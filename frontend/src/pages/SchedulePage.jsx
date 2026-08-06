@@ -18,6 +18,9 @@ function SchedulePage({ setFlash, user }) {
   const [warnings, setWarnings] = useState([])
   const [swapSelection, setSwapSelection] = useState(null)
   const [view, setView] = useState('calendar')
+  // Off by default: evening out weekend duty specifically can cost a little of
+  // the overall balance (see README), so it's an opt-in rather than always-on.
+  const [weekendEquity, setWeekendEquity] = useState(false)
 
   const [year, month] = ym.split('-').map(Number)
   // Employee accounts read the plan; only HR may change it.
@@ -83,7 +86,11 @@ function SchedulePage({ setFlash, user }) {
       return
     }
     try {
-      const data = await api.post('/schedules/generate', { year, month })
+      const data = await api.post('/schedules/generate', {
+        year,
+        month,
+        weekend_weight: weekendEquity ? 5 : 0,
+      })
       setSchedule(data)
       setWarnings([])
       setFlash({
@@ -187,6 +194,17 @@ function SchedulePage({ setFlash, user }) {
           </div>
           {canEdit && (
             <>
+              <div className="field checkbox-field">
+                <input
+                  id="weekend-equity"
+                  type="checkbox"
+                  checked={weekendEquity}
+                  onChange={e => setWeekendEquity(e.target.checked)}
+                />
+                <label htmlFor="weekend-equity" title="Verteilt Wochenenddienste gleichmäßiger, kann dafür die Gesamtverteilung minimal verschlechtern">
+                  Wochenenden ausgleichen
+                </label>
+              </div>
               <button onClick={generate}>{schedule ? 'Neu generieren' : 'Plan generieren'}</button>
               {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>Plan löschen</button>}
             </>
