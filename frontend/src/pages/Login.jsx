@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { useTranslation } from '../i18n/context'
 
 function Login({ onLoggedIn, setFlash }) {
+  const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
@@ -14,7 +16,7 @@ function Login({ onLoggedIn, setFlash }) {
     try {
       const user = await api.post('/login', { username, password })
       onLoggedIn(user)
-      setFlash({ type: 'success', text: `Willkommen zurück, ${user.username}.` })
+      setFlash({ type: 'success', text: t('login.welcomeBack', { username: user.username }) })
       navigate('/')
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
@@ -25,11 +27,11 @@ function Login({ onLoggedIn, setFlash }) {
 
   return (
     <div className="panel panel-narrow">
-      <h2>Anmelden</h2>
-      <p className="hint">Interner Zugang für die Personalabteilung.</p>
+      <h2>{t('login.title')}</h2>
+      <p className="hint">{t('login.subtitle')}</p>
       <form onSubmit={handleSubmit}>
         <div className="field">
-          <label htmlFor="login-username">Benutzername</label>
+          <label htmlFor="login-username">{t('common.username')}</label>
           <input
             id="login-username"
             autoComplete="username"
@@ -39,7 +41,7 @@ function Login({ onLoggedIn, setFlash }) {
           />
         </div>
         <div className="field">
-          <label htmlFor="login-password">Passwort</label>
+          <label htmlFor="login-password">{t('common.password')}</label>
           <input
             id="login-password"
             type="password"
@@ -49,10 +51,10 @@ function Login({ onLoggedIn, setFlash }) {
             required
           />
         </div>
-        <button type="submit" disabled={busy}>{busy ? 'Anmelden …' : 'Anmelden'}</button>
+        <button type="submit" disabled={busy}>{busy ? t('login.submitBusy') : t('login.submit')}</button>
       </form>
       <p className="hint mt-md">
-        Noch kein Konto? <Link to="/register">Erstes Konto einrichten</Link>
+        {t('login.noAccountPrefix')} <Link to="/register">{t('login.setupLink')}</Link>
       </p>
     </div>
   )

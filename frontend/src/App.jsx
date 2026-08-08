@@ -9,6 +9,7 @@ import Accounts from './pages/Accounts'
 import SetPassword from './pages/SetPassword'
 import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
+import { useTranslation } from './i18n/context'
 import './App.css'
 
 function RequireAuth({ user, setupRequired, hrOnly = false, children }) {
@@ -31,7 +32,30 @@ function RequireAuth({ user, setupRequired, hrOnly = false, children }) {
   return children
 }
 
+function LanguageToggle() {
+  const { lang, setLang, t } = useTranslation()
+  return (
+    <div className="view-toggle" role="group" aria-label={t('nav.languageLabel')}>
+      <button
+        type="button"
+        className={lang === 'de' ? 'active' : ''}
+        onClick={() => setLang('de')}
+      >
+        DE
+      </button>
+      <button
+        type="button"
+        className={lang === 'en' ? 'active' : ''}
+        onClick={() => setLang('en')}
+      >
+        EN
+      </button>
+    </div>
+  )
+}
+
 function App() {
+  const { t } = useTranslation()
   const [flash, setFlash] = useState(null)
   const [user, setUser] = useState(null)
   const [setupRequired, setSetupRequired] = useState(false)
@@ -75,7 +99,7 @@ function App() {
       // Clearing local state matters more than the response here.
     }
     setUser(null)
-    setFlash({ type: 'success', text: 'Abgemeldet.' })
+    setFlash({ type: 'success', text: t('nav.loggedOutFlash') })
   }
 
   return (
@@ -83,23 +107,24 @@ function App() {
       <div className="app">
         <div className="glow-bg" aria-hidden="true" />
         <nav className="navbar">
-          <NavLink to="/" className="navbar-brand">Schichtplan-Tool</NavLink>
+          <NavLink to="/" className="navbar-brand">{t('nav.brand')}</NavLink>
           <div className="navbar-right">
             {user ? (
               <>
-                <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>Dienstplan</NavLink>
+                <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.schedule')}</NavLink>
                 {isHr && (
                   <>
-                    <NavLink to="/employees" className={({ isActive }) => isActive ? 'active' : ''}>Mitarbeiter</NavLink>
-                    <NavLink to="/shift-types" className={({ isActive }) => isActive ? 'active' : ''}>Schichtarten</NavLink>
-                    <NavLink to="/register" className={({ isActive }) => isActive ? 'active' : ''}>Konten</NavLink>
+                    <NavLink to="/employees" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.employees')}</NavLink>
+                    <NavLink to="/shift-types" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.shiftTypes')}</NavLink>
+                    <NavLink to="/register" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.accounts')}</NavLink>
                   </>
                 )}
-                <button onClick={handleLogout}>Abmelden ({user.username})</button>
+                <button onClick={handleLogout}>{t('nav.logout', { username: user.username })}</button>
               </>
             ) : (
-              <NavLink to="/login" className={({ isActive }) => isActive ? 'active' : ''}>Anmelden</NavLink>
+              <NavLink to="/login" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.login')}</NavLink>
             )}
+            <LanguageToggle />
           </div>
         </nav>
 
@@ -107,7 +132,7 @@ function App() {
 
         <main className={`page ${user ? 'page-wide' : ''}`}>
           {checkingSession ? (
-            <p className="hint">Lade …</p>
+            <p className="hint">{t('common.loading')}</p>
           ) : (
             <Routes>
               <Route path="/" element={
@@ -145,7 +170,7 @@ function App() {
           )}
         </main>
         <footer className="footer">
-          <p>2026 Muhammet Sahin. Schichtplan-Tool — Planung durch die Personalabteilung, Einsicht für Mitarbeiter.</p>
+          <p>{t('nav.footer')}</p>
         </footer>
       </div>
     </BrowserRouter>

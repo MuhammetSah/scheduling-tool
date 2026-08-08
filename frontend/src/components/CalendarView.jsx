@@ -1,13 +1,4 @@
-import { ABSENCE_LABELS, WEEKDAY_LABELS } from '../api'
-
-function personLabel(slot) {
-  if (slot.employee_id !== null) return slot.employee_name
-  if (slot.absence_type) {
-    const label = ABSENCE_LABELS[slot.absence_type] || slot.absence_type
-    return slot.absent_employee_name ? `${label} (war: ${slot.absent_employee_name})` : label
-  }
-  return 'unbesetzt'
-}
+import { useTranslation } from '../i18n/context'
 
 /**
  * The month as a wall calendar: one column per weekday, one row per week.
@@ -17,6 +8,19 @@ function personLabel(slot) {
  * design; editing lives in the table view, which has room for the controls.
  */
 function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
+  const { t, weekdayLabels, absenceLabels } = useTranslation()
+
+  function personLabel(slot) {
+    if (slot.employee_id !== null) return slot.employee_name
+    if (slot.absence_type) {
+      const label = absenceLabels[slot.absence_type] || slot.absence_type
+      return slot.absent_employee_name
+        ? `${label} (${t('shiftCell.absentWasPrefix')}: ${slot.absent_employee_name})`
+        : label
+    }
+    return t('common.unassigned')
+  }
+
   const byDate = new Map()
   for (const a of schedule.assignments) {
     if (!byDate.has(a.date)) byDate.set(a.date, [])
@@ -58,7 +62,7 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
   return (
     <div className="calendar">
       <div className="calendar-head">
-        {WEEKDAY_LABELS.map(label => (
+        {weekdayLabels.map(label => (
           <div key={label} className="calendar-head-cell">{label}</div>
         ))}
       </div>
@@ -86,7 +90,7 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
               <div key={iso} className={`calendar-day ${isWeekend ? 'calendar-day-weekend' : ''}`}>
                 <div className="calendar-day-header">
                   <span className="calendar-day-number">{dayNumber(iso)}</span>
-                  {hasGap && <span className="calendar-gap-dot" title="Unbesetzte Schicht" />}
+                  {hasGap && <span className="calendar-gap-dot" title={t('calendar.gapTitle')} />}
                 </div>
 
                 {orderedGroups.map(([shiftTypeId, slots]) => (
@@ -97,7 +101,10 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                       <span
                         className={`calendar-shift-time ${slots[0].time_overridden ? 'calendar-shift-time-changed' : ''}`}
                         title={slots[0].time_overridden
-                          ? `Nur an diesem Tag ${slots[0].start_time}–${slots[0].end_time} statt ${slots[0].default_start_time}–${slots[0].default_end_time}`
+                          ? t('calendar.timeOverrideTitle', {
+                              start: slots[0].start_time, end: slots[0].end_time,
+                              defaultStart: slots[0].default_start_time, defaultEnd: slots[0].default_end_time,
+                            })
                           : undefined}
                       >
                         {slots[0].start_time}–{slots[0].end_time}{slots[0].time_overridden ? ' *' : ''}
@@ -118,7 +125,10 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                                 ? 'calendar-person-me' : '',
                             ].join(' ').trim()}
                             title={slot.absence_type && slot.absent_employee_name
-                              ? `${slot.absent_employee_name} ist ${ABSENCE_LABELS[slot.absence_type] || slot.absence_type} - Vertretung gesucht`
+                              ? t('calendar.absenceTitle', {
+                                  name: slot.absent_employee_name,
+                                  label: absenceLabels[slot.absence_type] || slot.absence_type,
+                                })
                               : undefined}
                           >
                             {personLabel(slot)}

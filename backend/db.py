@@ -12,7 +12,12 @@ except ImportError:  # only needed for a Postgres deployment
 DB_PATH = 'schichtplan.db'
 
 # Weekday convention throughout this project: 0=Monday ... 6=Sunday (Python's date.weekday()).
-WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
+# Language-keyed so the same index works for both the UI (frontend has its own
+# copy, see frontend/src/i18n) and backend-generated messages (app.py).
+WEEKDAYS = {
+    'de': ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'],
+    'en': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+}
 
 
 def use_postgres():

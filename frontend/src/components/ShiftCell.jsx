@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { api, ABSENCE_LABELS } from '../api'
+import { api } from '../api'
+import { useTranslation } from '../i18n/context'
 
 /**
  * One shift on one date: the hours it runs that day, everyone working it, and
@@ -24,6 +25,7 @@ function ShiftCell({
   onReportAbsence,
   setFlash,
 }) {
+  const { t } = useTranslation()
   const [editingTimes, setEditingTimes] = useState(false)
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
@@ -33,7 +35,7 @@ function ShiftCell({
       <span className="hint">—</span>
     ) : (
       <button type="button" className="cell-add" onClick={() => onAddSlot(date, shiftType.id)}>
-        + Platz
+        {t('shiftCell.addSlotButton')}
       </button>
     )
   }
@@ -57,8 +59,8 @@ function ShiftCell({
     <div className="shift-cell">
       {editingTimes ? (
         <div className="cell-time-edit">
-          <input type="time" value={start} onChange={e => setStart(e.target.value)} aria-label="Beginn" />
-          <input type="time" value={end} onChange={e => setEnd(e.target.value)} aria-label="Ende" />
+          <input type="time" value={start} onChange={e => setStart(e.target.value)} aria-label={t('shiftCell.startAria')} />
+          <input type="time" value={end} onChange={e => setEnd(e.target.value)} aria-label={t('shiftCell.endAria')} />
           <button
             type="button"
             className="btn-small"
@@ -70,10 +72,10 @@ function ShiftCell({
             <button
               type="button"
               className="btn-secondary btn-small"
-              title={`Zurück auf ${sample.default_start_time}–${sample.default_end_time}`}
+              title={t('shiftCell.resetToDefaultTitle', { start: sample.default_start_time, end: sample.default_end_time })}
               onClick={() => { onSetTimes(date, shiftType.id, null, null); setEditingTimes(false) }}
             >
-              Standard
+              {t('shiftCell.defaultButton')}
             </button>
           )}
           <button type="button" className="btn-secondary btn-small" onClick={() => setEditingTimes(false)}>
@@ -83,12 +85,12 @@ function ShiftCell({
       ) : (
         <div className={`cell-times ${sample.time_overridden ? 'cell-times-overridden' : ''}`}>
           <span title={sample.time_overridden
-            ? `Abweichend von ${sample.default_start_time}–${sample.default_end_time}`
+            ? t('shiftCell.deviatesFromTitle', { start: sample.default_start_time, end: sample.default_end_time })
             : undefined}>
             {sample.start_time}–{sample.end_time}{sample.time_overridden ? ' *' : ''}
           </span>
           {!readOnly && (
-            <button type="button" className="cell-icon" title="Zeiten für diesen Tag ändern" onClick={startEditing}>
+            <button type="button" className="cell-icon" title={t('shiftCell.editTimesTitle')} onClick={startEditing}>
               ✎
             </button>
           )}
@@ -113,7 +115,7 @@ function ShiftCell({
 
       {!readOnly && (
         <button type="button" className="cell-add" onClick={() => onAddSlot(date, shiftType.id)}>
-          + Platz
+          {t('shiftCell.addSlotButton')}
         </button>
       )}
     </div>
@@ -134,14 +136,15 @@ function AssignmentSlot({
   onReportAbsence,
   setFlash,
 }) {
+  const { t, absenceLabels } = useTranslation()
   const [suggestions, setSuggestions] = useState(null)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
 
   const isAbsence = Boolean(slot.absence_type)
-  const absenceLabel = ABSENCE_LABELS[slot.absence_type] || slot.absence_type
+  const absenceLabel = absenceLabels[slot.absence_type] || slot.absence_type
   const label = isAbsence
-    ? `${absenceLabel}${slot.absent_employee_name ? ` (war: ${slot.absent_employee_name})` : ''}`
-    : (slot.employee_name || 'unbesetzt')
+    ? `${absenceLabel}${slot.absent_employee_name ? ` (${t('shiftCell.absentWasPrefix')}: ${slot.absent_employee_name})` : ''}`
+    : (slot.employee_name || t('common.unassigned'))
 
   async function loadSuggestions() {
     setLoadingSuggestions(true)
@@ -172,7 +175,7 @@ function AssignmentSlot({
   return (
     <div className={`slot-cell ${slot.employee_id ? '' : 'unfilled'} ${swapSelection === slot.id ? 'swap-selected' : ''}`}>
       <select value={slot.employee_id ?? ''} onChange={e => onReassign(slot.id, e.target.value)}>
-        <option value="">— unbesetzt —</option>
+        <option value="">{t('shiftCell.unassignedOption')}</option>
         {employeeOptions(slot.employee_id).map(e => (
           <option key={e.id} value={e.id}>{e.name}</option>
         ))}
@@ -181,7 +184,7 @@ function AssignmentSlot({
       {isAbsence && (
         <span
           className={`badge ${slot.absence_type === 'sick' ? 'badge-inactive' : 'badge-pending'}`}
-          title={slot.absent_employee_name ? `${slot.absent_employee_name} ist ${absenceLabel}` : undefined}
+          title={slot.absent_employee_name ? `${slot.absent_employee_name}: ${absenceLabel}` : undefined}
         >
           {absenceLabel}
         </span>
@@ -193,32 +196,32 @@ function AssignmentSlot({
           className="btn-secondary btn-small"
           onClick={loadSuggestions}
           disabled={loadingSuggestions}
-          title="Passende Mitarbeiter für diese Schicht vorschlagen"
+          title={t('shiftCell.suggestTitle')}
         >
-          {loadingSuggestions ? '…' : 'Vorschläge'}
+          {loadingSuggestions ? t('common.ellipsis') : t('shiftCell.suggestButton')}
         </button>
       )}
 
       {slot.employee_id !== null && !isAbsence && onReportAbsence && (
         <select
           value=""
-          title="Für diesen Mitarbeiter an diesem Tag Krankheit oder Urlaub eintragen - die Schicht wird dann frei"
+          title={t('shiftCell.quickAbsenceTitle')}
           onChange={e => {
             const type = e.target.value
             if (type) onReportAbsence(slot.employee_id, date, type)
             e.target.value = ''
           }}
         >
-          <option value="">Abwesenheit …</option>
-          <option value="sick">Krank melden</option>
-          <option value="vacation">Urlaub melden</option>
+          <option value="">{t('shiftCell.quickAbsencePlaceholder')}</option>
+          <option value="sick">{t('shiftCell.reportSickOption')}</option>
+          <option value="vacation">{t('shiftCell.reportVacationOption')}</option>
         </select>
       )}
 
       <button
         type="button"
         className={`swap-toggle ${swapSelection === slot.id ? 'active' : ''}`}
-        title="Für Tausch auswählen"
+        title={t('shiftCell.selectForSwapTitle')}
         onClick={() => onToggleSwap(slot.id)}
       >
         ⇄
@@ -226,7 +229,7 @@ function AssignmentSlot({
       <button
         type="button"
         className="cell-icon cell-icon-danger"
-        title="Diesen Platz an diesem Tag entfernen"
+        title={t('shiftCell.removeSlotTitle')}
         onClick={() => onRemoveSlot(slot.id)}
       >
         ✕
@@ -235,7 +238,7 @@ function AssignmentSlot({
       {suggestions !== null && (
         <div className="suggestion-list">
           {suggestions.length === 0 ? (
-            <span className="hint">Keine geeigneten Vorschläge gefunden.</span>
+            <span className="hint">{t('shiftCell.noSuggestions')}</span>
           ) : (
             suggestions.map(s => (
               <button
@@ -243,7 +246,7 @@ function AssignmentSlot({
                 key={s.employee_id}
                 className="btn-secondary btn-small"
                 onClick={() => pickSuggestion(s.employee_id)}
-                title={`${s.current_load} Schichten in diesem Monat`}
+                title={t('shiftCell.suggestionLoadTitle', { n: s.current_load })}
               >
                 {s.name}
               </button>

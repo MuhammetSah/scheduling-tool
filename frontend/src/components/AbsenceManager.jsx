@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-
-const TYPE_LABELS = { sick: 'Krank', vacation: 'Urlaub' }
+import { useTranslation } from '../i18n/context'
 
 function currentMonthRange() {
   const now = new Date()
@@ -22,6 +21,7 @@ function currentMonthRange() {
  * e.g. to pre-report a vacation day.
  */
 function AbsenceManager({ employeeId, onChange, setFlash }) {
+  const { t, absenceLabels } = useTranslation()
   const [absences, setAbsences] = useState([])
   const [loading, setLoading] = useState(true)
   const [date, setDate] = useState('')
@@ -49,11 +49,12 @@ function AbsenceManager({ employeeId, onChange, setFlash }) {
     setBusy(true)
     try {
       const result = await api.post(`/employees/${employeeId}/absences`, { date, type })
+      const label = absenceLabels[type] || type
       setFlash({
         type: 'success',
         text: result.freed_assignment_ids.length > 0
-          ? `${TYPE_LABELS[type]} für ${date} eingetragen. Die Schicht an diesem Tag ist jetzt wieder frei.`
-          : `${TYPE_LABELS[type]} für ${date} eingetragen.`,
+          ? t('absences.reportedFreedFlash', { label, date })
+          : t('absences.reportedFlash', { label, date }),
       })
       setDate('')
       await load()
@@ -66,10 +67,11 @@ function AbsenceManager({ employeeId, onChange, setFlash }) {
   }
 
   async function cancel(entry) {
-    if (!confirm(`${TYPE_LABELS[entry.type] || entry.type} für ${entry.date} wirklich zurücknehmen?`)) return
+    const label = absenceLabels[entry.type] || entry.type
+    if (!confirm(t('absences.confirmCancel', { label, date: entry.date }))) return
     try {
-      await api.delete(`/employees/${employeeId}/absences/${entry.date}`)
-      setFlash({ type: 'success', text: 'Eintrag entfernt.' })
+      const result = await api.delete(`/employees/${employeeId}/absences/${entry.date}`)
+      setFlash({ type: 'success', text: result.message })
       await load()
       onChange?.()
     } catch (err) {
@@ -79,14 +81,11 @@ function AbsenceManager({ employeeId, onChange, setFlash }) {
 
   return (
     <div className="panel">
-      <h3>Krank / Urlaub melden</h3>
-      <p className="hint">
-        Gilt nur für den laufenden Monat. Eine an diesem Tag bereits verplante Schicht wird automatisch
-        freigegeben, damit die Personalabteilung eine Vertretung finden kann.
-      </p>
+      <h3>{t('absences.title')}</h3>
+      <p className="hint">{t('absences.hint')}</p>
       <form onSubmit={submit} className="toolbar">
         <div className="field">
-          <label htmlFor="absence-date">Datum</label>
+          <label htmlFor="absence-date">{t('common.date')}</label>
           <input
             id="absence-date"
             type="date"
@@ -98,20 +97,20 @@ function AbsenceManager({ employeeId, onChange, setFlash }) {
           />
         </div>
         <div className="field">
-          <label htmlFor="absence-type">Grund</label>
+          <label htmlFor="absence-type">{t('absences.reasonLabel')}</label>
           <select id="absence-type" value={type} onChange={e => setType(e.target.value)}>
-            <option value="sick">Krank</option>
-            <option value="vacation">Urlaub</option>
+            <option value="sick">{t('common.sickLabel')}</option>
+            <option value="vacation">{t('common.vacationLabel')}</option>
           </select>
         </div>
-        <button type="submit" disabled={busy}>{busy ? 'Speichern …' : 'Eintragen'}</button>
+        <button type="submit" disabled={busy}>{busy ? t('common.savingEllipsis') : t('absences.submit')}</button>
       </form>
 
       {!loading && absences.length > 0 && (
         <div className="item-meta mt-sm">
           {absences.map(a => (
             <span key={a.date} className="badge">
-              {a.date} · {TYPE_LABELS[a.type] || a.type}
+              {a.date} · {absenceLabels[a.type] || a.type}
               <button type="button" className="badge-remove" onClick={() => cancel(a)}>×</button>
             </span>
           ))}

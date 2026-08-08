@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
+import { useTranslation } from '../i18n/context'
 
 /**
  * Where an invited employee chooses their own password.
@@ -10,6 +11,7 @@ import { api } from '../api'
  * knows it.
  */
 function SetPassword({ setFlash }) {
+  const { t } = useTranslation()
   const [params] = useSearchParams()
   const token = params.get('token')
 
@@ -35,7 +37,7 @@ function SetPassword({ setFlash }) {
   async function handleSubmit(e) {
     e.preventDefault()
     if (password !== repeat) {
-      setFlash({ type: 'error', text: 'Die Passwörter stimmen nicht überein.' })
+      setFlash({ type: 'error', text: t('setPassword.mismatch') })
       return
     }
     setBusy(true)
@@ -51,32 +53,28 @@ function SetPassword({ setFlash }) {
   }
 
   if (checking) {
-    return <div className="panel panel-narrow"><p className="hint">Link wird geprüft …</p></div>
+    return <div className="panel panel-narrow"><p className="hint">{t('setPassword.checking')}</p></div>
   }
 
   if (invalid) {
     return (
       <div className="panel panel-narrow">
-        <h2>Link ungültig</h2>
-        <p className="hint">
-          Dieser Einladungslink ist abgelaufen oder wurde bereits verwendet.
-          Bitte wenden Sie sich an die Personalabteilung, um eine neue Einladung zu erhalten.
-        </p>
-        <Link to="/login">Zur Anmeldung</Link>
+        <h2>{t('setPassword.invalidTitle')}</h2>
+        <p className="hint">{t('setPassword.invalidText')}</p>
+        <Link to="/login">{t('common.toLogin')}</Link>
       </div>
     )
   }
 
   return (
     <div className="panel panel-narrow">
-      <h2>Passwort festlegen</h2>
+      <h2>{t('setPassword.title')}</h2>
       <p className="hint">
-        Konto <strong>{username}</strong> — bitte vergeben Sie Ihr eigenes Passwort.
-        Es ist nur Ihnen bekannt.
+        {t('setPassword.subtitlePrefix')} <strong>{username}</strong> {t('setPassword.subtitleSuffix')}
       </p>
       <form onSubmit={handleSubmit}>
         <div className="field">
-          <label htmlFor="new-password">Neues Passwort</label>
+          <label htmlFor="new-password">{t('setPassword.newPasswordLabel')}</label>
           <input
             id="new-password"
             type="password"
@@ -86,10 +84,10 @@ function SetPassword({ setFlash }) {
             onChange={e => setPassword(e.target.value)}
             required
           />
-          <p className="hint">Mindestens 8 Zeichen.</p>
+          <p className="hint">{t('common.minPasswordHint')}</p>
         </div>
         <div className="field">
-          <label htmlFor="repeat-password">Passwort wiederholen</label>
+          <label htmlFor="repeat-password">{t('setPassword.repeatLabel')}</label>
           <input
             id="repeat-password"
             type="password"
@@ -99,7 +97,7 @@ function SetPassword({ setFlash }) {
             required
           />
         </div>
-        <button type="submit" disabled={busy}>{busy ? 'Speichern …' : 'Passwort speichern'}</button>
+        <button type="submit" disabled={busy}>{busy ? t('common.savingEllipsis') : t('setPassword.submit')}</button>
       </form>
     </div>
   )
