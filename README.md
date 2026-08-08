@@ -1,5 +1,7 @@
 # Schichtplan-Tool
 
+**Live frontend:** [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/)
+
 An automated shift-scheduling tool for HR teams, built with React (frontend) and Flask (backend). HR defines employees, their availability constraints, and shift types with staffing requirements; the tool generates a full monthly schedule via backtracking search and lets HR fine-tune the result by hand — including swapping shifts between employees.
 
 This is a standalone project living alongside the Support Ticket System in this repository, and the fourth project in a portfolio (after the portfolio website, the ticket system, and a paused API-integration project).
@@ -252,6 +254,8 @@ VITE_API_URL=http://localhost:5001
 
 ## Deployment
 
+**Frontend:** [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/)
+
 The app runs on SQLite locally and **Postgres in production**, chosen automatically: set `DATABASE_URL` and it uses Postgres, leave it unset and it writes a local `schichtplan.db`. This matters more than it sounds — a free-tier container's filesystem is wiped on every restart, so deploying on SQLite would quietly lose every schedule.
 
 **Backend (Render).** `render.yaml` in the repository root is a blueprint: pointing Render at the repo creates the web service *and* a Postgres database, wires `DATABASE_URL` between them, and generates a `SECRET_KEY`. Two values must be filled in by hand afterwards, because they depend on where the frontend lands:
@@ -308,7 +312,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: 23 unit tests, a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Not yet deployed.
+Built and tested locally through v1.4: 23 unit tests, a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

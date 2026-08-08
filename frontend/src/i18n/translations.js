@@ -38,6 +38,17 @@ const de = {
     vacationLabel: 'Urlaub',
   },
 
+  // Thrown by api.js itself (not returned by the backend) when a request
+  // can't even be meaningfully answered - missing config, network/CORS
+  // failure, or a non-JSON response (a strong sign the request never reached
+  // the actual API). api.js is a plain module, not a component, so it reads
+  // these directly rather than through useTranslation() - see api.js.
+  api: {
+    missingApiUrl: 'Die API-Adresse ist nicht konfiguriert (VITE_API_URL fehlt im Frontend-Build). Bitte die Bereitstellung prüfen.',
+    unreachable: 'Server unter {url} nicht erreichbar (Netzwerk- oder CORS-Fehler). Bitte später erneut versuchen.',
+    unexpectedResponse: 'Unerwartete Antwort vom Server - vermutlich zeigt VITE_API_URL nicht auf das Backend. Bitte die API-Konfiguration prüfen.',
+  },
+
   nav: {
     brand: 'Schichtplan-Tool',
     schedule: 'Dienstplan',
@@ -276,6 +287,12 @@ const en = {
     roleEmployee: 'Employee',
     sickLabel: 'Sick',
     vacationLabel: 'Vacation',
+  },
+
+  api: {
+    missingApiUrl: 'The API address is not configured (VITE_API_URL is missing from the frontend build). Please check the deployment.',
+    unreachable: 'Could not reach the server at {url} (network or CORS error). Please try again later.',
+    unexpectedResponse: 'Unexpected response from the server - VITE_API_URL is likely not pointing at the backend. Please check the API configuration.',
   },
 
   nav: {
