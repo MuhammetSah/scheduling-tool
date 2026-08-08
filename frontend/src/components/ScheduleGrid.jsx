@@ -1,11 +1,5 @@
-import { WEEKDAY_LABELS } from '../api'
 import ShiftCell from './ShiftCell'
-
-function formatDate(iso) {
-  const d = new Date(iso + 'T00:00:00')
-  const weekdayIndex = (d.getDay() + 6) % 7 // JS: 0=Sunday -> ours: 0=Monday
-  return `${WEEKDAY_LABELS[weekdayIndex]}, ${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}`
-}
+import { useTranslation } from '../i18n/context'
 
 function isWeekend(iso) {
   const day = new Date(iso + 'T00:00:00').getDay()
@@ -23,7 +17,17 @@ function ScheduleGrid({
   onSetTimes,
   onAddSlot,
   onRemoveSlot,
+  onReportAbsence,
+  setFlash,
 }) {
+  const { t, weekdayLabels, dateLocale } = useTranslation()
+
+  function formatDate(iso) {
+    const d = new Date(iso + 'T00:00:00')
+    const weekdayIndex = (d.getDay() + 6) % 7 // JS: 0=Sunday -> ours: 0=Monday
+    return `${weekdayLabels[weekdayIndex]}, ${d.toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit' })}`
+  }
+
   const byDate = new Map()
   for (const a of schedule.assignments) {
     if (!byDate.has(a.date)) byDate.set(a.date, new Map())
@@ -38,7 +42,7 @@ function ScheduleGrid({
       <table className="schedule-table">
         <thead>
           <tr>
-            <th>Datum</th>
+            <th>{t('scheduleGrid.dateHeader')}</th>
             {shiftTypes.map(st => <th key={st.id}>{st.name}</th>)}
           </tr>
         </thead>
@@ -60,6 +64,8 @@ function ScheduleGrid({
                     onSetTimes={onSetTimes}
                     onAddSlot={onAddSlot}
                     onRemoveSlot={onRemoveSlot}
+                    onReportAbsence={onReportAbsence}
+                    setFlash={setFlash}
                   />
                 </td>
               ))}

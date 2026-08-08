@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, WEEKDAY_LABELS, WEEKDAY_NAMES } from '../api'
+import { api } from '../api'
+import { useTranslation } from '../i18n/context'
 
 const emptyForm = {
   id: null,
@@ -7,12 +8,15 @@ const emptyForm = {
   email: '',
   active: true,
   max_shifts_per_month: '',
+  weekly_hours: '',
+  min_rest_hours: 11,
   unavailable_weekdays: [],
   allowed_shift_types: [],
   unavailable_dates: [],
 }
 
 function Employees({ setFlash }) {
+  const { t, weekdayLabels, weekdayNames } = useTranslation()
   const [employees, setEmployees] = useState([])
   const [shiftTypes, setShiftTypes] = useState([])
   const [form, setForm] = useState(emptyForm)
@@ -45,6 +49,8 @@ function Employees({ setFlash }) {
       email: emp.email || '',
       active: emp.active,
       max_shifts_per_month: emp.max_shifts_per_month ?? '',
+      weekly_hours: emp.weekly_hours ?? '',
+      min_rest_hours: emp.min_rest_hours ?? 11,
       unavailable_weekdays: emp.unavailable_weekdays,
       allowed_shift_types: emp.allowed_shift_types,
       unavailable_dates: emp.unavailable_dates,
@@ -87,6 +93,8 @@ function Employees({ setFlash }) {
       email: form.email || null,
       active: form.active,
       max_shifts_per_month: form.max_shifts_per_month === '' ? null : Number(form.max_shifts_per_month),
+      weekly_hours: form.weekly_hours === '' ? null : Number(form.weekly_hours),
+      min_rest_hours: form.min_rest_hours === '' ? null : Number(form.min_rest_hours),
       unavailable_weekdays: form.unavailable_weekdays,
       allowed_shift_types: form.allowed_shift_types,
       unavailable_dates: form.unavailable_dates,
@@ -94,10 +102,10 @@ function Employees({ setFlash }) {
     try {
       if (form.id) {
         await api.put(`/employees/${form.id}`, payload)
-        setFlash({ type: 'success', text: 'Mitarbeiter aktualisiert.' })
+        setFlash({ type: 'success', text: t('employees.flashUpdated') })
       } else {
         await api.post('/employees', payload)
-        setFlash({ type: 'success', text: 'Mitarbeiter angelegt.' })
+        setFlash({ type: 'success', text: t('employees.flashCreated') })
       }
       setShowForm(false)
       load()
@@ -107,10 +115,10 @@ function Employees({ setFlash }) {
   }
 
   async function deleteEmployee(id) {
-    if (!confirm('Diesen Mitarbeiter wirklich löschen?')) return
+    if (!confirm(t('employees.confirmDelete'))) return
     try {
-      await api.delete(`/employees/${id}`)
-      setFlash({ type: 'success', text: 'Mitarbeiter gelöscht.' })
+      const result = await api.delete(`/employees/${id}`)
+      setFlash({ type: 'success', text: result.message })
       load()
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
@@ -125,35 +133,45 @@ function Employees({ setFlash }) {
     <>
       <div className="panel">
         <div className="panel-header">
-          <h2>Mitarbeiter</h2>
-          <button onClick={startCreate}>+ Neuer Mitarbeiter</button>
+          <h2>{t('employees.title')}</h2>
+          <button onClick={startCreate}>{t('employees.newButton')}</button>
         </div>
 
         {employees.length === 0 ? (
-          <p className="empty-state">Noch keine Mitarbeiter angelegt.</p>
+          <p className="empty-state">{t('employees.empty')}</p>
         ) : (
           <ul className="item-list">
             {employees.map(emp => (
               <li key={emp.id} className="item-row">
                 <div className="item-main">
-                  <span className="item-title">{emp.name}{!emp.active && ' (inaktiv)'}</span>
+                  <span className="item-title">{emp.name}{!emp.active && t('employees.inactiveSuffix')}</span>
                   <div className="item-meta">
                     {emp.email && <span className="badge">{emp.email}</span>}
-                    {emp.max_shifts_per_month != null && <span className="badge">max. {emp.max_shifts_per_month}/Monat</span>}
+                    {emp.max_shifts_per_month != null && (
+                      <span className="badge">{t('employees.maxPerMonthBadge', { n: emp.max_shifts_per_month })}</span>
+                    )}
+                    {emp.weekly_hours != null && (
+                      <span className="badge">{t('employees.weeklyHoursBadge', { n: emp.weekly_hours })}</span>
+                    )}
+                    {emp.min_rest_hours != null && emp.min_rest_hours !== 11 && (
+                      <span className="badge">{t('employees.restHoursBadge', { n: emp.min_rest_hours })}</span>
+                    )}
                     {emp.unavailable_weekdays.map(wd => (
-                      <span key={wd} className="badge">nicht {WEEKDAY_NAMES[wd]}</span>
+                      <span key={wd} className="badge">{t('employees.notOnWeekdayBadge', { weekday: weekdayNames[wd] })}</span>
                     ))}
                     {emp.allowed_shift_types.length > 0 && (
-                      <span className="badge">nur {emp.allowed_shift_types.map(shiftTypeName).join(', ')}</span>
+                      <span className="badge">
+                        {t('employees.onlyShiftTypesBadge', { list: emp.allowed_shift_types.map(shiftTypeName).join(', ') })}
+                      </span>
                     )}
                     {emp.unavailable_dates.length > 0 && (
-                      <span className="badge">{emp.unavailable_dates.length} freie Tage</span>
+                      <span className="badge">{t('employees.freeDaysBadge', { n: emp.unavailable_dates.length })}</span>
                     )}
                   </div>
                 </div>
                 <div className="item-actions">
-                  <button className="btn-secondary btn-small" onClick={() => startEdit(emp)}>Bearbeiten</button>
-                  <button className="btn-danger btn-small" onClick={() => deleteEmployee(emp.id)}>Löschen</button>
+                  <button className="btn-secondary btn-small" onClick={() => startEdit(emp)}>{t('common.edit')}</button>
+                  <button className="btn-danger btn-small" onClick={() => deleteEmployee(emp.id)}>{t('common.delete')}</button>
                 </div>
               </li>
             ))}
@@ -163,28 +181,54 @@ function Employees({ setFlash }) {
 
       {showForm && (
         <div className="panel">
-          <h3>{form.id ? 'Mitarbeiter bearbeiten' : 'Neuer Mitarbeiter'}</h3>
+          <h3>{form.id ? t('employees.editTitle') : t('employees.newTitle')}</h3>
           <form onSubmit={submitForm}>
             <div className="field">
-              <label htmlFor="emp-name">Name</label>
+              <label htmlFor="emp-name">{t('common.name')}</label>
               <input id="emp-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
             </div>
             <div className="field">
-              <label htmlFor="emp-email">E-Mail (optional)</label>
+              <label htmlFor="emp-email">{t('employees.emailLabel')}</label>
               <input id="emp-email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
             </div>
             <div className="field">
-              <label htmlFor="emp-max">Maximale Schichten pro Monat (optional)</label>
+              <label htmlFor="emp-max">{t('employees.maxShiftsLabel')}</label>
               <input id="emp-max" type="number" min="0" value={form.max_shifts_per_month} onChange={e => setForm(f => ({ ...f, max_shifts_per_month: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label htmlFor="emp-weekly-hours">{t('employees.weeklyHoursLabel')}</label>
+              <input
+                id="emp-weekly-hours"
+                type="number"
+                min="0"
+                step="0.5"
+                placeholder={t('employees.weeklyHoursPlaceholder')}
+                value={form.weekly_hours}
+                onChange={e => setForm(f => ({ ...f, weekly_hours: e.target.value }))}
+              />
+              <p className="hint">{t('employees.weeklyHoursHint')}</p>
+            </div>
+            <div className="field">
+              <label htmlFor="emp-rest">{t('employees.minRestLabel')}</label>
+              <input
+                id="emp-rest"
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.min_rest_hours}
+                onChange={e => setForm(f => ({ ...f, min_rest_hours: e.target.value }))}
+                required
+              />
+              <p className="hint">{t('employees.minRestHint')}</p>
             </div>
             <div className="field checkbox-field">
               <input id="emp-active" type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />
-              <label htmlFor="emp-active">Aktiv (wird bei der Planung berücksichtigt)</label>
+              <label htmlFor="emp-active">{t('employees.activeLabel')}</label>
             </div>
             <div className="field">
-              <label>Arbeitet nicht an</label>
+              <label>{t('employees.notWorkingLabel')}</label>
               <div className="weekday-picker">
-                {WEEKDAY_LABELS.map((label, wd) => (
+                {weekdayLabels.map((label, wd) => (
                   <button
                     type="button"
                     key={wd}
@@ -198,7 +242,7 @@ function Employees({ setFlash }) {
             </div>
             {shiftTypes.length > 0 && (
               <div className="field">
-                <label>Nur folgende Schichtarten (leer = alle erlaubt)</label>
+                <label>{t('employees.onlyShiftTypesLabel')}</label>
                 <div className="weekday-picker">
                   {shiftTypes.map(st => (
                     <button
@@ -214,10 +258,10 @@ function Employees({ setFlash }) {
               </div>
             )}
             <div className="field">
-              <label htmlFor="emp-date-off">Einzelne freie Tage (Urlaub, Krankheit, ...)</label>
+              <label htmlFor="emp-date-off">{t('employees.freeDaysLabel')}</label>
               <div className="toolbar">
                 <input id="emp-date-off" type="date" value={newDate} onChange={e => setNewDate(e.target.value)} />
-                <button type="button" className="btn-secondary" onClick={addUnavailableDate}>Hinzufügen</button>
+                <button type="button" className="btn-secondary" onClick={addUnavailableDate}>{t('common.add')}</button>
               </div>
               {form.unavailable_dates.length > 0 && (
                 <div className="item-meta mt-sm">
@@ -231,8 +275,8 @@ function Employees({ setFlash }) {
               )}
             </div>
             <div className="toolbar">
-              <button type="submit">{form.id ? 'Speichern' : 'Anlegen'}</button>
-              <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Abbrechen</button>
+              <button type="submit">{form.id ? t('common.save') : t('common.create')}</button>
+              <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         </div>

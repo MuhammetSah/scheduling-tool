@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useTranslation } from '../i18n/context'
 
 /**
  * Shows how the month's shifts landed across the team, so HR can see at a glance
  * whether the plan is balanced - and can spot it going lopsided as they edit.
  */
 function Distribution({ distribution }) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const rows = distribution.per_employee
   if (rows.length === 0) return null
@@ -14,7 +16,7 @@ function Distribution({ distribution }) {
   return (
     <div className="distribution">
       <button type="button" className="distribution-toggle" onClick={() => setOpen(!open)}>
-        {open ? '▾' : '▸'} Verteilung der Schichten
+        {open ? '▾' : '▸'} {t('distribution.title')}
       </button>
 
       {open && (
@@ -30,7 +32,7 @@ function Distribution({ distribution }) {
               </span>
               <span className="distribution-count">
                 {row.total}
-                {row.weekend > 0 && <em> ({row.weekend} WE)</em>}
+                {row.weekend > 0 && <em>{t('distribution.weekendSuffix', { n: row.weekend })}</em>}
               </span>
             </li>
           ))}

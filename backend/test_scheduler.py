@@ -1,6 +1,6 @@
 import unittest
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
 
 from baselines import greedy_first_fit
 from scheduler import (
@@ -12,18 +12,26 @@ from scheduler import (
 )
 
 
-def employee(id, max_shifts_per_month=None, unavailable_weekdays=None, unavailable_dates=None, allowed_shift_types=None):
+def employee(id, max_shifts_per_month=None, unavailable_weekdays=None, unavailable_dates=None,
+             allowed_shift_types=None, weekly_hours=None, min_rest_hours=None):
     return {
         'id': id,
         'max_shifts_per_month': max_shifts_per_month,
         'unavailable_weekdays': set(unavailable_weekdays or []),
         'unavailable_dates': set(unavailable_dates or []),
         'allowed_shift_types': set(allowed_shift_types) if allowed_shift_types else None,
+        'weekly_hours': weekly_hours,
+        'min_rest_hours': min_rest_hours,
     }
 
 
-def shift_type(id, required_every_day=1):
-    return {'id': id, 'requirements': {wd: required_every_day for wd in range(7)}}
+def shift_type(id, required_every_day=1, start_time=None, end_time=None):
+    return {
+        'id': id,
+        'requirements': {wd: required_every_day for wd in range(7)},
+        'start_time': start_time,
+        'end_time': end_time,
+    }
 
 
 class BacktrackingBeatsGreedy(unittest.TestCase):
@@ -256,6 +264,126 @@ class SlotOrdering(unittest.TestCase):
         for ordering in (CHRONOLOGICAL, MOST_CONSTRAINED, AUTO):
             result = generate_schedule(2026, 8, employees, shift_types, ordering=ordering)
             self.assertEqual(result['unfilled_count'], 0, f'{ordering} left gaps')
+
+
+class WeeklyHoursCap(unittest.TestCase):
+    """Part-time employees: weekly_hours is a hard cap in minutes, reset every ISO week."""
+
+    def test_part_time_employee_is_capped_per_week_and_spread_across_the_month(self):
+        # 8h shifts every day; a 16h/week target should cap this employee at 2
+        # shifts in any Monday-Sunday week, and - since demand exceeds that
+        # every single week - push their remaining hours into other weeks
+        # rather than exhausting the target in one week and sitting idle after.
+        employees = [
+            employee(id=1, weekly_hours=16),
+            employee(id=2),  # full-time, no cap - mops up everything else
+        ]
+        shift_types = [shift_type(id=1, required_every_day=1, start_time='08:00', end_time='16:00')]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+        by_week = {}
+        for a in result['assignments']:
+            if a['employee_id'] != 1:
+                continue
+            d = date.fromisoformat(a['date'])
+            week_start = d - timedelta(days=d.weekday())
+            by_week[week_start] = by_week.get(week_start, 0) + 1
+
+        self.assertTrue(by_week, 'employee 1 should still get some shifts')
+        for week_start, count in by_week.items():
+            self.assertLessEqual(count * 8, 16, f'week of {week_start}: {count} shifts (={count * 8}h) exceeds the 16h cap')
+        self.assertGreater(len(by_week), 1, 'a 16h/week target over a full month should span more than one week')
+
+    def test_no_weekly_hours_target_is_unaffected(self):
+        employees = [employee(id=1)]
+        shift_types = [shift_type(id=1, required_every_day=1, start_time='08:00', end_time='16:00')]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+
+    def test_weekly_cap_ignored_when_shift_hours_are_unknown(self):
+        # Backward compatibility: without duration info there is nothing to cap.
+        employees = [employee(id=1, weekly_hours=1)]  # absurdly low - would forbid everything if enforced
+        shift_types = [shift_type(id=1, required_every_day=1)]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+
+
+class RestPeriods(unittest.TestCase):
+    """Employees need min_rest_hours between the end of one shift and the start of the next."""
+
+    def test_overnight_shift_blocks_an_early_shift_the_next_morning(self):
+        # Night shift 22:00-06:00 crosses midnight; an early shift the very
+        # next morning at 08:00 would leave only 2h rest - a violation even
+        # though the two shifts are different shift types on different dates.
+        employees = [employee(id=1, min_rest_hours=11), employee(id=2, min_rest_hours=11)]
+        shift_types = [
+            shift_type(id=1, required_every_day=1, start_time='22:00', end_time='06:00'),  # night
+            shift_type(id=2, required_every_day=1, start_time='08:00', end_time='16:00'),  # early
+        ]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0, 'two people are enough to cover one night + one early shift daily')
+        by_date = {}
+        for a in result['assignments']:
+            by_date.setdefault(a['date'], {})[a['shift_type_id']] = a['employee_id']
+        dates = sorted(by_date)
+        for i in range(len(dates) - 1):
+            night_worker = by_date[dates[i]].get(1)
+            next_early_worker = by_date[dates[i + 1]].get(2)
+            if night_worker is not None and next_early_worker is not None:
+                self.assertNotEqual(
+                    night_worker, next_early_worker,
+                    f'{night_worker} would get only 2h rest between the {dates[i]} night shift and the {dates[i + 1]} early shift')
+
+    def test_sufficient_gap_is_allowed(self):
+        # The same 8h day shift every day gives a comfortable 16h overnight
+        # gap - the rest check must not flag this ordinary, everyday case.
+        employees = [employee(id=1, min_rest_hours=11)]
+        shift_types = [shift_type(id=1, required_every_day=1, start_time='08:00', end_time='16:00')]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+        self.assertTrue(result['complete'])
+
+    def test_no_rest_requirement_when_shift_hours_are_unknown(self):
+        # Backward compatibility: shift types without hours (as used by every
+        # other test in this file) never trigger the rest check.
+        employees = [employee(id=1, min_rest_hours=11)]
+        shift_types = [shift_type(id=1, required_every_day=1)]
+
+        result = generate_schedule(2026, 8, employees, shift_types)
+
+        self.assertEqual(result['unfilled_count'], 0)
+
+    def test_respected_under_most_constrained_ordering_too(self):
+        # most_constrained ordering does not process slots chronologically, so
+        # this exercises the "check both neighbours" logic that makes the rest
+        # check correct regardless of slot processing order (see scheduler.py).
+        employees = [employee(id=1, min_rest_hours=11), employee(id=2, min_rest_hours=11)]
+        shift_types = [
+            shift_type(id=1, required_every_day=1, start_time='22:00', end_time='06:00'),
+            shift_type(id=2, required_every_day=1, start_time='08:00', end_time='16:00'),
+        ]
+
+        result = generate_schedule(2026, 8, employees, shift_types, ordering=MOST_CONSTRAINED)
+
+        by_date = {}
+        for a in result['assignments']:
+            by_date.setdefault(a['date'], {})[a['shift_type_id']] = a['employee_id']
+        dates = sorted(by_date)
+        for i in range(len(dates) - 1):
+            night_worker = by_date[dates[i]].get(1)
+            next_early_worker = by_date[dates[i + 1]].get(2)
+            if night_worker is not None and next_early_worker is not None:
+                self.assertNotEqual(night_worker, next_early_worker)
 
 
 if __name__ == '__main__':

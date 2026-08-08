@@ -12,7 +12,12 @@ except ImportError:  # only needed for a Postgres deployment
 DB_PATH = 'schichtplan.db'
 
 # Weekday convention throughout this project: 0=Monday ... 6=Sunday (Python's date.weekday()).
-WEEKDAYS = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
+# Language-keyed so the same index works for both the UI (frontend has its own
+# copy, see frontend/src/i18n) and backend-generated messages (app.py).
+WEEKDAYS = {
+    'de': ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'],
+    'en': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+}
 
 
 def use_postgres():
@@ -114,9 +119,25 @@ def init_db():
             email TEXT,
             active INTEGER NOT NULL DEFAULT 1,
             max_shifts_per_month INTEGER,
+            weekly_hours REAL,
+            min_rest_hours REAL NOT NULL DEFAULT 11,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # Databases created before part-time/rest-period support only have the
+    # original columns - CREATE TABLE IF NOT EXISTS above is a no-op for them.
+    employee_columns = table_columns(cursor, 'employees')
+    if 'weekly_hours' not in employee_columns:
+        # Target hours/week for staff who don't work full time; None = no target,
+        # unaffected by the weekly cap the scheduler enforces (see scheduler.py).
+        cursor.execute('ALTER TABLE employees ADD COLUMN weekly_hours REAL')
+    if 'min_rest_hours' not in employee_columns:
+        # Hours required between the end of one shift and the start of the next
+        # (German ArbZG default: 11h). NOT NULL with a default - unlike
+        # weekly_hours, this is a safety-relevant setting that should never
+        # silently become "no minimum" just because a write omitted it.
+        cursor.execute('ALTER TABLE employees ADD COLUMN min_rest_hours REAL NOT NULL DEFAULT 11')
 
     # Accounts that can sign in. Two roles:
     #   'hr'       - full access: manages employees, shift types and schedules
@@ -174,12 +195,33 @@ def init_db():
     ''')
 
     # One-off unavailability, e.g. vacation or sick leave on specific dates.
+    # HR-managed: replace_employee_constraints() in app.py wipes and reinserts
+    # this table from the roster form on every save of that employee, so it is
+    # not where the *self-reported* absences below live - a save of an
+    # unrelated field would silently erase them.
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS employee_unavailable_dates(
             id {AUTO_ID},
             employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
             date TEXT NOT NULL,
             reason TEXT,
+            UNIQUE(employee_id, date)
+        )
+    ''')
+
+    # Self-reported sick/vacation days. Separate from employee_unavailable_dates
+    # above on purpose (see that table's comment) - this is the one place an
+    # employee account is allowed to write, and only ever its own rows, only
+    # ever for the current month (enforced in app.py, not here). Also feeds
+    # load_employees_for_scheduling() so a later regeneration doesn't schedule
+    # someone back onto a day they reported as sick/on vacation.
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS employee_absences(
+            id {AUTO_ID},
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            date TEXT NOT NULL,
+            absence_type TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(employee_id, date)
         )
     ''')
@@ -253,9 +295,27 @@ def init_db():
             shift_type_id INTEGER NOT NULL REFERENCES shift_types(id),
             slot_index INTEGER NOT NULL,
             employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-            manually_edited INTEGER NOT NULL DEFAULT 0
+            manually_edited INTEGER NOT NULL DEFAULT 0,
+            absence_type TEXT,
+            absent_employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
         )
     ''')
+
+    # Databases created before self-service sick/vacation reporting only have
+    # the original columns - CREATE TABLE IF NOT EXISTS above is a no-op for them.
+    assignment_columns = table_columns(cursor, 'shift_assignments')
+    if 'absence_type' not in assignment_columns:
+        # Set (to 'sick'/'vacation') when this slot was freed because the
+        # employee who had it reported an absence - employee_id is NULL at
+        # that point (the slot behaves like any other open slot) and
+        # absent_employee_id (below) remembers who it was, for display and so
+        # they're excluded from their own replacement suggestions.
+        cursor.execute('ALTER TABLE shift_assignments ADD COLUMN absence_type TEXT')
+    if 'absent_employee_id' not in assignment_columns:
+        cursor.execute(
+            'ALTER TABLE shift_assignments ADD COLUMN absent_employee_id '
+            'INTEGER REFERENCES employees(id) ON DELETE SET NULL'
+        )
 
     connection.commit()
     connection.close()

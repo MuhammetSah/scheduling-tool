@@ -11,18 +11,23 @@ Industry-independent shift planning for HR: define employees with constraints (e
 Two kinds of account:
 
 - **Personalabteilung (HR)** – creates, edits and deletes everything: employees, shift types, generated plans, and accounts. Sees the whole plan.
-- **Mitarbeiter (employee)** – read-only, and only their *own* shifts. Colleagues' shifts, the staff roster, gaps in the plan and the workload comparison are never sent to them at all. Every write is refused by the API, not just hidden in the UI.
+- **Mitarbeiter (employee)** – read-only, and only their *own* shifts, with one narrow, deliberate exception: they may report their own sick/vacation days for the current month (see [Self-service sick / vacation](#self-service-sick--vacation) below). Every other write is refused by the API, not just hidden in the UI — colleagues' shifts, the staff roster, gaps in the plan and the workload comparison are never sent to them at all.
 
 Being scheduled does not require an account — an employee only needs one if they should be able to look their own shifts up. Each employee account is linked to its roster entry, which is what makes "own shifts" meaningful, so the link is required when the account is created. Because of that link an employee cannot be deleted while an account still points at them: the account has to go first, which HR does on the Konten page. Nobody can delete the account they are signed in with, or the last remaining HR account.
 
+The tool is usable in **German or English** – see [Language](#language) below.
+
 ## Scope
 
-- **Role-based access** – HR manages everything; employees get a read-only view of the plan
+- **Role-based access** – HR manages everything; employees get a read-only view of the plan, plus self-service sick/vacation reporting
 - **Sign-in required** – the first visit sets up the HR account; after that everything is behind a login
 - **Monthly plans** – one schedule per calendar month
 - **Backtracking scheduling algorithm** – not greedy (see below)
 - **Manual post-editing by HR** – reassign any slot, or swap two shifts between employees
 - **Balanced workloads** – the plan spreads shifts evenly once every shift that *can* be staffed is
+- **Part-time aware** – employees can carry a weekly target-hours figure instead of only a monthly shift count
+- **Rest periods** – an 11h (configurable) minimum between shifts, enforced during generation and flagged on manual edits
+- **Bilingual** – German or English, switchable per browser at any time
 
 ## Features
 
@@ -31,13 +36,32 @@ Being scheduled does not require an account — an employee only needs one if th
 - **Two views of the plan** – a **calendar** laid out like a wall planner (one column per weekday, one row per week, each day listing its shifts and everyone working them), and a **table** for editing. HR gets both; employees get both read-only
 - **Several people per shift** – each shift type carries a required headcount *per weekday*, so a weekday can need 2 on the early shift and 3 on the late one while a Sunday needs 1 of each. The scheduler fills each of those places separately and the calendar lists everyone assigned
 - **Day-level changes** – beyond the shift type's usual hours (e.g. 08:00–16:30), HR can change what a shift runs on one single date without touching any other day, and can add or remove a place on a given day. Changed hours are marked with `*` in both views and can be reset to the shift type's default in one click
-- **Employee management** – name, optional email, optional monthly shift cap, recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
+- **Employee management** – name, optional email, optional monthly shift cap, an optional **weekly target-hours** figure for part-time staff, a **minimum rest period** between shifts (defaults to 11h, individually adjustable), recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave HR enters directly), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
 - **Shift type management** – name, start/end time, color, and required headcount per weekday (weekday and weekend staffing needs are often different)
-- **Automatic monthly schedule generation** via backtracking search
-- **Manual editing** – reassign any shift slot to a different employee (or leave it unfilled), with non-blocking warnings if the change violates that employee's usual constraints (HR can always override)
+- **Automatic monthly schedule generation** via backtracking search, respecting weekly-hours caps and rest periods as hard constraints alongside the existing ones
+- **Manual editing** – reassign any shift slot to a different employee (or leave it unfilled), with non-blocking warnings if the change violates that employee's usual constraints — including a weekly-hours overrun or too little rest before/after the shift — so HR can always override, but never by accident
 - **Shift swapping** – pick two shifts and swap their assigned employees in one atomic action
 - **Unfilled-slot reporting** – when there isn't enough eligible staff, the tool reports exactly how many/which slots couldn't be filled instead of failing silently or crashing
 - **Workload distribution panel** – shifts per employee (and weekend shifts per employee) for the month, recomputed from what's actually saved, so it stays honest as HR edits the plan by hand
+- **Self-service sick/vacation** – an employee can report their own sick or vacation days for the current month; a shift they were already assigned frees up automatically for HR to cover, and HR gets ranked replacement suggestions for it (see below)
+- **Bilingual UI** – every label, message and validation error is available in German and English (see below)
+
+## Self-service sick / vacation
+
+The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
+
+Reporting an absence for a day the employee already holds a shift on:
+
+- **frees the shift** – it goes back to being an ordinary unfilled slot (counted in `unfilled_count`, shown in the distribution panel, reassignable from the usual dropdown)
+- **keeps the context** – HR sees "Krank (war: Anna)" / "Sick (was: Anna)" instead of a bare gap, so it's clear why the slot opened up and who to ask about it
+- **still shows on the employee's own calendar** – as "Krank"/"Sick" or "Urlaub"/"Vacation", not as a normal shift, even though the slot itself no longer has their name on it
+- **feeds back into the scheduler** – a later regeneration of that month won't reassign the same person straight back onto a day they reported as unavailable
+
+HR gets a **"Vorschläge"/"Suggestions"** action on any freed slot: it re-runs the same eligibility checks used for manual reassignment (weekday/date availability, allowed shift types, not already working that day, monthly cap, weekly-hours cap, rest period) against every active employee and ranks the eligible ones by current workload, so the least-loaded suitable person is offered first. Picking one is a normal reassignment — nothing special has to be undone if it turns out to be wrong.
+
+## Language
+
+The UI is available in German (default) and English, toggled from the navbar; the choice is remembered per browser (`localStorage`) and sent to the backend on every request via an `X-Lang` header, so validation errors and the non-blocking constraint warnings above come back in the same language as the rest of the page — not just the static labels. Adding a third language means extending `backend/i18n.py`'s translation table and `frontend/src/i18n/translations.js` the same way; both are hand-rolled (no `react-i18next`/`Flask-Babel`) to keep the near-zero-dependency footprint the rest of the project has.
 
 ## The scheduling algorithm
 
@@ -47,9 +71,21 @@ A greedy algorithm assigns the first workable candidate to each slot and never r
 
 This algorithm instead explores assignments slot by slot in calendar order, and **undoes (backtracks) a choice** whenever it turns out to block a later slot with no other eligible candidate. It keeps searching after finding one complete assignment, in case a different set of choices leaves fewer slots unfilled (branch-and-bound: a running best-so-far result prunes any branch that can't beat it, and search stops early once a fully-staffed solution is found). A node/time budget acts as a safety valve on pathologically understaffed inputs, so a request always returns a best-effort result instead of hanging.
 
-Hard constraints enforced during search: an employee can't work two shifts the same day, can't be scheduled on a weekday/date they're marked unavailable, can't be scheduled outside their allowed shift types (if restricted), and can't exceed their monthly shift cap (if set).
+Hard constraints enforced during search: an employee can't work two shifts the same day, can't be scheduled on a weekday/date they're marked unavailable, can't be scheduled outside their allowed shift types (if restricted), can't exceed their monthly shift cap (if set), can't exceed their weekly target hours (if set — see [Part-time / weekly hours](#part-time--weekly-hours)), and can't be left with less than their minimum rest period against the shift immediately before or after (see [Rest periods](#rest-periods)).
 
 `backend/test_scheduler.py` includes a test that constructs a scenario where a literal greedy-first-fit pass provably leaves gaps that this algorithm closes, alongside tests for each hard constraint and for graceful degradation when there isn't enough staff to fill every slot.
+
+### Part-time / weekly hours
+
+An employee can carry an optional `weekly_hours` target (e.g. "works 30h/week") instead of only the existing monthly shift-count cap. It's enforced as a hard ceiling in minutes over each Monday–Sunday week: once assigning another shift would push the employee past their target for that week, they stop being eligible for further shifts *that week* — which, combined with the existing one-shift-per-day rule, is what spreads a part-timer's hours across several distinct days each week rather than letting them bunch onto a few long ones. It's a ceiling and a best-effort target, not a guaranteed minimum — same "report gaps rather than force an answer" philosophy the rest of the scheduler already has for `max_shifts_per_month`.
+
+Both this cap and the rest-period check below are inherently scoped to the month being generated (the search only ever sees one month's slots at a time, same limitation `max_shifts_per_month` already has) — but the *manual-edit* warning path (see [Rest periods](#rest-periods)) queries the actually-saved data with no such boundary, so it correctly sees a conflict that spans two calendar months.
+
+### Rest periods
+
+Every employee has a `min_rest_hours` setting (defaults to 11h, the German ArbZG minimum, individually editable per employee). During generation this is a hard constraint: the search won't assign a shift that would leave less than that much rest against the employee's own shift the day before or after — including across midnight, e.g. a 22:00–06:00 shift followed by an 08:00 shift the same "next day" is only 2h apart even though the two are different shift types on different dates.
+
+Manual reassignment and swapping only ever produce a **non-blocking warning** for this (exactly like every other constraint already works) — the violation is scoped to that one employee's one shift, so HR can fix it by hand while everyone else's shift that day is completely unaffected.
 
 ### Fairness (v1.3)
 
@@ -114,8 +150,8 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 
 **Roadmap** (not yet built):
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
-- Rest periods between consecutive shifts (e.g. no late shift followed by an early shift)
 - Skill/qualification matching, so a shift can require a specific certification
+- Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
 
 ## Tech Stack
 
@@ -134,7 +170,8 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 schichtplan-tool/
 ├── backend/
 │   ├── app.py                 # Flask app: REST routes
-│   ├── db.py                   # SQLite schema + connection
+│   ├── db.py                   # SQLite/Postgres schema + connection
+│   ├── i18n.py                  # Backend message translations (de/en) + t()
 │   ├── mailer.py               # Invitation email (SMTP, or logged in dev)
 │   ├── scheduler.py            # Backtracking scheduler (ordering + fairness)
 │   ├── baselines.py            # Alternative algorithms, for comparison only
@@ -144,8 +181,13 @@ schichtplan-tool/
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
 └── frontend/
     └── src/
-        ├── App.jsx           # Routing, navigation & auth guarding
-        ├── api.js            # Fetch helper + shared constants
+        ├── App.jsx           # Routing, navigation, auth guarding & language toggle
+        ├── api.js            # Fetch helper (sends the X-Lang header)
+        ├── i18n/
+        │   ├── translations.js     # The full de/en dictionary + weekday/month labels
+        │   ├── storage.js          # Shared localStorage key/helpers (context + api.js)
+        │   ├── context.js          # useTranslation() hook (split out for Fast Refresh)
+        │   └── LanguageContext.jsx # LanguageProvider, wraps <App> in main.jsx
         ├── pages/
         │   ├── Login.jsx          # Sign-in
         │   ├── Register.jsx       # First-account setup / the create-account form
@@ -155,8 +197,11 @@ schichtplan-tool/
         │   ├── ShiftTypes.jsx    # Shift type CRUD + weekday requirements
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
         └── components/
-            ├── ScheduleGrid.jsx  # The schedule grid: reassign + swap UI
-            └── Distribution.jsx  # Shifts-per-employee balance panel
+            ├── ScheduleGrid.jsx    # The schedule grid: reassign + swap UI
+            ├── ShiftCell.jsx       # One shift/date cell: reassign, swap, suggestions, quick-log absence
+            ├── CalendarView.jsx    # Read-only wall-planner view
+            ├── Distribution.jsx    # Shifts-per-employee balance panel
+            └── AbsenceManager.jsx  # Employee self-service: report/cancel sick & vacation
 ```
 
 ## Local Setup
@@ -226,7 +271,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 ## API Endpoints
 
-Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account).
+Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
 
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
@@ -244,22 +289,26 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | GET    | `/employees/<id>`               | Get one employee                                             |
 | PUT    | `/employees/<id>`                | Update an employee (replaces constraints)                    |
 | DELETE | `/employees/<id>`                | Delete an employee                                            |
+| GET    | `/employees/<id>/absences`      | List an employee's reported sick/vacation days `?year=&month=` (self or HR) |
+| POST   | `/employees/<id>/absences`      | Report sick/vacation for one date `{date, type}`; frees any shift held that day (self, current month only, or HR, any date) |
+| DELETE | `/employees/<id>/absences/<date>` | Cancel a report; restores the original shift if nobody has covered it yet (self, current month only, or HR, any date) |
 | GET    | `/shift-types`                  | List shift types (with per-weekday requirements)              |
 | POST   | `/shift-types`                  | Create a shift type                                            |
 | PUT    | `/shift-types/<id>`               | Update a shift type                                             |
 | DELETE | `/shift-types/<id>`               | Delete a shift type (blocked if used by an existing schedule)   |
 | POST   | `/schedules/generate`            | Generate (or regenerate) a month's schedule `{year, month}`      |
-| GET    | `/schedules/<year>/<month>`      | Get a month's schedule, its assignments, and the workload distribution |
+| GET    | `/schedules/<year>/<month>`      | Get a month's schedule, its assignments, absences, and the workload distribution |
 | DELETE | `/schedules/<year>/<month>`      | Delete a month's schedule                                           |
 | PUT    | `/schedules/<year>/<month>/shift-times` | Change a shift's hours on one date; null times reset it to the shift type's |
 | POST   | `/schedules/<year>/<month>/slots` | Add one more place to a shift on a single date                      |
 | DELETE | `/assignments/<id>`               | Remove a place from a shift on one date                              |
 | PUT    | `/assignments/<id>`               | Reassign one shift slot to a different employee (or `null`)          |
 | POST   | `/assignments/swap`               | Swap the employees on two shift assignments `{assignment_id_a, assignment_id_b}` |
+| GET    | `/assignments/<id>/replacement-suggestions` | Eligible employees for this slot, ranked by current workload (HR) |
 
 ## Status
 
-Built and tested locally through v1.3: 16 unit tests, a benchmark against four alternative algorithms plus an exact solver, and a full browser walkthrough of create → generate → reassign → swap → check balance. Not yet deployed.
+Built and tested locally through v1.4: 23 unit tests, a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Not yet deployed.
 
 ## About This Project
 

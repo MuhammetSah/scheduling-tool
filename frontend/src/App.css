@@ -476,7 +476,17 @@ button.btn-small {
 .slot-cell {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.4rem;
+}
+
+.suggestion-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  margin-top: 0.1rem;
 }
 
 .slot-cell select {
@@ -651,6 +661,11 @@ button.btn-small {
 
 .calendar-person-unfilled {
   color: #b45309;
+  font-style: italic;
+}
+
+.calendar-person-absence {
+  color: #b91c1c;
   font-style: italic;
 }
 

@@ -1,6 +1,6 @@
 import calendar
 import time
-from datetime import date
+from datetime import date, datetime, timedelta
 
 # Safety valves so a pathological/understaffed month can't hang the request forever.
 DEFAULT_NODE_BUDGET = 300_000
@@ -16,6 +16,45 @@ class _BudgetExceeded(Exception):
     pass
 
 
+def shift_duration_minutes(start_time, end_time):
+    """Minutes a shift lasts, given "HH:MM" strings.
+
+    A shift that ends at or before its own start time (e.g. 22:00-06:00) is
+    taken to run past midnight into the next day, not backwards in time.
+    """
+    start = datetime.strptime(start_time, '%H:%M')
+    end = datetime.strptime(end_time, '%H:%M')
+    if end <= start:
+        end += timedelta(days=1)
+    return int((end - start).total_seconds() // 60)
+
+
+def shift_datetimes(iso_date, start_time, end_time):
+    """The (start, end) datetimes of a shift on a given calendar date.
+
+    Same midnight-crossing rule as shift_duration_minutes, applied to actual
+    datetimes so gaps between two different shifts (on two different dates)
+    can be measured directly.
+    """
+    d = date.fromisoformat(iso_date) if isinstance(iso_date, str) else iso_date
+    start_dt = datetime.combine(d, datetime.strptime(start_time, '%H:%M').time())
+    end_dt = datetime.combine(d, datetime.strptime(end_time, '%H:%M').time())
+    if end_dt <= start_dt:
+        end_dt += timedelta(days=1)
+    return start_dt, end_dt
+
+
+def rest_gap_hours(earlier, later):
+    """Hours between the end of one shift and the start of a later one.
+
+    Each argument is a (start_dt, end_dt) pair as returned by shift_datetimes().
+    Negative means the two shifts actually overlap.
+    """
+    _, earlier_end = earlier
+    later_start, _ = later
+    return (later_start - earlier_end).total_seconds() / 3600
+
+
 def build_slots(year, month, shift_types):
     """Expand shift requirements into one entry per person-shift that must be staffed."""
     days_in_month = calendar.monthrange(year, month)[1]
@@ -23,15 +62,32 @@ def build_slots(year, month, shift_types):
     for day in range(1, days_in_month + 1):
         d = date(year, month, day)
         weekday = d.weekday()
+        # Monday of this date's calendar week - the bucket weekly-hours caps
+        # are tracked against (0=Monday convention, same as WEEKDAYS in db.py).
+        week_start = (d - timedelta(days=weekday)).isoformat()
         for shift_type in shift_types:
             required_count = shift_type['requirements'].get(weekday, 0)
+            start_time = shift_type.get('start_time')
+            end_time = shift_type.get('end_time')
+            # None (rather than crashing) when a caller doesn't supply hours -
+            # keeps this backward compatible with callers/tests that only ever
+            # cared about shift *counts*. Duration- and rest-aware checks
+            # simply have nothing to enforce in that case.
+            duration_minutes = (
+                shift_duration_minutes(start_time, end_time)
+                if start_time and end_time else None
+            )
             for slot_index in range(required_count):
                 slots.append({
                     'date': d.isoformat(),
                     'weekday': weekday,
+                    'week_start': week_start,
                     'shift_type_id': shift_type['id'],
                     'slot_index': slot_index,
                     'is_weekend': weekday >= 5,
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'duration_minutes': duration_minutes,
                 })
     return slots
 
@@ -144,6 +200,17 @@ def _search(
     total_slots = len(slots)
     assignment = [None] * total_slots
     day_usage = {}
+    # (employee_id, date) -> (start_time, end_time) of the shift assigned there,
+    # only ever populated for slots with known hours. Backs the rest-period
+    # check below. Note this is *not* redundant with day_usage: day_usage only
+    # stops the same employee working twice on the same calendar date, but an
+    # overnight shift dated D (22:00-06:00) and a normal shift dated D+1
+    # (08:00-16:00) are on different dates and only 2h apart - exactly the gap
+    # this closes.
+    day_shift = {}
+    # (employee_id, week_start) -> minutes assigned so far that week, only
+    # tracked where a weekly_hours target makes it relevant.
+    week_minutes = {}
     load = {emp['id']: 0 for emp in employees}
     weekend_load = {emp['id']: 0 for emp in employees}
 
@@ -160,6 +227,34 @@ def _search(
         if state['nodes'] % 2000 == 0 and time.monotonic() - state['start'] > time_budget_seconds:
             raise _BudgetExceeded()
 
+    def rest_period_ok(emp, slot):
+        """Would assigning `emp` to `slot` leave enough rest either side of it?
+
+        Only checked when the slot's hours are known (backward compatible with
+        callers - e.g. existing tests - that only ever dealt in shift counts).
+        Like max_shifts_per_month, this is inherently scoped to the month being
+        generated: a slot on the 1st can't see what was assigned on the last
+        day of the previous month, since that's a different generation run.
+        constraint_warnings() in app.py covers that gap for manual edits, where
+        the already-saved data spans month boundaries freely.
+        """
+        min_rest = emp.get('min_rest_hours')
+        if not min_rest or not slot['start_time'] or not slot['end_time']:
+            return True
+        eid = emp['id']
+        this_shift = shift_datetimes(slot['date'], slot['start_time'], slot['end_time'])
+        d = date.fromisoformat(slot['date'])
+
+        prev = day_shift.get((eid, (d - timedelta(days=1)).isoformat()))
+        if prev and rest_gap_hours(shift_datetimes((d - timedelta(days=1)).isoformat(), *prev), this_shift) < min_rest:
+            return False
+
+        nxt = day_shift.get((eid, (d + timedelta(days=1)).isoformat()))
+        if nxt and rest_gap_hours(this_shift, shift_datetimes((d + timedelta(days=1)).isoformat(), *nxt)) < min_rest:
+            return False
+
+        return True
+
     def eligible_candidates(slot):
         used_today = day_usage.get(slot['date'], ())
         candidates = []
@@ -171,6 +266,13 @@ def _search(
                 continue
             cap = emp['max_shifts_per_month']
             if cap is not None and load[eid] >= cap:
+                continue
+            weekly_cap = emp.get('weekly_hours')
+            if weekly_cap is not None and slot['duration_minutes'] is not None:
+                current = week_minutes.get((eid, slot['week_start']), 0)
+                if current + slot['duration_minutes'] > weekly_cap * 60:
+                    continue
+            if not rest_period_ok(emp, slot):
                 continue
             candidates.append(emp)
 
@@ -213,8 +315,15 @@ def _search(
                 if weekend_weight and slot['is_weekend']:
                     added += weekend_weight * (2 * weekend_load[eid] + 1)
 
+            has_hours = bool(slot['start_time'] and slot['end_time'])
+            week_key = (eid, slot['week_start'])
+
             assignment[i] = eid
             day_usage.setdefault(d, set()).add(eid)
+            if has_hours:
+                day_shift[(eid, d)] = (slot['start_time'], slot['end_time'])
+            if slot['duration_minutes'] is not None:
+                week_minutes[week_key] = week_minutes.get(week_key, 0) + slot['duration_minutes']
             load[eid] += 1
             if slot['is_weekend']:
                 weekend_load[eid] += 1
@@ -222,6 +331,10 @@ def _search(
             backtrack(i + 1, unfilled_so_far, cost_so_far + added)
 
             day_usage[d].discard(eid)
+            if has_hours:
+                del day_shift[(eid, d)]
+            if slot['duration_minutes'] is not None:
+                week_minutes[week_key] -= slot['duration_minutes']
             load[eid] -= 1
             if slot['is_weekend']:
                 weekend_load[eid] -= 1
@@ -298,8 +411,16 @@ def generate_schedule(
     """Build a month's schedule, choosing a search strategy to suit the month.
 
     employees: [{id, max_shifts_per_month, unavailable_weekdays: set[int],
-                 unavailable_dates: set[str ISO date], allowed_shift_types: set[int] or None}]
-    shift_types: [{id, requirements: {weekday(0-6): required_count}}]
+                 unavailable_dates: set[str ISO date], allowed_shift_types: set[int] or None,
+                 weekly_hours: number or None, min_rest_hours: number or None}]
+    shift_types: [{id, requirements: {weekday(0-6): required_count},
+                   start_time: "HH:MM" or None, end_time: "HH:MM" or None}]
+
+    weekly_hours and min_rest_hours are both optional, hard, best-effort caps -
+    same "no guarantee, reports gaps rather than failing" philosophy as
+    max_shifts_per_month - and both fall back to doing nothing when a shift
+    type has no start/end time, so existing callers that only ever dealt in
+    shift counts are unaffected.
 
     Benchmarking the two slot orderings against each other (see benchmark.py)
     showed they win in different situations, so neither is right on its own:

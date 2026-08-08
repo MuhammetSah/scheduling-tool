@@ -1,3 +1,5 @@
+import { getStoredLang } from './i18n/storage'
+
 const API_URL = import.meta.env.VITE_API_URL
 
 /** Thrown when the API rejects a request because nobody is signed in. */
@@ -5,7 +7,14 @@ export class UnauthorizedError extends Error {}
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      // Read directly from storage rather than through React context - this
+      // is a plain module, not a component, so it can't use useTranslation().
+      // LanguageContext writes to the same key on every change, so this is
+      // always the language the user currently has selected.
+      'X-Lang': getStoredLang(),
+    },
     // Sends the session cookie; without it every guarded route answers 401.
     credentials: 'include',
     ...options,
@@ -29,10 +38,3 @@ export const api = {
   put: (path, body) => request(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (path) => request(path, { method: 'DELETE' }),
 }
-
-export const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
-export const WEEKDAY_NAMES = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
-export const MONTH_NAMES = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
-]

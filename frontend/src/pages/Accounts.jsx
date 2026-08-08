@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import Register from './Register'
+import { useTranslation } from '../i18n/context'
 
 /**
  * HR's view of who can sign in. Deleting an account is the way to revoke a
@@ -8,6 +9,7 @@ import Register from './Register'
  * the roster, since a login without a roster entry could never show anything.
  */
 function Accounts({ currentUser, setFlash }) {
+  const { t } = useTranslation()
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -36,7 +38,7 @@ function Accounts({ currentUser, setFlash }) {
   }
 
   async function deleteAccount(account) {
-    if (!confirm(`Konto "${account.username}" wirklich löschen?`)) return
+    if (!confirm(t('accounts.confirmDelete', { username: account.username }))) return
     try {
       const result = await api.delete(`/accounts/${account.id}`)
       setFlash({ type: 'success', text: result.message })
@@ -49,15 +51,13 @@ function Accounts({ currentUser, setFlash }) {
   return (
     <>
       <div className="panel">
-        <h2>Konten</h2>
-        <p className="hint">
-          Personal-Konten dürfen alles bearbeiten. Mitarbeiter-Konten sehen ausschließlich ihre eigenen Schichten.
-        </p>
+        <h2>{t('accounts.title')}</h2>
+        <p className="hint">{t('accounts.hint')}</p>
 
         {loading ? (
-          <p className="hint">Lade …</p>
+          <p className="hint">{t('common.loading')}</p>
         ) : accounts.length === 0 ? (
-          <p className="empty-state">Noch keine Konten.</p>
+          <p className="empty-state">{t('accounts.empty')}</p>
         ) : (
           <ul className="item-list">
             {accounts.map(account => (
@@ -65,19 +65,21 @@ function Accounts({ currentUser, setFlash }) {
                 <div className="item-main">
                   <span className="item-title">
                     {account.username}
-                    {account.id === currentUser.id && <span className="badge">Sie</span>}
+                    {account.id === currentUser.id && <span className="badge">{t('accounts.youBadge')}</span>}
                   </span>
                   <div className="item-meta">
                     <span className="badge">
-                      {account.role === 'hr' ? 'Personalabteilung' : 'Mitarbeiter'}
+                      {account.role === 'hr' ? t('common.roleHr') : t('common.roleEmployee')}
                     </span>
-                    {account.employee_name && <span className="badge">verknüpft mit {account.employee_name}</span>}
+                    {account.employee_name && (
+                      <span className="badge">{t('accounts.linkedWith', { name: account.employee_name })}</span>
+                    )}
                     {account.contact_email && <span className="badge">{account.contact_email}</span>}
                     {account.invitation_pending && (
-                      <span className="badge badge-pending">Einladung offen</span>
+                      <span className="badge badge-pending">{t('accounts.invitationPending')}</span>
                     )}
                     {!account.password_set && !account.invitation_pending && (
-                      <span className="badge badge-inactive">Kein Passwort gesetzt</span>
+                      <span className="badge badge-inactive">{t('accounts.noPasswordSet')}</span>
                     )}
                   </div>
                 </div>
@@ -85,19 +87,19 @@ function Accounts({ currentUser, setFlash }) {
                   {account.contact_email && account.id !== currentUser.id && (
                     <button
                       className="btn-secondary btn-small"
-                      title="Neuen Einladungslink per E-Mail schicken; ein bestehendes Passwort wird dabei ungültig"
+                      title={t('accounts.resendTitle')}
                       onClick={() => resendInvitation(account)}
                     >
-                      {account.password_set ? 'Passwort zurücksetzen' : 'Einladung erneut senden'}
+                      {account.password_set ? t('accounts.resetPassword') : t('accounts.resendInvite')}
                     </button>
                   )}
                   <button
                     className="btn-danger btn-small"
                     disabled={account.id === currentUser.id}
-                    title={account.id === currentUser.id ? 'Das eigene Konto kann nicht gelöscht werden' : undefined}
+                    title={account.id === currentUser.id ? t('accounts.cannotDeleteSelf') : undefined}
                     onClick={() => deleteAccount(account)}
                   >
-                    Löschen
+                    {t('common.delete')}
                   </button>
                 </div>
               </li>

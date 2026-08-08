@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { api, WEEKDAY_LABELS } from '../api'
+import { api } from '../api'
+import { useTranslation } from '../i18n/context'
 
 const emptyForm = {
   id: null,
@@ -11,6 +12,7 @@ const emptyForm = {
 }
 
 function ShiftTypes({ setFlash }) {
+  const { t, weekdayLabels } = useTranslation()
   const [shiftTypes, setShiftTypes] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
@@ -52,10 +54,10 @@ function ShiftTypes({ setFlash }) {
     try {
       if (form.id) {
         await api.put(`/shift-types/${form.id}`, payload)
-        setFlash({ type: 'success', text: 'Schichtart aktualisiert.' })
+        setFlash({ type: 'success', text: t('shiftTypes.flashUpdated') })
       } else {
         await api.post('/shift-types', payload)
-        setFlash({ type: 'success', text: 'Schichtart angelegt.' })
+        setFlash({ type: 'success', text: t('shiftTypes.flashCreated') })
       }
       setShowForm(false)
       load()
@@ -65,10 +67,10 @@ function ShiftTypes({ setFlash }) {
   }
 
   async function deleteShiftType(id) {
-    if (!confirm('Diese Schichtart wirklich löschen?')) return
+    if (!confirm(t('shiftTypes.confirmDelete'))) return
     try {
-      await api.delete(`/shift-types/${id}`)
-      setFlash({ type: 'success', text: 'Schichtart gelöscht.' })
+      const result = await api.delete(`/shift-types/${id}`)
+      setFlash({ type: 'success', text: result.message })
       load()
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
@@ -79,12 +81,12 @@ function ShiftTypes({ setFlash }) {
     <>
       <div className="panel">
         <div className="panel-header">
-          <h2>Schichtarten</h2>
-          <button onClick={startCreate}>+ Neue Schichtart</button>
+          <h2>{t('shiftTypes.title')}</h2>
+          <button onClick={startCreate}>{t('shiftTypes.newButton')}</button>
         </div>
 
         {shiftTypes.length === 0 ? (
-          <p className="empty-state">Noch keine Schichtarten angelegt.</p>
+          <p className="empty-state">{t('shiftTypes.empty')}</p>
         ) : (
           <ul className="item-list">
             {shiftTypes.map(st => (
@@ -95,14 +97,14 @@ function ShiftTypes({ setFlash }) {
                   </span>
                   <div className="item-meta">
                     <span className="badge">{st.start_time}–{st.end_time}</span>
-                    {WEEKDAY_LABELS.map((label, wd) => (
+                    {weekdayLabels.map((label, wd) => (
                       <span key={wd} className="badge">{label}: {st.requirements[wd]}</span>
                     ))}
                   </div>
                 </div>
                 <div className="item-actions">
-                  <button className="btn-secondary btn-small" onClick={() => startEdit(st)}>Bearbeiten</button>
-                  <button className="btn-danger btn-small" onClick={() => deleteShiftType(st.id)}>Löschen</button>
+                  <button className="btn-secondary btn-small" onClick={() => startEdit(st)}>{t('common.edit')}</button>
+                  <button className="btn-danger btn-small" onClick={() => deleteShiftType(st.id)}>{t('common.delete')}</button>
                 </div>
               </li>
             ))}
@@ -112,30 +114,30 @@ function ShiftTypes({ setFlash }) {
 
       {showForm && (
         <div className="panel">
-          <h3>{form.id ? 'Schichtart bearbeiten' : 'Neue Schichtart'}</h3>
+          <h3>{form.id ? t('shiftTypes.editTitle') : t('shiftTypes.newTitle')}</h3>
           <form onSubmit={submitForm}>
             <div className="field">
-              <label htmlFor="st-name">Name</label>
-              <input id="st-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="z. B. Frühschicht" />
+              <label htmlFor="st-name">{t('common.name')}</label>
+              <input id="st-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder={t('shiftTypes.namePlaceholder')} />
             </div>
             <div className="toolbar">
               <div className="field">
-                <label htmlFor="st-start">Beginn</label>
+                <label htmlFor="st-start">{t('shiftTypes.startLabel')}</label>
                 <input id="st-start" type="time" value={form.start_time} onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))} required />
               </div>
               <div className="field">
-                <label htmlFor="st-end">Ende</label>
+                <label htmlFor="st-end">{t('shiftTypes.endLabel')}</label>
                 <input id="st-end" type="time" value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))} required />
               </div>
               <div className="field">
-                <label htmlFor="st-color">Farbe</label>
+                <label htmlFor="st-color">{t('shiftTypes.colorLabel')}</label>
                 <input id="st-color" type="color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} />
               </div>
             </div>
             <div className="field">
-              <label>Benötigte Mitarbeiter pro Wochentag</label>
+              <label>{t('shiftTypes.requirementsLabel')}</label>
               <div className="weekday-counts">
-                {WEEKDAY_LABELS.map((label, wd) => (
+                {weekdayLabels.map((label, wd) => (
                   <div key={wd} className="weekday-count">
                     <label htmlFor={`req-${wd}`}>{label}</label>
                     <input id={`req-${wd}`} type="number" min="0" value={form.requirements[wd]} onChange={e => setRequirement(wd, e.target.value)} />
@@ -144,8 +146,8 @@ function ShiftTypes({ setFlash }) {
               </div>
             </div>
             <div className="toolbar">
-              <button type="submit">{form.id ? 'Speichern' : 'Anlegen'}</button>
-              <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Abbrechen</button>
+              <button type="submit">{form.id ? t('common.save') : t('common.create')}</button>
+              <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>{t('common.cancel')}</button>
             </div>
           </form>
         </div>

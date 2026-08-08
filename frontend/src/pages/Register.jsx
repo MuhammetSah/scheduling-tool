@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { useTranslation } from '../i18n/context'
 
 /**
  * Used twice: to create the very first account on a fresh install, and by a
@@ -8,6 +9,7 @@ import { api } from '../api'
  * wording matches what the person is actually doing.
  */
 function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated }) {
+  const { t } = useTranslation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
@@ -21,9 +23,19 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
   // picks the password. Only the very first account sets one here.
   const invitesByEmail = Boolean(currentUser)
   const selectedEmployee = employees.find(e => String(e.id) === String(employeeId))
-  // An employee's address comes from the roster entry; HR types one in.
-  const employeeMissingEmail = role === 'employee' && selectedEmployee && !selectedEmployee.email
-  const invitationTarget = role === 'employee' ? selectedEmployee?.email : email
+  // For an employee account the address is normally the one on the roster
+  // entry, but HR can type/correct it right here too (see the email field
+  // below) - only genuinely missing on both sides blocks the invitation.
+  const employeeMissingEmail = role === 'employee' && selectedEmployee && !selectedEmployee.email && !email
+  const invitationTarget = role === 'employee' ? (email || selectedEmployee?.email) : email
+
+  function selectEmployee(id) {
+    setEmployeeId(id)
+    // Show whatever address is already on file for the newly picked person,
+    // rather than leaving a previous selection's typed address showing.
+    const emp = employees.find(e => String(e.id) === id)
+    setEmail(emp?.email || '')
+  }
 
   // Only HR can link a new read-only account to a roster entry.
   useEffect(() => {
@@ -56,9 +68,9 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
           type: 'success',
           text: user.invitation_email
             ? (user.invitation_sent
-                ? `Konto angelegt. Einladung an ${user.invitation_email} gesendet.`
-                : `Konto angelegt. Einladung für ${user.invitation_email} erstellt — kein SMTP konfiguriert, der Link steht im Server-Log.`)
-            : `Konto für ${user.username} angelegt.`,
+                ? t('register.flashInvited', { email: user.invitation_email })
+                : t('register.flashInvitedLogged', { email: user.invitation_email }))
+            : t('register.flashCreatedNoInvite', { username: user.username }),
         })
         setUsername('')
         setPassword('')
@@ -67,7 +79,7 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
         onAccountCreated?.()
       } else {
         onLoggedIn(user)
-        setFlash({ type: 'success', text: `Konto angelegt. Willkommen, ${user.username}.` })
+        setFlash({ type: 'success', text: t('register.flashSetupWelcome', { username: user.username }) })
         navigate('/')
       }
     } catch (err) {
@@ -79,15 +91,13 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
 
   return (
     <div className={`panel ${currentUser ? '' : 'panel-narrow'}`}>
-      <h2>{currentUser ? 'Kollegin oder Kollegen hinzufügen' : 'Erstes Konto einrichten'}</h2>
+      <h2>{currentUser ? t('register.titleAddColleague') : t('register.titleSetup')}</h2>
       <p className="hint">
-        {currentUser
-          ? 'Personal-Konten dürfen alles bearbeiten. Mitarbeiter-Konten können den Dienstplan nur ansehen.'
-          : 'Dieses Konto erhält Zugriff auf alle Mitarbeiter- und Planungsdaten. Weitere Konten kann danach nur die Personalabteilung anlegen.'}
+        {currentUser ? t('register.hintAddColleague') : t('register.hintSetup')}
       </p>
       <form onSubmit={handleSubmit}>
         <div className="field">
-          <label htmlFor="register-username">Benutzername</label>
+          <label htmlFor="register-username">{t('common.username')}</label>
           <input
             id="register-username"
             autoComplete="username"
@@ -98,7 +108,7 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
         </div>
         {!invitesByEmail && (
           <div className="field">
-            <label htmlFor="register-password">Passwort</label>
+            <label htmlFor="register-password">{t('common.password')}</label>
             <input
               id="register-password"
               type="password"
@@ -108,52 +118,65 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
               onChange={e => setPassword(e.target.value)}
               required
             />
-            <p className="hint">Mindestens 8 Zeichen.</p>
+            <p className="hint">{t('common.minPasswordHint')}</p>
           </div>
         )}
         {!currentUser && (
           <div className="field">
-            <label htmlFor="setup-email">E-Mail-Adresse (optional)</label>
+            <label htmlFor="setup-email">{t('register.emailOptionalLabel')}</label>
             <input
               id="setup-email"
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
             />
-            <p className="hint">
-              Nur nötig, falls Sie Ihr Passwort später einmal per Einladungslink zurücksetzen möchten.
-            </p>
+            <p className="hint">{t('register.emailOptionalHint')}</p>
           </div>
         )}
         {currentUser && (
           <>
             <div className="field">
-              <label htmlFor="register-role">Rolle</label>
+              <label htmlFor="register-role">{t('register.roleLabel')}</label>
               <select id="register-role" value={role} onChange={e => setRole(e.target.value)}>
-                <option value="employee">Mitarbeiter — darf den Dienstplan nur ansehen</option>
-                <option value="hr">Personalabteilung — darf alles bearbeiten</option>
+                <option value="employee">{t('register.roleEmployeeOption')}</option>
+                <option value="hr">{t('register.roleHrOption')}</option>
               </select>
             </div>
             {role === 'employee' && (
-              <div className="field">
-                <label htmlFor="register-employee">Mit Mitarbeiter verknüpfen</label>
-                <select
-                  id="register-employee"
-                  value={employeeId}
-                  onChange={e => setEmployeeId(e.target.value)}
-                  required
-                >
-                  <option value="">— bitte auswählen —</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </select>
-                <p className="hint">Legt fest, wessen Schichten dieses Konto sieht.</p>
-              </div>
+              <>
+                <div className="field">
+                  <label htmlFor="register-employee">{t('register.linkEmployeeLabel')}</label>
+                  <select
+                    id="register-employee"
+                    value={employeeId}
+                    onChange={e => selectEmployee(e.target.value)}
+                    required
+                  >
+                    <option value="">{t('common.pleaseSelect')}</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.name}</option>
+                    ))}
+                  </select>
+                  <p className="hint">{t('register.linkEmployeeHint')}</p>
+                </div>
+                {employeeId && (
+                  <div className="field">
+                    <label htmlFor="register-employee-email">{t('register.employeeEmailLabel')}</label>
+                    <input
+                      id="register-employee-email"
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      required
+                    />
+                    <p className="hint">{t('register.employeeEmailHint')}</p>
+                  </div>
+                )}
+              </>
             )}
             {role === 'hr' && (
               <div className="field">
-                <label htmlFor="register-email">E-Mail-Adresse</label>
+                <label htmlFor="register-email">{t('register.hrEmailLabel')}</label>
                 <input
                   id="register-email"
                   type="email"
@@ -161,32 +184,33 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
                   onChange={e => setEmail(e.target.value)}
                   required
                 />
-                <p className="hint">Dorthin geht die Einladung.</p>
+                <p className="hint">{t('register.hrEmailHint')}</p>
               </div>
             )}
             <div className="field">
               {employeeMissingEmail ? (
                 <p className="warning-list">
-                  {selectedEmployee.name} hat keine E-Mail-Adresse hinterlegt. Bitte zuerst unter
-                  „Mitarbeiter“ ergänzen — ohne Adresse kann keine Einladung verschickt werden.
+                  {t('register.employeeMissingEmailWarning', { name: selectedEmployee.name })}
                 </p>
               ) : (
                 <p className="hint">
-                  Es wird kein Passwort vergeben: {invitationTarget
-                    ? <>die Person erhält eine Einladung an <strong>{invitationTarget}</strong> und</>
-                    : 'die Person erhält eine Einladung per E-Mail und'} setzt ihr Passwort selbst.
+                  {t('register.noPasswordPrefix')}{' '}
+                  {invitationTarget
+                    ? <>{t('register.invitationAtTarget')} <strong>{invitationTarget}</strong></>
+                    : t('register.invitationByEmail')}
+                  {' '}{t('register.noPasswordSuffix')}
                 </p>
               )}
             </div>
           </>
         )}
         <button type="submit" disabled={busy || employeeMissingEmail}>
-          {busy ? 'Speichern …' : (invitesByEmail ? 'Konto anlegen und einladen' : 'Konto einrichten')}
+          {busy ? t('common.savingEllipsis') : (invitesByEmail ? t('register.submitInvite') : t('register.submitSetup'))}
         </button>
       </form>
       {!currentUser && !isSetup && (
         <p className="hint mt-md">
-          Bereits registriert? <Link to="/login">Zur Anmeldung</Link>
+          {t('register.alreadyRegisteredPrefix')} <Link to="/login">{t('common.toLogin')}</Link>
         </p>
       )}
     </div>
