@@ -77,6 +77,13 @@ function App() {
         setUser(null)
         if (err instanceof UnauthorizedError) {
           setSetupRequired(Boolean(err.data?.setup_required))
+        } else {
+          // Couldn't even ask the server whether an account exists yet - a
+          // network/config problem, not "no session". Leaving setupRequired
+          // at its default here would silently make /register bounce back to
+          // /login, which looks exactly like a dead link instead of what it
+          // actually is: the app not being able to reach its API.
+          setFlash({ type: 'error', text: err.message })
         }
       })
       .finally(() => {
