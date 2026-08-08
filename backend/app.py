@@ -9,7 +9,7 @@ from flask_cors import CORS
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
-from db import get_db_connection, init_db, WEEKDAYS
+from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from scheduler import generate_schedule
 
 app = Flask(__name__)
@@ -36,6 +36,30 @@ CORS(
 init_db()
 
 
+def get_db():
+    """This request's database connection, opened on first use and reused after.
+
+    Every route used to open its own connection and had to remember to close it
+    on every single return path - easy to get wrong, and a forgotten close() on
+    an exception path that isn't a plain ValueError (e.g. a stray null in a JSON
+    list blowing up int()) leaked a connection holding a write lock, which then
+    made every *other* request fail too until garbage collection eventually
+    caught up. Going through `g` and teardown_appcontext below means the
+    connection is closed exactly once per request no matter how it ends -
+    including on an unhandled exception.
+    """
+    if 'db_connection' not in g:
+        g.db_connection = _open_db_connection()
+    return g.db_connection
+
+
+@app.teardown_appcontext
+def close_db(exception=None):
+    connection = g.pop('db_connection', None)
+    if connection is not None:
+        connection.close()
+
+
 # ---------- authentication ----------
 
 HR_ROLE = 'hr'
@@ -52,11 +76,10 @@ def load_current_user():
     if not user_id:
         return None
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT id, username, role, employee_id FROM users WHERE id = ?', (user_id,))
     user = cursor.fetchone()
-    connection.close()
     return dict(user) if user else None
 
 
@@ -184,7 +207,7 @@ def register():
     if not username:
         return jsonify({'message': 'Benutzername ist erforderlich'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
 
     first_account = count_users(cursor) == 0
@@ -194,14 +217,12 @@ def register():
     # able to administer it. After that only HR may create accounts, so nobody
     # can sign themselves up and read the roster.
     if not first_account and not is_hr(creator):
-        connection.close()
         message = ('Nur die Personalabteilung darf Konten anlegen' if creator
                    else 'Neue Konten kann nur ein angemeldeter Benutzer anlegen')
         return jsonify({'message': message}), 403
 
     role = HR_ROLE if first_account else (data.get('role') or HR_ROLE)
     if role not in (HR_ROLE, EMPLOYEE_ROLE):
-        connection.close()
         return jsonify({'message': 'Unbekannte Rolle'}), 400
 
     # Every account except the very first is created by somebody else, so it is
@@ -219,16 +240,13 @@ def register():
         # An employee account shows that person's own shifts, so it is useless
         # until it knows whose shifts those are.
         if employee_id is None:
-            connection.close()
             return jsonify({'message': 'Ein Mitarbeiter-Konto muss mit einem Mitarbeiter verknüpft werden'}), 400
         employee = employee_email(cursor, employee_id)
         if not employee:
-            connection.close()
             return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
         # The invitation is the only way this account gets a password, so
         # without an address there is nowhere to send it.
         if not employee['email']:
-            connection.close()
             return jsonify({'message':
                             f'{employee["name"]} hat keine E-Mail-Adresse. '
                             'Bitte zuerst beim Mitarbeiter hinterlegen.'}), 400
@@ -237,28 +255,22 @@ def register():
         recipient_email, recipient_name = employee['email'], employee['name']
     elif invited:
         if not account_email:
-            connection.close()
             return jsonify({'message': 'E-Mail-Adresse ist erforderlich, um die Einladung zu senden'}), 400
         if not looks_like_email(account_email):
-            connection.close()
             return jsonify({'message': 'Bitte eine gültige E-Mail-Adresse angeben'}), 400
         recipient_email, recipient_name = account_email, username
     else:
         # The bootstrap account. An address is optional here, but storing one
         # means this account can later be re-invited if the password is lost.
         if account_email and not looks_like_email(account_email):
-            connection.close()
             return jsonify({'message': 'Bitte eine gültige E-Mail-Adresse angeben'}), 400
         if not password:
-            connection.close()
             return jsonify({'message': 'Passwort ist erforderlich'}), 400
         if len(password) < MIN_PASSWORD_LENGTH:
-            connection.close()
             return jsonify({'message': f'Das Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen lang sein'}), 400
 
     cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
     if cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Benutzername ist bereits vergeben'}), 400
 
     # An empty hash marks an account that cannot be signed into yet. Invited
@@ -275,12 +287,10 @@ def register():
     if invited:
         token = issue_invitation(cursor, user_id)
         connection.commit()
-        connection.close()
         invitation_sent = mailer.send_invitation(
             recipient_email, username, token, INVITATION_VALID_DAYS)
     else:
         connection.commit()
-        connection.close()
 
     # Signing in the very first user saves them an immediate second step; HR
     # adding a colleague must stay logged in as themselves.
@@ -303,11 +313,10 @@ def login():
     username = (data.get('username') or '').strip()
     password = data.get('password') or ''
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
     user = cursor.fetchone()
-    connection.close()
 
     # An invited account has no password yet. Saying so is safe - the invitation
     # went to that person's mailbox, not to whoever is guessing here - and it is
@@ -341,10 +350,9 @@ def logout():
 @app.route('/invitations/<token>', methods=['GET'])
 def check_invitation(token):
     """Public: does this link still work? Used to greet the invitee by name."""
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     invitation = load_invitation(cursor, token)
-    connection.close()
 
     if not invitation:
         return jsonify({'message': 'Dieser Link ist ungültig oder abgelaufen'}), 404
@@ -360,11 +368,10 @@ def redeem_invitation(token):
     if len(password) < MIN_PASSWORD_LENGTH:
         return jsonify({'message': f'Das Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen lang sein'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     invitation = load_invitation(cursor, token)
     if not invitation:
-        connection.close()
         return jsonify({'message': 'Dieser Link ist ungültig oder abgelaufen'}), 404
 
     cursor.execute('UPDATE users SET hash = ? WHERE id = ?',
@@ -372,7 +379,6 @@ def redeem_invitation(token):
     # Single use: the link stops working the moment it has been redeemed.
     cursor.execute('DELETE FROM password_invitations WHERE id = ?', (invitation['id'],))
     connection.commit()
-    connection.close()
 
     return jsonify({'username': invitation['username'],
                     'message': 'Passwort gesetzt. Sie können sich jetzt anmelden.'}), 200
@@ -381,7 +387,7 @@ def redeem_invitation(token):
 @app.route('/me', methods=['GET'])
 def me():
     user_id = current_user_id()
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
 
     # The frontend uses this on load both to restore a session and to find out
@@ -389,12 +395,10 @@ def me():
     setup_required = count_users(cursor) == 0
 
     if not user_id:
-        connection.close()
         return jsonify({'message': 'Nicht angemeldet', 'setup_required': setup_required}), 401
 
     cursor.execute('SELECT id, username, role, employee_id FROM users WHERE id = ?', (user_id,))
     user = cursor.fetchone()
-    connection.close()
 
     if not user:
         # The account was deleted while the cookie was still around.
@@ -415,7 +419,13 @@ def me():
 def parse_int_list(value):
     if not value:
         return []
-    return [int(v) for v in value]
+    try:
+        return [int(v) for v in value]
+    except (TypeError, ValueError):
+        # int(None), int({...}), int([...]) etc. all raise TypeError rather than
+        # ValueError - normalised here so a stray non-number in the list is a
+        # clean 400 like any other bad input, not an unhandled 500.
+        raise ValueError('Die Liste darf nur ganze Zahlen enthalten')
 
 
 def serialize_employee(cursor, row):
@@ -490,7 +500,12 @@ def replace_shift_requirements(connection, shift_type_id, requirements):
     cursor = connection.cursor()
     cursor.execute('DELETE FROM shift_requirements WHERE shift_type_id = ?', (shift_type_id,))
     for weekday, count in enumerate(requirements):
-        count = int(count)
+        try:
+            count = int(count)
+        except (TypeError, ValueError):
+            # Same normalisation as parse_int_list: a null or other non-number
+            # in the list must be a 400, not an unhandled 500.
+            raise ValueError('Der Personalbedarf muss für jeden Wochentag eine ganze Zahl sein')
         if count < 0:
             raise ValueError('Der benötigte Personalbedarf darf nicht negativ sein')
         cursor.execute('INSERT INTO shift_requirements (shift_type_id, weekday, required_count) VALUES (?, ?, ?)', (shift_type_id, weekday, count))
@@ -504,11 +519,10 @@ def list_employees():
     # HR-only: an employee account is shown its own shifts, which already carry
     # the shift name and hours, so it never needs the roster - and the roster is
     # colleagues' personal data.
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM employees ORDER BY name')
     employees = [serialize_employee(cursor, row) for row in cursor.fetchall()]
-    connection.close()
     return jsonify(employees)
 
 
@@ -520,7 +534,7 @@ def create_employee():
     if not name:
         return jsonify({'message': 'Name ist erforderlich'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     try:
         cursor = connection.cursor()
         cursor.execute(
@@ -533,24 +547,20 @@ def create_employee():
         cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
         employee = serialize_employee(cursor, cursor.fetchone())
     except ValueError as e:
-        connection.close()
         return jsonify({'message': str(e)}), 400
-    connection.close()
     return jsonify(employee), 201
 
 
 @app.route('/employees/<int:employee_id>', methods=['GET'])
 @hr_required
 def get_employee(employee_id):
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
     row = cursor.fetchone()
     if not row:
-        connection.close()
         return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
     employee = serialize_employee(cursor, row)
-    connection.close()
     return jsonify(employee)
 
 
@@ -558,16 +568,14 @@ def get_employee(employee_id):
 @hr_required
 def update_employee(employee_id):
     data = request.get_json(silent=True) or {}
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
     if not cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
 
     name = (data.get('name') or '').strip()
     if not name:
-        connection.close()
         return jsonify({'message': 'Name ist erforderlich'}), 400
 
     try:
@@ -580,20 +588,17 @@ def update_employee(employee_id):
         cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
         employee = serialize_employee(cursor, cursor.fetchone())
     except ValueError as e:
-        connection.close()
         return jsonify({'message': str(e)}), 400
-    connection.close()
     return jsonify(employee)
 
 
 @app.route('/employees/<int:employee_id>', methods=['DELETE'])
 @hr_required
 def delete_employee(employee_id):
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
     if not cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
 
     # Deleting the roster entry out from under a login would leave an account
@@ -601,13 +606,11 @@ def delete_employee(employee_id):
     cursor.execute('SELECT username FROM users WHERE employee_id = ?', (employee_id,))
     linked = [row['username'] for row in cursor.fetchall()]
     if linked:
-        connection.close()
         return jsonify({'message':
                         'Zuerst das verknüpfte Konto löschen: ' + ', '.join(linked)}), 400
 
     cursor.execute('DELETE FROM employees WHERE id = ?', (employee_id,))
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Mitarbeiter gelöscht'}), 200
 
 
@@ -616,7 +619,7 @@ def delete_employee(employee_id):
 @app.route('/accounts', methods=['GET'])
 @hr_required
 def list_accounts():
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('''
         SELECT u.id, u.username, u.role, u.employee_id, u.created_at,
@@ -637,7 +640,6 @@ def list_accounts():
         account['password_set'] = bool(account['password_set'])
         account['invitation_pending'] = bool(account['invitation_pending'])
         accounts.append(account)
-    connection.close()
     return jsonify(accounts)
 
 
@@ -645,17 +647,15 @@ def list_accounts():
 @hr_required
 def resend_invitation(account_id):
     """Send a fresh invitation, e.g. when the first one expired or went astray."""
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT id, username, role, employee_id, email, hash FROM users WHERE id = ?', (account_id,))
     account = cursor.fetchone()
     if not account:
-        connection.close()
         return jsonify({'message': 'Konto nicht gefunden'}), 404
 
     recipient_email, _ = invitation_recipient(cursor, account)
     if not recipient_email:
-        connection.close()
         return jsonify({'message': 'Für dieses Konto ist keine E-Mail-Adresse hinterlegt'}), 400
 
     token = issue_invitation(cursor, account_id)
@@ -663,7 +663,6 @@ def resend_invitation(account_id):
     # replaced without HR ever setting it.
     cursor.execute("UPDATE users SET hash = '' WHERE id = ?", (account_id,))
     connection.commit()
-    connection.close()
 
     sent = mailer.send_invitation(recipient_email, account['username'], token, INVITATION_VALID_DAYS)
     return jsonify({
@@ -680,24 +679,21 @@ def delete_account(account_id):
         # Deleting the account you are signed in with would lock you out mid-session.
         return jsonify({'message': 'Das eigene Konto kann nicht gelöscht werden'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT id, username, role FROM users WHERE id = ?', (account_id,))
     account = cursor.fetchone()
     if not account:
-        connection.close()
         return jsonify({'message': 'Konto nicht gefunden'}), 404
 
     if account['role'] == HR_ROLE:
         cursor.execute('SELECT COUNT(*) AS n FROM users WHERE role = ?', (HR_ROLE,))
         if cursor.fetchone()['n'] <= 1:
-            connection.close()
             # Without an HR account nobody could administer the tool again.
             return jsonify({'message': 'Das letzte Personal-Konto kann nicht gelöscht werden'}), 400
 
     cursor.execute('DELETE FROM users WHERE id = ?', (account_id,))
     connection.commit()
-    connection.close()
     return jsonify({'message': f'Konto {account["username"]} gelöscht'}), 200
 
 
@@ -706,11 +702,10 @@ def delete_account(account_id):
 @app.route('/shift-types', methods=['GET'])
 @login_required
 def list_shift_types():
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM shift_types ORDER BY start_time')
     shift_types = [serialize_shift_type(cursor, row) for row in cursor.fetchall()]
-    connection.close()
     return jsonify(shift_types)
 
 
@@ -724,7 +719,7 @@ def create_shift_type():
     if not name or not start_time or not end_time:
         return jsonify({'message': 'Name, Beginn und Ende sind erforderlich'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     try:
         cursor = connection.cursor()
         cursor.execute(
@@ -737,9 +732,7 @@ def create_shift_type():
         cursor.execute('SELECT * FROM shift_types WHERE id = ?', (shift_type_id,))
         shift_type = serialize_shift_type(cursor, cursor.fetchone())
     except ValueError as e:
-        connection.close()
         return jsonify({'message': str(e)}), 400
-    connection.close()
     return jsonify(shift_type), 201
 
 
@@ -747,18 +740,16 @@ def create_shift_type():
 @hr_required
 def update_shift_type(shift_type_id):
     data = request.get_json(silent=True) or {}
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM shift_types WHERE id = ?', (shift_type_id,))
     if not cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Schichtart nicht gefunden'}), 404
 
     name = (data.get('name') or '').strip()
     start_time = data.get('start_time')
     end_time = data.get('end_time')
     if not name or not start_time or not end_time:
-        connection.close()
         return jsonify({'message': 'Name, Beginn und Ende sind erforderlich'}), 400
 
     try:
@@ -771,30 +762,25 @@ def update_shift_type(shift_type_id):
         cursor.execute('SELECT * FROM shift_types WHERE id = ?', (shift_type_id,))
         shift_type = serialize_shift_type(cursor, cursor.fetchone())
     except ValueError as e:
-        connection.close()
         return jsonify({'message': str(e)}), 400
-    connection.close()
     return jsonify(shift_type)
 
 
 @app.route('/shift-types/<int:shift_type_id>', methods=['DELETE'])
 @hr_required
 def delete_shift_type(shift_type_id):
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
     if not cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Schichtart nicht gefunden'}), 404
 
     cursor.execute('SELECT COUNT(*) AS n FROM shift_assignments WHERE shift_type_id = ?', (shift_type_id,))
     if cursor.fetchone()['n'] > 0:
-        connection.close()
         return jsonify({'message': 'Schichtart wird in einem bestehenden Plan verwendet und kann nicht gelöscht werden'}), 400
 
     cursor.execute('DELETE FROM shift_types WHERE id = ?', (shift_type_id,))
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Schichtart gelöscht'}), 200
 
 
@@ -832,12 +818,11 @@ def load_shift_types_for_scheduling(cursor):
 
 
 def fetch_schedule(year, month):
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM schedules WHERE year = ? AND month = ?', (year, month))
     schedule = cursor.fetchone()
     if not schedule:
-        connection.close()
         return None
 
     cursor.execute(
@@ -874,7 +859,6 @@ def fetch_schedule(year, month):
     cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')
     active_employees = cursor.fetchall()
 
-    connection.close()
     return {
         'id': schedule['id'],
         'year': schedule['year'],
@@ -933,20 +917,33 @@ def generate_schedule_route():
     if not 1 <= month <= 12:
         return jsonify({'message': 'Monat muss zwischen 1 und 12 liegen'}), 400
 
-    connection = get_db_connection()
+    # Optional: how strongly to even out weekend duty specifically, on top of
+    # the total-shifts balancing that always runs (see scheduler.py). Off by
+    # default so existing behaviour doesn't change under callers that don't
+    # send it.
+    weekend_weight = data.get('weekend_weight') or 0
+    try:
+        weekend_weight = float(weekend_weight)
+        if weekend_weight != int(weekend_weight):
+            raise ValueError()
+        weekend_weight = int(weekend_weight)
+    except (TypeError, ValueError):
+        return jsonify({'message': 'weekend_weight muss eine ganze Zahl sein'}), 400
+    if weekend_weight < 0:
+        return jsonify({'message': 'weekend_weight darf nicht negativ sein'}), 400
+
+    connection = get_db()
     cursor = connection.cursor()
 
     shift_types = load_shift_types_for_scheduling(cursor)
     if not shift_types:
-        connection.close()
         return jsonify({'message': 'Bitte zuerst mindestens eine Schichtart anlegen'}), 400
 
     employees = load_employees_for_scheduling(cursor)
 
     try:
-        result = generate_schedule(year, month, employees, shift_types)
+        result = generate_schedule(year, month, employees, shift_types, weekend_weight=weekend_weight)
     except ValueError:
-        connection.close()
         return jsonify({'message': 'Ungültiges Jahr oder Monat'}), 400
 
     cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
@@ -972,7 +969,6 @@ def generate_schedule_route():
         )
 
     connection.commit()
-    connection.close()
     return jsonify(fetch_schedule(year, month)), 201
 
 
@@ -1006,16 +1002,14 @@ def get_schedule(year, month):
 @app.route('/schedules/<int:year>/<int:month>', methods=['DELETE'])
 @hr_required
 def delete_schedule(year, month):
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
     row = cursor.fetchone()
     if not row:
-        connection.close()
         return jsonify({'message': 'Für diesen Monat wurde kein Plan gefunden'}), 404
     cursor.execute('DELETE FROM schedules WHERE id = ?', (row['id'],))
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Plan gelöscht'}), 200
 
 
@@ -1057,17 +1051,15 @@ def set_shift_times(year, month):
     except (TypeError, ValueError):
         return jsonify({'message': 'Ungültiges Datum'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
 
     schedule_id = find_schedule_id(cursor, year, month)
     if not schedule_id:
-        connection.close()
         return jsonify({'message': 'Für diesen Monat wurde kein Plan gefunden'}), 404
 
     cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
     if not cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Schichtart nicht gefunden'}), 404
 
     if start_time is None and end_time is None:
@@ -1076,11 +1068,9 @@ def set_shift_times(year, month):
             (schedule_id, iso_date, shift_type_id),
         )
         connection.commit()
-        connection.close()
         return jsonify({'message': 'Zeiten auf die Standardzeiten zurückgesetzt'}), 200
 
     if not valid_time(start_time) or not valid_time(end_time):
-        connection.close()
         return jsonify({'message': TIME_FORMAT_HINT}), 400
 
     cursor.execute('''
@@ -1091,7 +1081,6 @@ def set_shift_times(year, month):
     ''', (schedule_id, iso_date, shift_type_id, start_time, end_time))
 
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Zeiten für diesen Tag geändert'}), 200
 
 
@@ -1114,17 +1103,15 @@ def add_slot(year, month):
     if (parsed.year, parsed.month) != (year, month):
         return jsonify({'message': 'Das Datum liegt nicht in diesem Monat'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
 
     schedule_id = find_schedule_id(cursor, year, month)
     if not schedule_id:
-        connection.close()
         return jsonify({'message': 'Für diesen Monat wurde kein Plan gefunden'}), 404
 
     cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
     if not cursor.fetchone():
-        connection.close()
         return jsonify({'message': 'Schichtart nicht gefunden'}), 404
 
     cursor.execute(
@@ -1143,7 +1130,6 @@ def add_slot(year, month):
     refresh_unfilled_count(cursor, schedule_id)
 
     connection.commit()
-    connection.close()
     return jsonify({'id': assignment_id, 'message': 'Platz hinzugefügt'}), 201
 
 
@@ -1151,19 +1137,17 @@ def add_slot(year, month):
 @hr_required
 def delete_assignment(assignment_id):
     """Remove a place from a shift on one date."""
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT schedule_id FROM shift_assignments WHERE id = ?', (assignment_id,))
     assignment = cursor.fetchone()
     if not assignment:
-        connection.close()
         return jsonify({'message': 'Zuweisung nicht gefunden'}), 404
 
     cursor.execute('DELETE FROM shift_assignments WHERE id = ?', (assignment_id,))
     refresh_unfilled_count(cursor, assignment['schedule_id'])
 
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Platz entfernt'}), 200
 
 
@@ -1223,20 +1207,24 @@ def refresh_unfilled_count(cursor, schedule_id):
 @hr_required
 def update_assignment(assignment_id):
     data = request.get_json(silent=True) or {}
-    employee_id = data.get('employee_id')
+    # Required rather than defaulted: data.get() can't tell "employee_id omitted"
+    # from "employee_id explicitly null", and the latter means "unassign this
+    # slot" - silently unassigning on a malformed request that simply forgot the
+    # field would be the wrong failure mode.
+    if 'employee_id' not in data:
+        return jsonify({'message': 'employee_id ist erforderlich (null, um die Schicht unbesetzt zu lassen)'}), 400
+    employee_id = data['employee_id']
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM shift_assignments WHERE id = ?', (assignment_id,))
     assignment = cursor.fetchone()
     if not assignment:
-        connection.close()
         return jsonify({'message': 'Zuweisung nicht gefunden'}), 404
 
     if employee_id is not None:
         cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
         if not cursor.fetchone():
-            connection.close()
             return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
 
     warnings = constraint_warnings(
@@ -1248,7 +1236,6 @@ def update_assignment(assignment_id):
     refresh_unfilled_count(cursor, assignment['schedule_id'])
 
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Zuweisung aktualisiert', 'warnings': warnings})
 
 
@@ -1261,17 +1248,15 @@ def swap_assignments():
     if not id_a or not id_b or id_a == id_b:
         return jsonify({'message': 'Zwei unterschiedliche Zuweisungs-IDs sind erforderlich'}), 400
 
-    connection = get_db_connection()
+    connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM shift_assignments WHERE id IN (?, ?)', (id_a, id_b))
     rows = {row['id']: row for row in cursor.fetchall()}
     if id_a not in rows or id_b not in rows:
-        connection.close()
         return jsonify({'message': 'Zuweisung nicht gefunden'}), 404
 
     a, b = rows[id_a], rows[id_b]
     if a['schedule_id'] != b['schedule_id']:
-        connection.close()
         return jsonify({'message': 'Schichten können nur innerhalb desselben Plans getauscht werden'}), 400
 
     cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (b['employee_id'], a['id']))
@@ -1284,7 +1269,6 @@ def swap_assignments():
     refresh_unfilled_count(cursor, a['schedule_id'])
 
     connection.commit()
-    connection.close()
     return jsonify({'message': 'Schichten getauscht', 'warnings': warnings})
 
 
