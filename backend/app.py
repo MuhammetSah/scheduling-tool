@@ -10,7 +10,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
-from scheduler import generate_schedule
+from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'schichtplan-local-dev')
@@ -244,6 +244,18 @@ def register():
         employee = employee_email(cursor, employee_id)
         if not employee:
             return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
+
+        # HR can set or correct the address right here instead of having to
+        # leave this form to edit the roster entry first. Empty stays a no-op -
+        # this field exists to unblock an invitation, not as a general edit
+        # surface, so it must never blank out an address already on file.
+        typed_email = (data.get('email') or '').strip()
+        if typed_email:
+            if not looks_like_email(typed_email):
+                return jsonify({'message': 'Bitte eine gültige E-Mail-Adresse angeben'}), 400
+            cursor.execute('UPDATE employees SET email = ? WHERE id = ?', (typed_email, employee_id))
+            employee['email'] = typed_email
+
         # The invitation is the only way this account gets a password, so
         # without an address there is nowhere to send it.
         if not employee['email']:
@@ -445,10 +457,25 @@ def serialize_employee(cursor, row):
         'email': row['email'],
         'active': bool(row['active']),
         'max_shifts_per_month': row['max_shifts_per_month'],
+        'weekly_hours': row['weekly_hours'],
+        'min_rest_hours': row['min_rest_hours'],
         'unavailable_weekdays': unavailable_weekdays,
         'unavailable_dates': unavailable_dates,
         'allowed_shift_types': allowed_shift_types,
     }
+
+
+def parse_optional_hours(value, field_label):
+    """A non-negative number, or None if the field was omitted/blank."""
+    if value is None or value == '':
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f'{field_label} muss eine Zahl sein')
+    if value < 0:
+        raise ValueError(f'{field_label} darf nicht negativ sein')
+    return value
 
 
 def replace_employee_constraints(connection, employee_id, data):
@@ -537,9 +564,13 @@ def create_employee():
     connection = get_db()
     try:
         cursor = connection.cursor()
+        weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'Die Zielstundenzahl pro Woche')
+        min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'Die Mindestruhezeit')
         cursor.execute(
-            'INSERT INTO employees (name, email, active, max_shifts_per_month) VALUES (?, ?, ?, ?)',
-            (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month')),
+            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11),
         )
         employee_id = cursor.lastrowid
         replace_employee_constraints(connection, employee_id, data)
@@ -579,9 +610,13 @@ def update_employee(employee_id):
         return jsonify({'message': 'Name ist erforderlich'}), 400
 
     try:
+        weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'Die Zielstundenzahl pro Woche')
+        min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'Die Mindestruhezeit')
         cursor.execute(
-            'UPDATE employees SET name = ?, email = ?, active = ?, max_shifts_per_month = ? WHERE id = ?',
-            (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'), employee_id),
+            'UPDATE employees SET name = ?, email = ?, active = ?, max_shifts_per_month = ?, '
+            'weekly_hours = ?, min_rest_hours = ? WHERE id = ?',
+            (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, employee_id),
         )
         replace_employee_constraints(connection, employee_id, data)
         connection.commit()
@@ -800,6 +835,8 @@ def load_employees_for_scheduling(cursor):
         employees.append({
             'id': employee_id,
             'max_shifts_per_month': row['max_shifts_per_month'],
+            'weekly_hours': row['weekly_hours'],
+            'min_rest_hours': row['min_rest_hours'],
             'unavailable_weekdays': unavailable_weekdays,
             'unavailable_dates': unavailable_dates,
             'allowed_shift_types': allowed if allowed else None,
@@ -813,7 +850,12 @@ def load_shift_types_for_scheduling(cursor):
     for row in cursor.fetchall():
         cursor.execute('SELECT weekday, required_count FROM shift_requirements WHERE shift_type_id = ?', (row['id'],))
         requirements = {r['weekday']: r['required_count'] for r in cursor.fetchall()}
-        shift_types.append({'id': row['id'], 'requirements': requirements})
+        shift_types.append({
+            'id': row['id'],
+            'requirements': requirements,
+            'start_time': row['start_time'],
+            'end_time': row['end_time'],
+        })
     return shift_types
 
 
@@ -1153,7 +1195,34 @@ def delete_assignment(assignment_id):
 
 # ---------- manual editing (reassign / swap) ----------
 
+def effective_shift_hours(cursor, schedule_id, iso_date, shift_type_id, default_start, default_end):
+    """A shift's actual hours on one date: a per-date override if one exists, else the shift type's usual hours."""
+    cursor.execute(
+        'SELECT start_time, end_time FROM shift_time_overrides WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
+        (schedule_id, iso_date, shift_type_id),
+    )
+    override = cursor.fetchone()
+    if override:
+        return override['start_time'], override['end_time']
+    return default_start, default_end
+
+
+def week_bounds(iso_date):
+    """The Monday-Sunday ISO week containing a date, as (start, end) ISO strings."""
+    d = date.fromisoformat(iso_date)
+    start = d - timedelta(days=d.weekday())
+    return start.isoformat(), (start + timedelta(days=6)).isoformat()
+
+
 def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, schedule_id, exclude_assignment_id=None):
+    """Non-blocking warnings for assigning `employee_id` to one shift.
+
+    Unlike the scheduler's hard constraints (which only ever see one month at a
+    time), this runs against already-saved data, so the weekly-hours and
+    rest-period checks below deliberately query shift_assignments *without*
+    scoping by schedule_id - the employee's neighbouring shift may belong to a
+    different month's schedule row, and it should still be found.
+    """
     if employee_id is None:
         return []
     warnings = []
@@ -1193,6 +1262,70 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
         )
         if cursor.fetchone()['n'] >= employee['max_shifts_per_month']:
             warnings.append(f'{employee["name"]} hat das monatliche Limit von {employee["max_shifts_per_month"]} Schichten bereits erreicht')
+
+    if employee['weekly_hours'] is not None:
+        week_start, week_end = week_bounds(assignment_date)
+        cursor.execute('''
+            SELECT sa.id, sa.date, sa.schedule_id, sa.shift_type_id, st.start_time, st.end_time
+            FROM shift_assignments sa
+            JOIN shift_types st ON st.id = sa.shift_type_id
+            WHERE sa.employee_id = ? AND sa.date BETWEEN ? AND ?
+        ''', (employee_id, week_start, week_end))
+        total_minutes = 0
+        for row in cursor.fetchall():
+            if exclude_assignment_id is not None and row['id'] == exclude_assignment_id:
+                continue
+            start, end = effective_shift_hours(
+                cursor, row['schedule_id'], row['date'], row['shift_type_id'], row['start_time'], row['end_time'])
+            total_minutes += shift_duration_minutes(start, end)
+
+        cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
+        proposed_type = cursor.fetchone()
+        if proposed_type:
+            new_start, new_end = effective_shift_hours(
+                cursor, schedule_id, assignment_date, shift_type_id, proposed_type['start_time'], proposed_type['end_time'])
+            total_minutes += shift_duration_minutes(new_start, new_end)
+
+        if total_minutes > employee['weekly_hours'] * 60:
+            warnings.append(
+                f'{employee["name"]} käme damit auf {total_minutes / 60:.1f} Std. in dieser Woche - '
+                f'über dem Ziel von {employee["weekly_hours"]:g} Std./Woche')
+
+    cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
+    this_shift_type = cursor.fetchone()
+    if this_shift_type:
+        cur_start, cur_end = effective_shift_hours(
+            cursor, schedule_id, assignment_date, shift_type_id, this_shift_type['start_time'], this_shift_type['end_time'])
+        this_shift = shift_datetimes(assignment_date, cur_start, cur_end)
+        min_rest = employee['min_rest_hours']
+        d = date.fromisoformat(assignment_date)
+
+        # (neighbouring date, is that neighbour the earlier of the two shifts?)
+        neighbors = [((d - timedelta(days=1)).isoformat(), True), ((d + timedelta(days=1)).isoformat(), False)]
+        for neighbor_date, neighbor_is_earlier in neighbors:
+            query = 'SELECT id, schedule_id, shift_type_id FROM shift_assignments WHERE employee_id = ? AND date = ?'
+            params = [employee_id, neighbor_date]
+            if exclude_assignment_id is not None:
+                query += ' AND id != ?'
+                params.append(exclude_assignment_id)
+            cursor.execute(query, params)
+            neighbor = cursor.fetchone()
+            if not neighbor:
+                continue
+            cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (neighbor['shift_type_id'],))
+            neighbor_type = cursor.fetchone()
+            if not neighbor_type:
+                continue
+            n_start, n_end = effective_shift_hours(
+                cursor, neighbor['schedule_id'], neighbor_date, neighbor['shift_type_id'],
+                neighbor_type['start_time'], neighbor_type['end_time'])
+            neighbor_shift = shift_datetimes(neighbor_date, n_start, n_end)
+
+            gap = (rest_gap_hours(neighbor_shift, this_shift) if neighbor_is_earlier
+                   else rest_gap_hours(this_shift, neighbor_shift))
+            if gap < min_rest:
+                warnings.append(
+                    f'{employee["name"]} hätte dann nur {gap:.1f} Std. Ruhezeit statt der geforderten {min_rest:g} Std.')
 
     return warnings
 

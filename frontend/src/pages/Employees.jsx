@@ -7,6 +7,8 @@ const emptyForm = {
   email: '',
   active: true,
   max_shifts_per_month: '',
+  weekly_hours: '',
+  min_rest_hours: 11,
   unavailable_weekdays: [],
   allowed_shift_types: [],
   unavailable_dates: [],
@@ -45,6 +47,8 @@ function Employees({ setFlash }) {
       email: emp.email || '',
       active: emp.active,
       max_shifts_per_month: emp.max_shifts_per_month ?? '',
+      weekly_hours: emp.weekly_hours ?? '',
+      min_rest_hours: emp.min_rest_hours ?? 11,
       unavailable_weekdays: emp.unavailable_weekdays,
       allowed_shift_types: emp.allowed_shift_types,
       unavailable_dates: emp.unavailable_dates,
@@ -87,6 +91,8 @@ function Employees({ setFlash }) {
       email: form.email || null,
       active: form.active,
       max_shifts_per_month: form.max_shifts_per_month === '' ? null : Number(form.max_shifts_per_month),
+      weekly_hours: form.weekly_hours === '' ? null : Number(form.weekly_hours),
+      min_rest_hours: form.min_rest_hours === '' ? null : Number(form.min_rest_hours),
       unavailable_weekdays: form.unavailable_weekdays,
       allowed_shift_types: form.allowed_shift_types,
       unavailable_dates: form.unavailable_dates,
@@ -140,6 +146,10 @@ function Employees({ setFlash }) {
                   <div className="item-meta">
                     {emp.email && <span className="badge">{emp.email}</span>}
                     {emp.max_shifts_per_month != null && <span className="badge">max. {emp.max_shifts_per_month}/Monat</span>}
+                    {emp.weekly_hours != null && <span className="badge">{emp.weekly_hours} Std./Woche</span>}
+                    {emp.min_rest_hours != null && emp.min_rest_hours !== 11 && (
+                      <span className="badge">Ruhezeit {emp.min_rest_hours} Std.</span>
+                    )}
                     {emp.unavailable_weekdays.map(wd => (
                       <span key={wd} className="badge">nicht {WEEKDAY_NAMES[wd]}</span>
                     ))}
@@ -176,6 +186,36 @@ function Employees({ setFlash }) {
             <div className="field">
               <label htmlFor="emp-max">Maximale Schichten pro Monat (optional)</label>
               <input id="emp-max" type="number" min="0" value={form.max_shifts_per_month} onChange={e => setForm(f => ({ ...f, max_shifts_per_month: e.target.value }))} />
+            </div>
+            <div className="field">
+              <label htmlFor="emp-weekly-hours">Zielstunden pro Woche (optional, für Teilzeit)</label>
+              <input
+                id="emp-weekly-hours"
+                type="number"
+                min="0"
+                step="0.5"
+                placeholder="z. B. 30"
+                value={form.weekly_hours}
+                onChange={e => setForm(f => ({ ...f, weekly_hours: e.target.value }))}
+              />
+              <p className="hint">
+                Wird als Obergrenze pro Woche eingehalten; die Schichten werden dafür automatisch über die Woche verteilt generiert. Leer lassen für Vollzeit ohne festes Wochenziel.
+              </p>
+            </div>
+            <div className="field">
+              <label htmlFor="emp-rest">Mindestruhezeit zwischen Schichten (Std.)</label>
+              <input
+                id="emp-rest"
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.min_rest_hours}
+                onChange={e => setForm(f => ({ ...f, min_rest_hours: e.target.value }))}
+                required
+              />
+              <p className="hint">
+                Gesetzlicher Standard sind 11 Std. Wird bei der Planung berücksichtigt; bei Verstoß erscheint ein Hinweis statt eines harten Fehlers, sodass die Schicht manuell angepasst werden kann, während andere an dem Tag normal weiterarbeiten.
+              </p>
             </div>
             <div className="field checkbox-field">
               <input id="emp-active" type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />

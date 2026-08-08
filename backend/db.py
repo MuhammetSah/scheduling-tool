@@ -114,9 +114,25 @@ def init_db():
             email TEXT,
             active INTEGER NOT NULL DEFAULT 1,
             max_shifts_per_month INTEGER,
+            weekly_hours REAL,
+            min_rest_hours REAL NOT NULL DEFAULT 11,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # Databases created before part-time/rest-period support only have the
+    # original columns - CREATE TABLE IF NOT EXISTS above is a no-op for them.
+    employee_columns = table_columns(cursor, 'employees')
+    if 'weekly_hours' not in employee_columns:
+        # Target hours/week for staff who don't work full time; None = no target,
+        # unaffected by the weekly cap the scheduler enforces (see scheduler.py).
+        cursor.execute('ALTER TABLE employees ADD COLUMN weekly_hours REAL')
+    if 'min_rest_hours' not in employee_columns:
+        # Hours required between the end of one shift and the start of the next
+        # (German ArbZG default: 11h). NOT NULL with a default - unlike
+        # weekly_hours, this is a safety-relevant setting that should never
+        # silently become "no minimum" just because a write omitted it.
+        cursor.execute('ALTER TABLE employees ADD COLUMN min_rest_hours REAL NOT NULL DEFAULT 11')
 
     # Accounts that can sign in. Two roles:
     #   'hr'       - full access: manages employees, shift types and schedules

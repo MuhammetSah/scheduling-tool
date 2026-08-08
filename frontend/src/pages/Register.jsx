@@ -21,9 +21,19 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
   // picks the password. Only the very first account sets one here.
   const invitesByEmail = Boolean(currentUser)
   const selectedEmployee = employees.find(e => String(e.id) === String(employeeId))
-  // An employee's address comes from the roster entry; HR types one in.
-  const employeeMissingEmail = role === 'employee' && selectedEmployee && !selectedEmployee.email
-  const invitationTarget = role === 'employee' ? selectedEmployee?.email : email
+  // For an employee account the address is normally the one on the roster
+  // entry, but HR can type/correct it right here too (see the email field
+  // below) - only genuinely missing on both sides blocks the invitation.
+  const employeeMissingEmail = role === 'employee' && selectedEmployee && !selectedEmployee.email && !email
+  const invitationTarget = role === 'employee' ? (email || selectedEmployee?.email) : email
+
+  function selectEmployee(id) {
+    setEmployeeId(id)
+    // Show whatever address is already on file for the newly picked person,
+    // rather than leaving a previous selection's typed address showing.
+    const emp = employees.find(e => String(e.id) === id)
+    setEmail(emp?.email || '')
+  }
 
   // Only HR can link a new read-only account to a roster entry.
   useEffect(() => {
@@ -135,21 +145,38 @@ function Register({ isSetup, currentUser, onLoggedIn, setFlash, onAccountCreated
               </select>
             </div>
             {role === 'employee' && (
-              <div className="field">
-                <label htmlFor="register-employee">Mit Mitarbeiter verknüpfen</label>
-                <select
-                  id="register-employee"
-                  value={employeeId}
-                  onChange={e => setEmployeeId(e.target.value)}
-                  required
-                >
-                  <option value="">— bitte auswählen —</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
-                  ))}
-                </select>
-                <p className="hint">Legt fest, wessen Schichten dieses Konto sieht.</p>
-              </div>
+              <>
+                <div className="field">
+                  <label htmlFor="register-employee">Mit Mitarbeiter verknüpfen</label>
+                  <select
+                    id="register-employee"
+                    value={employeeId}
+                    onChange={e => selectEmployee(e.target.value)}
+                    required
+                  >
+                    <option value="">— bitte auswählen —</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.name}</option>
+                    ))}
+                  </select>
+                  <p className="hint">Legt fest, wessen Schichten dieses Konto sieht.</p>
+                </div>
+                {employeeId && (
+                  <div className="field">
+                    <label htmlFor="register-employee-email">E-Mail-Adresse</label>
+                    <input
+                      id="register-employee-email"
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      required
+                    />
+                    <p className="hint">
+                      Dorthin geht die Einladung. Wird auch beim Mitarbeiter hinterlegt.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
             {role === 'hr' && (
               <div className="field">
