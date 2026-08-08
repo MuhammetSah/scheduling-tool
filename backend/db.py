@@ -190,12 +190,33 @@ def init_db():
     ''')
 
     # One-off unavailability, e.g. vacation or sick leave on specific dates.
+    # HR-managed: replace_employee_constraints() in app.py wipes and reinserts
+    # this table from the roster form on every save of that employee, so it is
+    # not where the *self-reported* absences below live - a save of an
+    # unrelated field would silently erase them.
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS employee_unavailable_dates(
             id {AUTO_ID},
             employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
             date TEXT NOT NULL,
             reason TEXT,
+            UNIQUE(employee_id, date)
+        )
+    ''')
+
+    # Self-reported sick/vacation days. Separate from employee_unavailable_dates
+    # above on purpose (see that table's comment) - this is the one place an
+    # employee account is allowed to write, and only ever its own rows, only
+    # ever for the current month (enforced in app.py, not here). Also feeds
+    # load_employees_for_scheduling() so a later regeneration doesn't schedule
+    # someone back onto a day they reported as sick/on vacation.
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS employee_absences(
+            id {AUTO_ID},
+            employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            date TEXT NOT NULL,
+            absence_type TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(employee_id, date)
         )
     ''')
@@ -269,9 +290,27 @@ def init_db():
             shift_type_id INTEGER NOT NULL REFERENCES shift_types(id),
             slot_index INTEGER NOT NULL,
             employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-            manually_edited INTEGER NOT NULL DEFAULT 0
+            manually_edited INTEGER NOT NULL DEFAULT 0,
+            absence_type TEXT,
+            absent_employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
         )
     ''')
+
+    # Databases created before self-service sick/vacation reporting only have
+    # the original columns - CREATE TABLE IF NOT EXISTS above is a no-op for them.
+    assignment_columns = table_columns(cursor, 'shift_assignments')
+    if 'absence_type' not in assignment_columns:
+        # Set (to 'sick'/'vacation') when this slot was freed because the
+        # employee who had it reported an absence - employee_id is NULL at
+        # that point (the slot behaves like any other open slot) and
+        # absent_employee_id (below) remembers who it was, for display and so
+        # they're excluded from their own replacement suggestions.
+        cursor.execute('ALTER TABLE shift_assignments ADD COLUMN absence_type TEXT')
+    if 'absent_employee_id' not in assignment_columns:
+        cursor.execute(
+            'ALTER TABLE shift_assignments ADD COLUMN absent_employee_id '
+            'INTEGER REFERENCES employees(id) ON DELETE SET NULL'
+        )
 
     connection.commit()
     connection.close()

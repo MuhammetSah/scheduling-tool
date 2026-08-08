@@ -3,6 +3,7 @@ import { api, MONTH_NAMES } from '../api'
 import ScheduleGrid from '../components/ScheduleGrid'
 import CalendarView from '../components/CalendarView'
 import Distribution from '../components/Distribution'
+import AbsenceManager from '../components/AbsenceManager'
 
 function currentMonthKey() {
   const now = new Date()
@@ -172,6 +173,24 @@ function SchedulePage({ setFlash, user }) {
     }
   }
 
+  // HR logging an absence on someone's behalf (e.g. they called in sick and
+  // don't use self-service) - same endpoint the employee's own AbsenceManager
+  // calls, just without the current-month restriction that only applies there.
+  async function reportAbsence(employeeId, dateStr, type) {
+    try {
+      const result = await api.post(`/employees/${employeeId}/absences`, { date: dateStr, type })
+      await refreshSchedule()
+      setFlash({
+        type: 'success',
+        text: result.freed_assignment_ids.length > 0
+          ? 'Abwesenheit eingetragen. Die Schicht an diesem Tag ist jetzt wieder frei.'
+          : 'Abwesenheit eingetragen.',
+      })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   function toggleSwapSelect(assignmentId) {
     if (swapSelection === assignmentId) {
       setSwapSelection(null)
@@ -184,133 +203,144 @@ function SchedulePage({ setFlash, user }) {
   }
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <h2>Dienstplan</h2>
-        <div className="toolbar">
-          <div className="field">
-            <label htmlFor="month-picker">Monat</label>
-            <input id="month-picker" type="month" value={ym} onChange={e => handleMonthChange(e.target.value)} />
-          </div>
-          {canEdit && (
-            <>
-              <div className="field checkbox-field">
-                <input
-                  id="weekend-equity"
-                  type="checkbox"
-                  checked={weekendEquity}
-                  onChange={e => setWeekendEquity(e.target.checked)}
-                />
-                <label htmlFor="weekend-equity" title="Verteilt Wochenenddienste gleichmäßiger, kann dafür die Gesamtverteilung minimal verschlechtern">
-                  Wochenenden ausgleichen
-                </label>
-              </div>
-              <button onClick={generate}>{schedule ? 'Neu generieren' : 'Plan generieren'}</button>
-              {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>Plan löschen</button>}
-            </>
-          )}
-        </div>
-      </div>
-
-      {schedule && (
-        <div className="toolbar">
-          <div className="view-toggle">
-            <button
-              type="button"
-              className={view === 'calendar' ? 'active' : ''}
-              onClick={() => setView('calendar')}
-            >
-              Kalender
-            </button>
-            <button
-              type="button"
-              className={view === 'table' ? 'active' : ''}
-              onClick={() => setView('table')}
-            >
-              Tabelle
-            </button>
-          </div>
-        </div>
-      )}
-
-      {loading && <p className="hint">Lade …</p>}
-
-      {!loading && !schedule && (
-        <p className="empty-state">
-          Für {MONTH_NAMES[month - 1]} {year} wurde noch kein Plan generiert.
-          {!canEdit && ' Sobald die Personalabteilung den Plan erstellt hat, erscheint er hier.'}
-        </p>
-      )}
-
-      {!loading && schedule && (
-        <>
-          <div className="schedule-summary">
-            <span className="badge">
-              {schedule.scope === 'own'
-                ? `${schedule.assignments.length} eigene Schichten`
-                : `${schedule.assignments.length} Schichten insgesamt`}
-            </span>
-            {schedule.scope !== 'own' && (
-              schedule.unfilled_count > 0 ? (
-                <span className="badge badge-inactive">{schedule.unfilled_count} unbesetzt</span>
-              ) : (
-                <span className="badge">Vollständig besetzt</span>
-              )
-            )}
-            {schedule.distribution && (
+    <>
+      <div className="panel">
+        <div className="panel-header">
+          <h2>Dienstplan</h2>
+          <div className="toolbar">
+            <div className="field">
+              <label htmlFor="month-picker">Monat</label>
+              <input id="month-picker" type="month" value={ym} onChange={e => handleMonthChange(e.target.value)} />
+            </div>
+            {canEdit && (
               <>
-                <span className="badge">Differenz {schedule.distribution.spread} Schichten</span>
-                <span className="badge">Wochenende ±{schedule.distribution.weekend_spread}</span>
+                <div className="field checkbox-field">
+                  <input
+                    id="weekend-equity"
+                    type="checkbox"
+                    checked={weekendEquity}
+                    onChange={e => setWeekendEquity(e.target.checked)}
+                  />
+                  <label htmlFor="weekend-equity" title="Verteilt Wochenenddienste gleichmäßiger, kann dafür die Gesamtverteilung minimal verschlechtern">
+                    Wochenenden ausgleichen
+                  </label>
+                </div>
+                <button onClick={generate}>{schedule ? 'Neu generieren' : 'Plan generieren'}</button>
+                {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>Plan löschen</button>}
               </>
             )}
           </div>
+        </div>
 
-          {schedule.distribution && <Distribution distribution={schedule.distribution} />}
-
-          {warnings.length > 0 && (
-            <div className="warning-list">
-              Hinweis zur letzten Änderung:
-              <ul>{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        {schedule && (
+          <div className="toolbar">
+            <div className="view-toggle">
+              <button
+                type="button"
+                className={view === 'calendar' ? 'active' : ''}
+                onClick={() => setView('calendar')}
+              >
+                Kalender
+              </button>
+              <button
+                type="button"
+                className={view === 'table' ? 'active' : ''}
+                onClick={() => setView('table')}
+              >
+                Tabelle
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {schedule.scope === 'own' && (
-            <p className="hint">Ihre eigenen Schichten in {MONTH_NAMES[month - 1]} {year}.</p>
-          )}
+        {loading && <p className="hint">Lade …</p>}
 
-          {view === 'table' && canEdit && (
-            <p className="hint">
-              Umbesetzen über die Auswahlfelder, ⇄ tauscht zwei Schichten, ✎ ändert die Zeiten nur an diesem Tag,
-              „+ Platz“ und ✕ fügen an einem Tag eine Besetzung hinzu oder entfernen sie
-              {swapSelection && ' — 1 Schicht ausgewählt, jetzt eine zweite anklicken'}.
-            </p>
-          )}
+        {!loading && !schedule && (
+          <p className="empty-state">
+            Für {MONTH_NAMES[month - 1]} {year} wurde noch kein Plan generiert.
+            {!canEdit && ' Sobald die Personalabteilung den Plan erstellt hat, erscheint er hier.'}
+          </p>
+        )}
 
-          {view === 'calendar' ? (
-            <div className="calendar-wrap">
-              <CalendarView
+        {!loading && schedule && (
+          <>
+            <div className="schedule-summary">
+              <span className="badge">
+                {schedule.scope === 'own'
+                  ? `${schedule.assignments.length} eigene Schichten`
+                  : `${schedule.assignments.length} Schichten insgesamt`}
+              </span>
+              {schedule.scope !== 'own' && (
+                schedule.unfilled_count > 0 ? (
+                  <span className="badge badge-inactive">{schedule.unfilled_count} unbesetzt</span>
+                ) : (
+                  <span className="badge">Vollständig besetzt</span>
+                )
+              )}
+              {schedule.distribution && (
+                <>
+                  <span className="badge">Differenz {schedule.distribution.spread} Schichten</span>
+                  <span className="badge">Wochenende ±{schedule.distribution.weekend_spread}</span>
+                </>
+              )}
+            </div>
+
+            {schedule.distribution && <Distribution distribution={schedule.distribution} />}
+
+            {warnings.length > 0 && (
+              <div className="warning-list">
+                Hinweis zur letzten Änderung:
+                <ul>{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+              </div>
+            )}
+
+            {schedule.scope === 'own' && (
+              <p className="hint">Ihre eigenen Schichten in {MONTH_NAMES[month - 1]} {year}.</p>
+            )}
+
+            {view === 'table' && canEdit && (
+              <p className="hint">
+                Umbesetzen über die Auswahlfelder, ⇄ tauscht zwei Schichten, ✎ ändert die Zeiten nur an diesem Tag,
+                „+ Platz“ und ✕ fügen an einem Tag eine Besetzung hinzu oder entfernen sie
+                {swapSelection && ' — 1 Schicht ausgewählt, jetzt eine zweite anklicken'}.
+              </p>
+            )}
+
+            {view === 'calendar' ? (
+              <div className="calendar-wrap">
+                <CalendarView
+                  schedule={schedule}
+                  shiftTypes={shiftTypes}
+                  highlightEmployeeId={user?.employee_id ?? null}
+                />
+              </div>
+            ) : (
+              <ScheduleGrid
                 schedule={schedule}
+                employees={employees}
                 shiftTypes={shiftTypes}
-                highlightEmployeeId={user?.employee_id ?? null}
+                readOnly={!canEdit}
+                onReassign={reassign}
+                swapSelection={swapSelection}
+                onToggleSwap={toggleSwapSelect}
+                onSetTimes={setTimes}
+                onAddSlot={addSlot}
+                onRemoveSlot={removeSlot}
+                onReportAbsence={reportAbsence}
+                setFlash={setFlash}
               />
-            </div>
-          ) : (
-            <ScheduleGrid
-              schedule={schedule}
-              employees={employees}
-              shiftTypes={shiftTypes}
-              readOnly={!canEdit}
-              onReassign={reassign}
-              swapSelection={swapSelection}
-              onToggleSwap={toggleSwapSelect}
-              onSetTimes={setTimes}
-              onAddSlot={addSlot}
-              onRemoveSlot={removeSlot}
-            />
-          )}
-        </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Self-service only makes sense for the month it's actually restricted
+          to server-side - showing it while browsing a different month would
+          be misleading, since it can never act on that month anyway. */}
+      {user?.employee_id && ym === currentMonthKey() && (
+        <AbsenceManager employeeId={user.employee_id} onChange={refreshSchedule} setFlash={setFlash} />
       )}
-    </div>
+    </>
   )
 }
 

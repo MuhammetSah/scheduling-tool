@@ -23,6 +23,8 @@ function ScheduleGrid({
   onSetTimes,
   onAddSlot,
   onRemoveSlot,
+  onReportAbsence,
+  setFlash,
 }) {
   const byDate = new Map()
   for (const a of schedule.assignments) {
@@ -60,6 +62,8 @@ function ScheduleGrid({
                     onSetTimes={onSetTimes}
                     onAddSlot={onAddSlot}
                     onRemoveSlot={onRemoveSlot}
+                    onReportAbsence={onReportAbsence}
+                    setFlash={setFlash}
                   />
                 </td>
               ))}

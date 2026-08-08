@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api, ABSENCE_LABELS } from '../api'
 
 /**
  * One shift on one date: the hours it runs that day, everyone working it, and
@@ -20,6 +21,8 @@ function ShiftCell({
   onSetTimes,
   onAddSlot,
   onRemoveSlot,
+  onReportAbsence,
+  setFlash,
 }) {
   const [editingTimes, setEditingTimes] = useState(false)
   const [start, setStart] = useState('')
@@ -93,47 +96,160 @@ function ShiftCell({
       )}
 
       {sorted.map(slot => (
-        <div
+        <AssignmentSlot
           key={slot.id}
-          className={`slot-cell ${slot.employee_id ? '' : 'unfilled'} ${swapSelection === slot.id ? 'swap-selected' : ''}`}
-        >
-          {readOnly ? (
-            <span className={slot.employee_id ? '' : 'calendar-person-unfilled'}>
-              {slot.employee_name || 'unbesetzt'}
-            </span>
-          ) : (
-            <>
-              <select value={slot.employee_id ?? ''} onChange={e => onReassign(slot.id, e.target.value)}>
-                <option value="">— unbesetzt —</option>
-                {employeeOptions(slot.employee_id).map(e => (
-                  <option key={e.id} value={e.id}>{e.name}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className={`swap-toggle ${swapSelection === slot.id ? 'active' : ''}`}
-                title="Für Tausch auswählen"
-                onClick={() => onToggleSwap(slot.id)}
-              >
-                ⇄
-              </button>
-              <button
-                type="button"
-                className="cell-icon cell-icon-danger"
-                title="Diesen Platz an diesem Tag entfernen"
-                onClick={() => onRemoveSlot(slot.id)}
-              >
-                ✕
-              </button>
-            </>
-          )}
-        </div>
+          slot={slot}
+          date={date}
+          readOnly={readOnly}
+          swapSelection={swapSelection}
+          employeeOptions={employeeOptions}
+          onReassign={onReassign}
+          onToggleSwap={onToggleSwap}
+          onRemoveSlot={onRemoveSlot}
+          onReportAbsence={onReportAbsence}
+          setFlash={setFlash}
+        />
       ))}
 
       {!readOnly && (
         <button type="button" className="cell-add" onClick={() => onAddSlot(date, shiftType.id)}>
           + Platz
         </button>
+      )}
+    </div>
+  )
+}
+
+/** One person's place within a shift cell - its own component so the
+ * replacement-suggestions fetch has somewhere to keep local state. */
+function AssignmentSlot({
+  slot,
+  date,
+  readOnly,
+  swapSelection,
+  employeeOptions,
+  onReassign,
+  onToggleSwap,
+  onRemoveSlot,
+  onReportAbsence,
+  setFlash,
+}) {
+  const [suggestions, setSuggestions] = useState(null)
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false)
+
+  const isAbsence = Boolean(slot.absence_type)
+  const absenceLabel = ABSENCE_LABELS[slot.absence_type] || slot.absence_type
+  const label = isAbsence
+    ? `${absenceLabel}${slot.absent_employee_name ? ` (war: ${slot.absent_employee_name})` : ''}`
+    : (slot.employee_name || 'unbesetzt')
+
+  async function loadSuggestions() {
+    setLoadingSuggestions(true)
+    try {
+      setSuggestions(await api.get(`/assignments/${slot.id}/replacement-suggestions`))
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    } finally {
+      setLoadingSuggestions(false)
+    }
+  }
+
+  function pickSuggestion(employeeId) {
+    onReassign(slot.id, employeeId)
+    setSuggestions(null)
+  }
+
+  if (readOnly) {
+    return (
+      <div className={`slot-cell ${slot.employee_id ? '' : 'unfilled'}`}>
+        <span className={slot.employee_id ? '' : (isAbsence ? 'calendar-person-absence' : 'calendar-person-unfilled')}>
+          {label}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className={`slot-cell ${slot.employee_id ? '' : 'unfilled'} ${swapSelection === slot.id ? 'swap-selected' : ''}`}>
+      <select value={slot.employee_id ?? ''} onChange={e => onReassign(slot.id, e.target.value)}>
+        <option value="">— unbesetzt —</option>
+        {employeeOptions(slot.employee_id).map(e => (
+          <option key={e.id} value={e.id}>{e.name}</option>
+        ))}
+      </select>
+
+      {isAbsence && (
+        <span
+          className={`badge ${slot.absence_type === 'sick' ? 'badge-inactive' : 'badge-pending'}`}
+          title={slot.absent_employee_name ? `${slot.absent_employee_name} ist ${absenceLabel}` : undefined}
+        >
+          {absenceLabel}
+        </span>
+      )}
+
+      {slot.employee_id === null && (
+        <button
+          type="button"
+          className="btn-secondary btn-small"
+          onClick={loadSuggestions}
+          disabled={loadingSuggestions}
+          title="Passende Mitarbeiter für diese Schicht vorschlagen"
+        >
+          {loadingSuggestions ? '…' : 'Vorschläge'}
+        </button>
+      )}
+
+      {slot.employee_id !== null && !isAbsence && onReportAbsence && (
+        <select
+          value=""
+          title="Für diesen Mitarbeiter an diesem Tag Krankheit oder Urlaub eintragen - die Schicht wird dann frei"
+          onChange={e => {
+            const type = e.target.value
+            if (type) onReportAbsence(slot.employee_id, date, type)
+            e.target.value = ''
+          }}
+        >
+          <option value="">Abwesenheit …</option>
+          <option value="sick">Krank melden</option>
+          <option value="vacation">Urlaub melden</option>
+        </select>
+      )}
+
+      <button
+        type="button"
+        className={`swap-toggle ${swapSelection === slot.id ? 'active' : ''}`}
+        title="Für Tausch auswählen"
+        onClick={() => onToggleSwap(slot.id)}
+      >
+        ⇄
+      </button>
+      <button
+        type="button"
+        className="cell-icon cell-icon-danger"
+        title="Diesen Platz an diesem Tag entfernen"
+        onClick={() => onRemoveSlot(slot.id)}
+      >
+        ✕
+      </button>
+
+      {suggestions !== null && (
+        <div className="suggestion-list">
+          {suggestions.length === 0 ? (
+            <span className="hint">Keine geeigneten Vorschläge gefunden.</span>
+          ) : (
+            suggestions.map(s => (
+              <button
+                type="button"
+                key={s.employee_id}
+                className="btn-secondary btn-small"
+                onClick={() => pickSuggestion(s.employee_id)}
+                title={`${s.current_load} Schichten in diesem Monat`}
+              >
+                {s.name}
+              </button>
+            ))
+          )}
+        </div>
       )}
     </div>
   )

@@ -1,3 +1,4 @@
+import calendar
 import hashlib
 import os
 import secrets
@@ -118,6 +119,29 @@ def hr_required(view):
         return view(*args, **kwargs)
 
     return wrapped
+
+
+def require_self_or_hr(employee_id):
+    """The one deliberate, narrow exception to "employee accounts are read-only".
+
+    Reporting your own sick/vacation days is a write, but only ever to your
+    own roster entry - so this checks "signed in AND (HR OR this employee's
+    own linked account)" instead of using the hr_required decorator above.
+    Returns a (response, status) pair to return early on failure, or None to
+    proceed; not a decorator, since the rule depends on the employee_id in the
+    URL, which a decorator can't see without extra machinery the rest of this
+    codebase doesn't otherwise use.
+    """
+    user = load_current_user()
+    if not user:
+        return jsonify({'message': 'Nicht angemeldet'}), 401
+    if is_hr(user):
+        g.user = user
+        return None
+    if user['role'] == EMPLOYEE_ROLE and user['employee_id'] == employee_id:
+        g.user = user
+        return None
+    return jsonify({'message': 'Dazu haben Sie keine Berechtigung'}), 403
 
 
 def count_users(cursor):
@@ -649,6 +673,165 @@ def delete_employee(employee_id):
     return jsonify({'message': 'Mitarbeiter gelöscht'}), 200
 
 
+# ---------- self-service absences (sick / vacation) ----------
+#
+# The one deliberate exception to "employee accounts are read-only" (see
+# require_self_or_hr above): an employee may report their own sick/vacation
+# days, but only for the current month. This immediately frees any shift they
+# currently hold that day - it starts behaving like any other unfilled slot -
+# while employee_absences also feeds load_employees_for_scheduling() so a
+# later regeneration doesn't schedule them straight back onto it.
+
+ABSENCE_TYPES = ('sick', 'vacation')
+
+
+def current_month_bounds():
+    """The server's own idea of "this month", as (first day, last day) ISO strings.
+
+    Never derived from client input - self-service reporting is only ever
+    allowed for the month the server's clock says it is right now.
+    """
+    today = date.today()
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    return today.replace(day=1).isoformat(), today.replace(day=days_in_month).isoformat()
+
+
+@app.route('/employees/<int:employee_id>/absences', methods=['GET'])
+def list_absences(employee_id):
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    try:
+        year = int(request.args['year']) if 'year' in request.args else date.today().year
+        month = int(request.args['month']) if 'month' in request.args else date.today().month
+    except (TypeError, ValueError):
+        return jsonify({'message': 'Jahr und Monat müssen Zahlen sein'}), 400
+    if not 1 <= month <= 12:
+        return jsonify({'message': 'Monat muss zwischen 1 und 12 liegen'}), 400
+
+    connection = get_db()
+    cursor = connection.cursor()
+    days_in_month = calendar.monthrange(year, month)[1]
+    cursor.execute(
+        'SELECT date, absence_type FROM employee_absences WHERE employee_id = ? AND date BETWEEN ? AND ? ORDER BY date',
+        (employee_id, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat()),
+    )
+    return jsonify([{'date': row['date'], 'type': row['absence_type']} for row in cursor.fetchall()])
+
+
+@app.route('/employees/<int:employee_id>/absences', methods=['POST'])
+def report_absence(employee_id):
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    data = request.get_json(silent=True) or {}
+    iso_date = data.get('date')
+    absence_type = data.get('type')
+
+    try:
+        date.fromisoformat(iso_date)
+    except (TypeError, ValueError):
+        return jsonify({'message': 'Ungültiges Datum'}), 400
+    if absence_type not in ABSENCE_TYPES:
+        return jsonify({'message': "Typ muss 'sick' oder 'vacation' sein"}), 400
+
+    if not is_hr(g.user):
+        month_start, month_end = current_month_bounds()
+        if not (month_start <= iso_date <= month_end):
+            return jsonify({'message': 'Krank- und Urlaubsmeldungen sind nur für den aktuellen Monat möglich'}), 400
+
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id, name FROM employees WHERE id = ?', (employee_id,))
+    employee = cursor.fetchone()
+    if not employee:
+        return jsonify({'message': 'Mitarbeiter nicht gefunden'}), 404
+
+    cursor.execute('''
+        INSERT INTO employee_absences (employee_id, date, absence_type) VALUES (?, ?, ?)
+        ON CONFLICT(employee_id, date) DO UPDATE SET absence_type = excluded.absence_type
+    ''', (employee_id, iso_date, absence_type))
+
+    # Free any shift they currently hold that day - "the shift becomes free in
+    # the general plan". absent_employee_id remembers who it was.
+    cursor.execute(
+        'SELECT id, schedule_id FROM shift_assignments WHERE date = ? AND employee_id = ?',
+        (iso_date, employee_id),
+    )
+    freed = cursor.fetchall()
+    for row in freed:
+        cursor.execute(
+            'UPDATE shift_assignments SET employee_id = NULL, absence_type = ?, absent_employee_id = ?, '
+            'manually_edited = 1 WHERE id = ?',
+            (absence_type, employee_id, row['id']),
+        )
+        refresh_unfilled_count(cursor, row['schedule_id'])
+
+    # A slot this same report already freed earlier (e.g. the type changed
+    # from vacation to sick) just needs its type updated, not re-freeing.
+    cursor.execute(
+        'UPDATE shift_assignments SET absence_type = ? WHERE date = ? AND absent_employee_id = ? AND employee_id IS NULL',
+        (absence_type, iso_date, employee_id),
+    )
+
+    connection.commit()
+    return jsonify({
+        'date': iso_date,
+        'type': absence_type,
+        'freed_assignment_ids': [row['id'] for row in freed],
+    }), 201
+
+
+@app.route('/employees/<int:employee_id>/absences/<iso_date>', methods=['DELETE'])
+def cancel_absence(employee_id, iso_date):
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    try:
+        date.fromisoformat(iso_date)
+    except ValueError:
+        return jsonify({'message': 'Ungültiges Datum'}), 400
+
+    if not is_hr(g.user):
+        month_start, month_end = current_month_bounds()
+        if not (month_start <= iso_date <= month_end):
+            return jsonify({'message': 'Krank- und Urlaubsmeldungen sind nur für den aktuellen Monat möglich'}), 400
+
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM employee_absences WHERE employee_id = ? AND date = ?', (employee_id, iso_date))
+    if not cursor.fetchone():
+        return jsonify({'message': 'Keine Abwesenheit für dieses Datum gefunden'}), 404
+
+    cursor.execute('DELETE FROM employee_absences WHERE employee_id = ? AND date = ?', (employee_id, iso_date))
+
+    cursor.execute(
+        'SELECT id, schedule_id, employee_id FROM shift_assignments WHERE date = ? AND absent_employee_id = ?',
+        (iso_date, employee_id),
+    )
+    for row in cursor.fetchall():
+        if row['employee_id'] is None:
+            # Nobody has covered it yet - give the shift back to them.
+            cursor.execute(
+                'UPDATE shift_assignments SET employee_id = ?, absence_type = NULL, absent_employee_id = NULL WHERE id = ?',
+                (employee_id, row['id']),
+            )
+            refresh_unfilled_count(cursor, row['schedule_id'])
+        else:
+            # Someone already covers this shift - leave their assignment
+            # alone, just stop pointing at an absence record that no longer exists.
+            cursor.execute(
+                'UPDATE shift_assignments SET absence_type = NULL, absent_employee_id = NULL WHERE id = ?',
+                (row['id'],),
+            )
+
+    connection.commit()
+    return jsonify({'message': 'Abwesenheit entfernt'}), 200
+
+
 # ---------- accounts ----------
 
 @app.route('/accounts', methods=['GET'])
@@ -830,6 +1013,11 @@ def load_employees_for_scheduling(cursor):
         unavailable_weekdays = {r['weekday'] for r in cursor.fetchall()}
         cursor.execute('SELECT date FROM employee_unavailable_dates WHERE employee_id = ?', (employee_id,))
         unavailable_dates = {r['date'] for r in cursor.fetchall()}
+        # Self-reported sick/vacation days count as unavailable too, so a
+        # regeneration doesn't schedule someone straight back onto a day they
+        # already freed.
+        cursor.execute('SELECT date FROM employee_absences WHERE employee_id = ?', (employee_id,))
+        unavailable_dates |= {r['date'] for r in cursor.fetchall()}
         cursor.execute('SELECT shift_type_id FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
         allowed = {r['shift_type_id'] for r in cursor.fetchall()}
         employees.append({
@@ -875,11 +1063,13 @@ def fetch_schedule(year, month):
 
     cursor.execute('''
         SELECT sa.id, sa.date, sa.shift_type_id, sa.slot_index, sa.employee_id, sa.manually_edited,
+               sa.absence_type, sa.absent_employee_id,
                st.name AS shift_type_name, st.color AS shift_type_color, st.start_time, st.end_time,
-               e.name AS employee_name
+               e.name AS employee_name, ae.name AS absent_employee_name
         FROM shift_assignments sa
         JOIN shift_types st ON st.id = sa.shift_type_id
         LEFT JOIN employees e ON e.id = sa.employee_id
+        LEFT JOIN employees ae ON ae.id = sa.absent_employee_id
         WHERE sa.schedule_id = ?
         ORDER BY sa.date, st.start_time, sa.slot_index
     ''', (schedule['id'],))
@@ -901,6 +1091,19 @@ def fetch_schedule(year, month):
     cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')
     active_employees = cursor.fetchall()
 
+    # This month's reported absences, including ones with no matching shift at
+    # all (e.g. vacation reported before the day had anyone assigned) - the
+    # assignments above only cover ones that *did* free a shift.
+    days_in_month = calendar.monthrange(year, month)[1]
+    cursor.execute('''
+        SELECT ea.employee_id, e.name AS employee_name, ea.date, ea.absence_type
+        FROM employee_absences ea
+        JOIN employees e ON e.id = ea.employee_id
+        WHERE ea.date BETWEEN ? AND ?
+        ORDER BY ea.date
+    ''', (date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat()))
+    absences = [dict(row) for row in cursor.fetchall()]
+
     return {
         'id': schedule['id'],
         'year': schedule['year'],
@@ -909,6 +1112,7 @@ def fetch_schedule(year, month):
         'unfilled_count': schedule['unfilled_count'],
         'generated_at': schedule['generated_at'],
         'assignments': assignments,
+        'absences': absences,
         'distribution': build_distribution(assignments, active_employees),
     }
 
@@ -1031,8 +1235,13 @@ def get_schedule(year, month):
     # the rest is never sent in the first place.
     linked_employee_id = g.user['employee_id']
     schedule['assignments'] = [
-        a for a in schedule['assignments'] if a['employee_id'] == linked_employee_id
+        a for a in schedule['assignments']
+        # Own shifts as usual, plus own shifts freed by a reported absence -
+        # employee_id is NULL on those, so they'd otherwise vanish from view
+        # instead of showing as "Krank"/"Urlaub".
+        if a['employee_id'] == linked_employee_id or a['absent_employee_id'] == linked_employee_id
     ]
+    schedule['absences'] = [a for a in schedule['absences'] if a['employee_id'] == linked_employee_id]
     schedule.pop('distribution', None)
     schedule['scope'] = 'own'
     schedule['unfilled_count'] = 0
@@ -1403,6 +1612,49 @@ def swap_assignments():
 
     connection.commit()
     return jsonify({'message': 'Schichten getauscht', 'warnings': warnings})
+
+
+@app.route('/assignments/<int:assignment_id>/replacement-suggestions', methods=['GET'])
+@hr_required
+def replacement_suggestions(assignment_id):
+    """Who could reasonably cover this slot - built for a shift an absence just
+    freed, but works for any slot, e.g. one added via add_slot.
+
+    Reuses constraint_warnings() rather than a second, parallel eligibility
+    check: a candidate with zero warnings is exactly "eligible under every
+    constraint that also governs manual reassignment", and it stays correct
+    automatically as those constraints evolve.
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM shift_assignments WHERE id = ?', (assignment_id,))
+    assignment = cursor.fetchone()
+    if not assignment:
+        return jsonify({'message': 'Zuweisung nicht gefunden'}), 404
+
+    cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')
+    candidates = []
+    # employee_id is NULL on a freed slot, so the absent person is only
+    # identifiable via absent_employee_id - excluding just employee_id would
+    # (wrongly) suggest them as their own replacement.
+    excluded = {assignment['employee_id'], assignment['absent_employee_id']}
+    for row in cursor.fetchall():
+        if row['id'] in excluded:
+            continue
+        warnings = constraint_warnings(
+            cursor, row['id'], assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
+            exclude_assignment_id=assignment_id,
+        )
+        if warnings:
+            continue
+        cursor.execute(
+            'SELECT COUNT(*) AS n FROM shift_assignments WHERE schedule_id = ? AND employee_id = ?',
+            (assignment['schedule_id'], row['id']),
+        )
+        candidates.append({'employee_id': row['id'], 'name': row['name'], 'current_load': cursor.fetchone()['n']})
+
+    candidates.sort(key=lambda c: (c['current_load'], c['name']))
+    return jsonify(candidates)
 
 
 @app.route('/')

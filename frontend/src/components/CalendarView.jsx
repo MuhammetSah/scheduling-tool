@@ -1,4 +1,13 @@
-import { WEEKDAY_LABELS } from '../api'
+import { ABSENCE_LABELS, WEEKDAY_LABELS } from '../api'
+
+function personLabel(slot) {
+  if (slot.employee_id !== null) return slot.employee_name
+  if (slot.absence_type) {
+    const label = ABSENCE_LABELS[slot.absence_type] || slot.absence_type
+    return slot.absent_employee_name ? `${label} (war: ${slot.absent_employee_name})` : label
+  }
+  return 'unbesetzt'
+}
 
 /**
  * The month as a wall calendar: one column per weekday, one row per week.
@@ -104,10 +113,15 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                             className={[
                               'calendar-person',
                               slot.employee_id === null ? 'calendar-person-unfilled' : '',
-                              highlightEmployeeId && slot.employee_id === highlightEmployeeId ? 'calendar-person-me' : '',
+                              slot.absence_type ? 'calendar-person-absence' : '',
+                              highlightEmployeeId && (slot.employee_id === highlightEmployeeId || slot.absent_employee_id === highlightEmployeeId)
+                                ? 'calendar-person-me' : '',
                             ].join(' ').trim()}
+                            title={slot.absence_type && slot.absent_employee_name
+                              ? `${slot.absent_employee_name} ist ${ABSENCE_LABELS[slot.absence_type] || slot.absence_type} - Vertretung gesucht`
+                              : undefined}
                           >
-                            {slot.employee_name || 'unbesetzt'}
+                            {personLabel(slot)}
                           </li>
                         ))}
                     </ul>
