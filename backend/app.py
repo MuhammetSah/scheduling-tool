@@ -7,6 +7,7 @@ from functools import wraps
 
 from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
@@ -22,9 +23,10 @@ if os.environ.get('FLASK_ENV') == 'production':
     app.config['SESSION_COOKIE_SECURE'] = True
 
 # supports_credentials is required for the session cookie to survive the
-# cross-origin hop from the Vite dev server to this API. X-Lang is not a
-# "simple" header, so without allow_headers a cross-origin request carrying
-# it would fail CORS preflight before ever reaching a route.
+# cross-origin hop from the Vite dev server to this API. X-Lang and
+# Authorization are not "simple" headers, so without allow_headers a
+# cross-origin request carrying either would fail CORS preflight before ever
+# reaching a route.
 CORS(
     app,
     supports_credentials=True,
@@ -35,23 +37,10 @@ CORS(
         ).split(',')
         if origin.strip()
     ],
-    allow_headers=['Content-Type', 'X-Lang'],
+    allow_headers=['Content-Type', 'X-Lang', 'Authorization'],
 )
 
 init_db()
-
-if os.environ.get('RESET_FIRST_ACCOUNT') == 'yes-really':
-    # One-time cleanup, triggered only by deliberately setting this env var:
-    # clears every row from users so /register treats the deployment as fresh
-    # again. Added to recover from a test account created during initial
-    # deployment whose password was lost, not a permanent feature - both this
-    # block and the env var are removed again immediately after use.
-    _reset_connection = _open_db_connection()
-    _reset_cursor = _reset_connection.cursor()
-    _reset_cursor.execute('DELETE FROM users')
-    _reset_connection.commit()
-    _reset_connection.close()
-    print('RESET_FIRST_ACCOUNT: users table cleared', flush=True)
 
 
 @app.before_request
@@ -93,9 +82,48 @@ def close_db(exception=None):
 HR_ROLE = 'hr'
 EMPLOYEE_ROLE = 'employee'
 
+# The session cookie alone isn't enough: it's SameSite=None (see FLASK_ENV
+# above), which is *sent* fine cross-site by most browsers, but Safari/WebKit
+# (including Chrome on iOS - Apple requires every iOS browser to use WebKit)
+# applies Intelligent Tracking Prevention to it anyway and drops it, since
+# from the browser's perspective the frontend and this API are two unrelated
+# sites. Confirmed live: the same login worked over and over from a desktop
+# Chromium browser and failed every time from an iPhone.
+#
+# The fix is a second, cookie-independent channel: a signed, stateless bearer
+# token (itsdangerous - already a Flask dependency, no new package) returned
+# in the login/register body and sent back as `Authorization: Bearer <token>`.
+# That header isn't a cookie, so ITP has no opinion about it. Stateless means
+# there is nothing to look up per request, but also nothing to revoke - the
+# tradeoff is a fixed expiry rather than a server-side logout; acceptable for
+# this app's threat model. The cookie path is left in place unchanged (it
+# still works for same-site/local-dev use), so current_user_id() below tries
+# it first and only falls back to the header if there's no session.
+AUTH_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 3600  # 30 days
+_auth_serializer = URLSafeTimedSerializer(app.secret_key, salt='auth-token')
+
+
+def issue_auth_token(user_id):
+    return _auth_serializer.dumps({'user_id': user_id})
+
+
+def verify_auth_token(token):
+    try:
+        data = _auth_serializer.loads(token, max_age=AUTH_TOKEN_MAX_AGE_SECONDS)
+    except (BadSignature, SignatureExpired):
+        return None
+    return data.get('user_id')
+
 
 def current_user_id():
-    return session.get('user_id')
+    user_id = session.get('user_id')
+    if user_id:
+        return user_id
+
+    auth_header = request.headers.get('Authorization', '')
+    if auth_header.startswith('Bearer '):
+        return verify_auth_token(auth_header[len('Bearer '):])
+    return None
 
 
 def load_current_user():
@@ -354,8 +382,10 @@ def register():
 
     # Signing in the very first user saves them an immediate second step; HR
     # adding a colleague must stay logged in as themselves.
+    auth_token = None
     if first_account:
         session['user_id'] = user_id
+        auth_token = issue_auth_token(user_id)
 
     return jsonify({
         'id': user_id,
@@ -364,6 +394,7 @@ def register():
         'employee_id': employee_id,
         'invitation_email': recipient_email,
         'invitation_sent': invitation_sent,
+        'auth_token': auth_token,
     }), 201
 
 
@@ -396,6 +427,7 @@ def login():
         'username': user['username'],
         'role': user['role'],
         'employee_id': user['employee_id'],
+        'auth_token': issue_auth_token(user['id']),
     }), 200
 
 

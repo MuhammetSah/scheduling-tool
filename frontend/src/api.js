@@ -1,5 +1,6 @@
 import { getStoredLang, DEFAULT_LANG } from './i18n/storage'
 import { TRANSLATIONS } from './i18n/translations'
+import { getAuthToken, setAuthToken, clearAuthToken } from './auth'
 
 // .replace() rather than a bare passthrough: a VITE_API_URL with a trailing
 // slash (an easy typo - e.g. pasted straight from a browser's address bar)
@@ -36,6 +37,14 @@ async function request(path, options = {}) {
     throw new Error(apiMessage('missingApiUrl'))
   }
 
+  // Belt-and-suspenders alongside the session cookie below: Safari/WebKit's
+  // Intelligent Tracking Prevention drops cross-site cookies even when
+  // they're correctly configured, since the frontend and this API are on two
+  // different domains. A bearer token isn't a cookie, so ITP has no opinion
+  // about it - see backend/app.py's AUTH_TOKEN_MAX_AGE_SECONDS comment for
+  // the full story. auth.js is the only other file that touches this token.
+  const token = getAuthToken()
+
   let response
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -46,8 +55,12 @@ async function request(path, options = {}) {
         // LanguageContext writes to the same key on every change, so this is
         // always the language the user currently has selected.
         'X-Lang': getStoredLang(),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       // Sends the session cookie; without it every guarded route answers 401.
+      // Still worth sending even though it isn't the only auth channel
+      // anymore - it's what makes same-site/local-dev usage work without a
+      // token at all.
       credentials: 'include',
       ...options,
     })
@@ -72,6 +85,10 @@ async function request(path, options = {}) {
   if (!response.ok) {
     const message = data?.message || `Request failed (${response.status})`
     if (response.status === 401) {
+      // Whatever token we were sending didn't work (missing, expired, or the
+      // account behind it is gone) - drop it rather than keep resending a
+      // dead credential on every request until the next login.
+      clearAuthToken()
       const error = new UnauthorizedError(message)
       error.data = data
       throw error
@@ -84,6 +101,12 @@ async function request(path, options = {}) {
     // a misconfigured VITE_API_URL landing back on this frontend's own
     // static host (see the SPA-rewrite note above), not a real 2xx from Flask.
     throw new Error(apiMessage('unexpectedResponse'))
+  }
+
+  // Only /login and /register's first-account path ever set this, but
+  // checking here - rather than in every caller - means neither can forget to.
+  if (data?.auth_token) {
+    setAuthToken(data.auth_token)
   }
 
   return data
