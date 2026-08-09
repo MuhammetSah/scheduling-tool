@@ -9,6 +9,7 @@ import Accounts from './pages/Accounts'
 import SetPassword from './pages/SetPassword'
 import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
+import { clearAuthToken } from './auth'
 import { useTranslation } from './i18n/context'
 import './App.css'
 
@@ -105,6 +106,10 @@ function App() {
     } catch {
       // Clearing local state matters more than the response here.
     }
+    // The server can't revoke the bearer token itself (see app.py's
+    // AUTH_TOKEN_MAX_AGE_SECONDS comment) - discarding our own copy is what
+    // actually ends the session from this device.
+    clearAuthToken()
     setUser(null)
     setFlash({ type: 'success', text: t('nav.loggedOutFlash') })
   }
