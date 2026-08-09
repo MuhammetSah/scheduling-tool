@@ -40,6 +40,19 @@ CORS(
 
 init_db()
 
+if os.environ.get('RESET_FIRST_ACCOUNT') == 'yes-really':
+    # One-time cleanup, triggered only by deliberately setting this env var:
+    # clears every row from users so /register treats the deployment as fresh
+    # again. Added to recover from a test account created during initial
+    # deployment whose password was lost, not a permanent feature - both this
+    # block and the env var are removed again immediately after use.
+    _reset_connection = _open_db_connection()
+    _reset_cursor = _reset_connection.cursor()
+    _reset_cursor.execute('DELETE FROM users')
+    _reset_connection.commit()
+    _reset_connection.close()
+    print('RESET_FIRST_ACCOUNT: users table cleared', flush=True)
+
 
 @app.before_request
 def resolve_request_lang():
