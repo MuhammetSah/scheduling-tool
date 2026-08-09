@@ -1,7 +1,16 @@
 import { getStoredLang, DEFAULT_LANG } from './i18n/storage'
 import { TRANSLATIONS } from './i18n/translations'
 
-const API_URL = import.meta.env.VITE_API_URL
+// .replace() rather than a bare passthrough: a VITE_API_URL with a trailing
+// slash (an easy typo - e.g. pasted straight from a browser's address bar)
+// combined with every call site's leading-slash path (request('/me') below)
+// produced a double slash, e.g. https://host//me. Browsers refuse to follow
+// a redirect on a CORS preflight, and Werkzeug's routing issues exactly that
+// redirect to merge the doubled slash - so every single request failed at
+// the network level, indistinguishably from a CORS/host misconfiguration.
+// backend/mailer.py's build_invitation() already guards APP_BASE_URL the
+// same way; this mirrors it on the frontend side.
+const API_URL = import.meta.env.VITE_API_URL?.replace(/\/+$/, '')
 
 /** Thrown when the API rejects a request because nobody is signed in. */
 export class UnauthorizedError extends Error {}
