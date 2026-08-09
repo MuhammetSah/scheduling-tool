@@ -1,0 +1,36 @@
+name: Keep backend awake
+
+# Render's free plan spins the API down after ~15 minutes without a request,
+# so the next real visitor pays a ~60s cold start (see README > Deployment).
+# This pings it every 14 minutes to keep it warm during the hours people
+# actually use the tool.
+#
+# Only covers 05:00-20:00 UTC (roughly 07:00-22:00 CEST / 06:00-21:00 GMT),
+# not around the clock: this repo is private, and GitHub Actions on a free
+# private repo only includes 2,000 minutes/month, billed in whole minutes
+# per run regardless of how short the job is. A 24/7 cadence tight enough to
+# reliably beat the 15-minute sleep window would blow well past that budget;
+# this schedule stays safely under it (~1,950 runs/month) while covering
+# ordinary working hours. Outside this window (and right at its edges), the
+# usual cold start can still happen - that's an accepted trade-off, not a
+# bug. Two ways to get real 24/7 coverage instead: make the repo public
+# (Actions minutes are then unmetered), or move the backend off Render's
+# free plan.
+#
+# IMPORTANT: GitHub only evaluates a workflow's `schedule` trigger from the
+# copy of this file on the repository's default branch - it has no effect
+# on a feature branch until merged.
+#
+# Manual runs (workflow_dispatch) work as a one-off nudge regardless of branch.
+
+on:
+  schedule:
+    - cron: '*/14 5-19 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the API
+        run: curl -fsS -m 30 https://schichtplan-api.onrender.com/ || true
