@@ -197,7 +197,13 @@ Alle neuen Texte kommen in `frontend/src/i18n/translations.js` und `backend/i18n
 - **Validierung** (Etappe 0): ein globaler Flask-Errorhandler gibt für jede unbehandelte Exception JSON zurück statt Flasks HTML-500. Heute erzeugt das im Frontend die irreführende Meldung „unerwartete Antwort".
 - **Neue Validierungen:** überlappende Bedarfsbänder, Bedarf außerhalb der Öffnungszeit, Fenster mit `end <= start` ohne Mitternachtsabsicht, Zuweisungszeiten außerhalb der Öffnungszeit → jeweils 400 mit übersetzter Meldung.
 - **Planer:** die bestehende Notbremse (300.000 Knoten / 8 s) bleibt. Stufe 1 bekommt eine eigene, deutlich kleinere Schranke, damit sie den Suchlauf nicht auffrisst.
-- **Migration:** jede Alembic-Revision braucht ein funktionierendes `downgrade()`.
+- **Migration:** jede Revision braucht ein funktionierendes Rückwärts-Skript.
+
+### 8.1 Zwei Werkzeugentscheidungen
+
+**Migrationen: eigener Runner statt Alembic.** Alembic zieht SQLAlchemy als Abhängigkeit nach und erwartet eine Engine bzw. eine Datenbank-URL. Dieses Projekt spricht die Datenbank direkt über `sqlite3` und `psycopg2` an und hat in `db.py` bereits eine eigene Dialektübersetzung (`?` → `%s`, `AUTOINCREMENT` → `SERIAL`, `RETURNING id`). Alembic würde gegen diese Schicht arbeiten, und ohne ORM-Modelle bleibt von Alembic ohnehin kaum mehr übrig als eine Versionstabelle plus `op.execute`. Ein eigener Runner (~120 Zeilen, nummerierte SQL-Dateien, `schema_migrations`-Tabelle) nutzt die vorhandene Schicht, kommt ohne neue Abhängigkeit aus und passt zur Linie des Projekts, das i18n aus demselben Grund selbst gebaut hat statt Flask-Babel zu nehmen.
+
+**Login-Drosselung: datenbankgestützt statt Flask-Limiter.** Flask-Limiter speichert Zähler standardmäßig im Arbeitsspeicher — das überlebt weder einen Neustart noch mehrere Gunicorn-Worker, und für persistente Zähler bräuchte es Redis. Eine kleine `login_attempts`-Tabelle löst beides ohne neue Infrastruktur und liefert nebenbei den ersten Baustein für das Audit-Log aus Etappe 5.
 
 ## 9. Tests
 
@@ -221,8 +227,8 @@ Jede Etappe bekommt ihren **eigenen Umsetzungsplan** und wird abgeschlossen (gr�
 1. Eigenes Git-Repository mit `.gitignore` und erstem Commit
 2. Abhängigkeiten pinnen (`flask==…` statt `flask`), Python-Version festlegen
 3. CI: GitHub Actions — pytest, eslint, `npm run build` bei jedem Push
-4. Alembic einführen, `init_db()` durch Migrationen ablösen
-5. `SECRET_KEY` in Produktion erzwingen (Abbruch statt Fallback); Rate-Limit auf `/login` und `/invitations/<token>`; Security-Header
+4. Migrationssystem einführen, `init_db()` ablösen
+5. `SECRET_KEY` in Produktion erzwingen (Abbruch statt Fallback); Login-Drosselung auf `/login` und `/invitations/<token>`; Security-Header
 6. Globaler JSON-Errorhandler + strukturiertes Logging
 7. Zeitzone `Europe/Berlin` für „aktueller Monat" statt Serverzeit
 8. Indizes und UNIQUE-Constraints
