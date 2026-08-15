@@ -1,4 +1,5 @@
-# Only needed to run benchmark.py, which compares the scheduler against an
-# exact CP-SAT solve. The app itself does not need this.
+# Werkzeuge fuer Tests und den Algorithmus-Benchmark. Die Anwendung selbst
+# braucht nichts hiervon.
 -r requirements.txt
+pytest==9.1.1
 ortools
