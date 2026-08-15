@@ -11,12 +11,13 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
+import security
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'schichtplan-local-dev')
+app.secret_key = security.resolve_secret_key()
 
 if os.environ.get('FLASK_ENV') == 'production':
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
@@ -39,6 +40,8 @@ CORS(
     ],
     allow_headers=['Content-Type', 'X-Lang', 'Authorization'],
 )
+
+security.register_security_headers(app)
 
 init_db()
 
