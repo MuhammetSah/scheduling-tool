@@ -19,9 +19,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv('SCHICHTPLAN_DB_PATH', str(tmp_path / 'test.db'))
     monkeypatch.delenv('DATABASE_URL', raising=False)
     monkeypatch.delenv('FLASK_ENV', raising=False)
+    monkeypatch.delenv('SMTP_HOST', raising=False)
     monkeypatch.setenv('SECRET_KEY', 'test-secret-nur-fuer-tests')
 
-    for module in ('app', 'db'):
+    for module in ('app', 'db', 'migrations'):
         sys.modules.pop(module, None)
 
     import app as app_module
