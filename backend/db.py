@@ -31,8 +31,6 @@ def use_postgres():
 # survive a restart and a schedule that vanishes overnight is worse than useless.
 # The queries are written once, in SQLite's dialect, and translated below.
 
-AUTO_ID = 'SERIAL PRIMARY KEY' if use_postgres() else 'INTEGER PRIMARY KEY AUTOINCREMENT'
-
 _INSERT_WITHOUT_RETURNING = re.compile(r'^\s*INSERT\b(?!.*\bRETURNING\b)', re.IGNORECASE | re.DOTALL)
 
 

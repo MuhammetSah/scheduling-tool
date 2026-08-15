@@ -17,6 +17,15 @@ oder
 SQL-Dateien duerfen den Platzhalter {auto_id} verwenden; er wird je nach
 Datenbank durch SERIAL PRIMARY KEY oder INTEGER PRIMARY KEY AUTOINCREMENT
 ersetzt.
+
+Zwei Faellen der Dialektschicht in db.py, die beim Schreiben einer
+.sql-Migration leicht uebersehen werden:
+  - _PostgresCursor.execute() interpoliert mit %, auch ohne uebergebene
+    Parameter - ein woertliches % in einer .sql-Migration (z.B. in einem
+    LIKE-Muster) schlaegt auf Postgres fehl.
+  - Jedes blanke INSERT ohne eigenes RETURNING bekommt automatisch
+    RETURNING id angehaengt; das schlaegt fehl, wenn die Zieltabelle keine
+    Spalte id hat.
 """
 
 import importlib.util
@@ -36,6 +45,32 @@ def _placeholders():
     }
 
 
+def _connection():
+    """Oeffnet eine Verbindung mit echter Transaktionskontrolle je Migration.
+
+    db.get_db_connection() liefert unter SQLite eine Verbindung mit
+    isolation_level='' (SQLite-Default): Python haengt ein implizites BEGIN
+    nur vor DML an (INSERT/UPDATE/DELETE), nicht vor DDL - CREATE TABLE und
+    ALTER TABLE committen dort sofort fuer sich allein. Ein
+    connection.rollback() nach einer fehlgeschlagenen Migration haette dann
+    nichts mehr zum Zuruecknehmen. isolation_level=None schaltet auf
+    Autocommit pro Anweisung um; zusammen mit einem expliziten BEGIN vor
+    jeder Migration (siehe _begin()) stehen DDL und DML dann unter derselben
+    Transaktion. Auf Postgres ist DDL ueber psycopg2 bereits transaktional -
+    dort bleibt die Verbindung unveraendert.
+    """
+    connection = get_db_connection()
+    if not use_postgres():
+        connection.isolation_level = None
+    return connection
+
+
+def _begin(cursor):
+    """Startet die Transaktion einer einzelnen Migration (siehe _connection())."""
+    if not use_postgres():
+        cursor.execute('BEGIN')
+
+
 def _ensure_version_table(cursor):
     auto_id = _placeholders()['auto_id']
     cursor.execute(f'''
@@ -53,8 +88,13 @@ def _statements(path):
     Bewusst simpel: Aufteilung am Semikolon. Migrationen dieses Projekts
     enthalten keine Semikolons in Zeichenketten oder Prozedurkoerpern. Falls
     das je noetig wird, gehoert die Migration in eine .py-Datei.
+
+    {auto_id} wird gezielt ersetzt statt ueber str.format() auf die ganze
+    Datei - ein Migrationstext mit einer woertlichen { oder } (Postgres-Array-
+    Default, JSON-Literal, CHECK mit Wiederholungsquantor) wuerde format()
+    sonst mit KeyError/ValueError zum Absturz bringen.
     """
-    text = path.read_text(encoding='utf-8').format(**_placeholders())
+    text = path.read_text(encoding='utf-8').replace('{auto_id}', _placeholders()['auto_id'])
     return [statement.strip() for statement in text.split(';') if statement.strip()]
 
 
@@ -66,14 +106,22 @@ def _python_module(path):
 
 
 def available_versions():
-    """Alle Migrationen in Anwendungsreihenfolge."""
+    """Alle Migrationen in Anwendungsreihenfolge.
+
+    Eine Datei mit .sql/.py-Endung, die nicht dem Namensschema entspricht,
+    wird nicht stillschweigend uebersprungen: eine so benannte Migration
+    (Tippfehler in der Nummer, falscher Trenner) wuerde sonst committet,
+    reviewt, deployt und nie ausgefuehrt - genau die stille Schemadrift,
+    die dieser Runner verhindern soll.
+    """
     versions = set()
     for path in MIGRATIONS_DIR.iterdir():
         if path.suffix not in ('.sql', '.py') or path.name.startswith('__'):
             continue
         stem = path.stem.removesuffix('.down')
-        if _VERSION_PATTERN.match(stem):
-            versions.add(stem)
+        if not _VERSION_PATTERN.match(stem):
+            raise ValueError(f'Migrationsdatei entspricht nicht dem Namensschema NNNN_name: {path.name}')
+        versions.add(stem)
     return sorted(versions)
 
 
@@ -108,11 +156,12 @@ def applied_versions():
 def apply_pending():
     """Wendet alle noch nicht angewandten Migrationen an, aelteste zuerst.
 
-    Jede Migration bekommt ihre eigene Transaktion: schlaegt die dritte fehl,
-    bleiben die ersten beiden angewandt und protokolliert, statt dass alles
-    in einem unklaren Zwischenzustand endet.
+    Jede Migration bekommt ihre eigene Transaktion (siehe _connection() und
+    _begin()): schlaegt die dritte fehl, bleiben die ersten beiden angewandt
+    und protokolliert, und von der dritten selbst bleibt nichts zurueck -
+    statt dass alles in einem unklaren Zwischenzustand endet.
     """
-    connection = get_db_connection()
+    connection = _connection()
     newly_applied = []
     try:
         cursor = connection.cursor()
@@ -125,8 +174,15 @@ def apply_pending():
         for version in available_versions():
             if version in already:
                 continue
+            _begin(cursor)
             try:
-                _run(cursor, version, 'up')
+                if not _run(cursor, version, 'up'):
+                    # available_versions() findet eine Version auch anhand
+                    # einer .down.sql ohne zugehoeriges Up-Skript. Ohne diese
+                    # Pruefung wuerde eine solche Datei unten als
+                    # "angewandt" protokolliert, obwohl nie etwas lief - und
+                    # jeder spaetere Lauf wuerde sie fuer immer ueberspringen.
+                    raise RuntimeError(f'Migration {version} hat kein Up-Skript')
                 cursor.execute('INSERT INTO schema_migrations (version) VALUES (?)', (version,))
                 connection.commit()
             except Exception:
@@ -140,7 +196,7 @@ def apply_pending():
 
 def rollback_last():
     """Nimmt die zuletzt angewandte Migration zurueck. Gibt deren Namen zurueck."""
-    connection = get_db_connection()
+    connection = _connection()
     try:
         cursor = connection.cursor()
         _ensure_version_table(cursor)
@@ -150,6 +206,7 @@ def rollback_last():
             return None
 
         version = rows[0]['version']
+        _begin(cursor)
         try:
             if not _run(cursor, version, 'down'):
                 raise RuntimeError(f'Migration {version} hat keine Ruecknahme')
