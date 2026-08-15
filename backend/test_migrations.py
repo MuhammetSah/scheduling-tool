@@ -116,3 +116,55 @@ def test_ruecknahme_ohne_migrationen_gibt_none(fresh_db):
     migrations, _ = fresh_db
 
     assert migrations.rollback_last() is None
+
+
+def indizes(db_file):
+    connection = sqlite3.connect(db_file)
+    try:
+        rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()
+    finally:
+        connection.close()
+    return {row[0] for row in rows}
+
+
+def test_indizes_werden_angelegt(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    assert {'ix_assignments_date_employee', 'ix_assignments_schedule',
+            'ix_absences_date', 'ux_assignment_slot'} <= indizes(db_file)
+
+
+def test_derselbe_platz_kann_nicht_doppelt_belegt_werden(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 3, 'generated')")
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '06:00', '14:00')")
+        connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index) '
+            'VALUES (1, ?, 1, 0)', ('2026-03-02',))
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index) '
+                'VALUES (1, ?, 1, 0)', ('2026-03-02',))
+    finally:
+        connection.close()
+
+
+def test_indexmigration_laesst_sich_zurueckrollen(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    # Nicht auf "die letzte Migration" verlassen: spaetere Aufgaben haengen
+    # weitere Migrationen hinten an, und dieser Test soll davon unberuehrt
+    # bleiben. Stattdessen zurueckrollen, bis 0002 weg ist.
+    while '0002_indexes' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    assert 'ix_assignments_date_employee' not in indizes(db_file)
+    assert '0002_indexes' not in migrations.applied_versions()
