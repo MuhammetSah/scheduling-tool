@@ -109,8 +109,8 @@ def _statements(path):
     woertliches ; innerhalb eines -- Kommentars trennt die Datei genauso wie
     jedes andere - das dabei entstehende Fragment enthaelt dann nur noch
     Kommentartext und wird uebersprungen statt an cursor.execute() zu gehen
-    (siehe _has_sql()): auf Postgres waere das Fragment lexikalisch leer und
-    ein Fehler.
+    (siehe _has_sql()): ein leeres Fragment an die Datenbank zu schicken waere
+    schlicht sinnlos, unabhaengig vom Dialekt.
 
     {auto_id} wird gezielt ersetzt statt ueber str.format() auf die ganze
     Datei - ein Migrationstext mit einer woertlichen { oder } (Postgres-Array-

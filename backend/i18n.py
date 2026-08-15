@@ -81,6 +81,10 @@ TRANSLATIONS = {
         'de': 'Benutzername oder Passwort ist falsch',
         'en': 'Incorrect username or password',
     },
+    'too_many_login_attempts': {
+        'de': 'Zu viele fehlgeschlagene Anmeldeversuche. Bitte in {minutes} Minuten erneut versuchen.',
+        'en': 'Too many failed sign-in attempts. Please try again in {minutes} minutes.',
+    },
     'logged_out': {
         'de': 'Abgemeldet',
         'en': 'Signed out',

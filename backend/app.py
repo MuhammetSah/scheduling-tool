@@ -409,6 +409,11 @@ def login():
 
     connection = get_db()
     cursor = connection.cursor()
+
+    if username and security.is_locked_out(cursor, username):
+        return jsonify({'message': t(g.lang, 'too_many_login_attempts',
+                                     minutes=security.ATTEMPT_WINDOW_MINUTES)}), 429
+
     cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
     user = cursor.fetchone()
 
@@ -421,7 +426,13 @@ def login():
     # Same message either way, so the response cannot be used to find out which
     # usernames exist.
     if not user or not check_password_hash(user['hash'], password):
+        if username:
+            security.record_attempt(cursor, username, request.remote_addr, succeeded=False)
+            connection.commit()
         return jsonify({'message': t(g.lang, 'login_failed')}), 401
+
+    security.record_attempt(cursor, username, request.remote_addr, succeeded=True)
+    connection.commit()
 
     session.clear()
     session['user_id'] = user['id']
@@ -463,8 +474,19 @@ def redeem_invitation(token):
 
     connection = get_db()
     cursor = connection.cursor()
+
+    # Ein Treffer hier uebernimmt ein Konto, also wird auch das Einloesen
+    # gedrosselt. Gezaehlt wird pro Token, nicht pro Konto - welches Konto
+    # gemeint ist, weiss man ohne gueltigen Token gar nicht.
+    attempt_key = f'invitation:{hash_token(token)}'
+    if security.is_locked_out(cursor, attempt_key):
+        return jsonify({'message': t(g.lang, 'too_many_login_attempts',
+                                     minutes=security.ATTEMPT_WINDOW_MINUTES)}), 429
+
     invitation = load_invitation(cursor, token)
     if not invitation:
+        security.record_attempt(cursor, attempt_key, request.remote_addr, succeeded=False)
+        connection.commit()
         return jsonify({'message': t(g.lang, 'invitation_invalid')}), 404
 
     cursor.execute('UPDATE users SET hash = ? WHERE id = ?',

@@ -6,6 +6,7 @@ jede Antwort tragen soll.
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 
 # Nur fuer lokale Entwicklung. Der Wert steht im oeffentlichen Quelltext und
 # ist damit kein Geheimnis - in Produktion wird er deshalb verweigert.
@@ -59,3 +60,47 @@ def register_security_headers(app):
             response.headers.setdefault(
                 'Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
         return response
+
+
+# Zehn Versuche in einer Viertelstunde: hoch genug, dass ein vertippter Mensch
+# nie dagegen laeuft, niedrig genug, dass Raten unbrauchbar langsam wird.
+MAX_FAILED_ATTEMPTS = 10
+ATTEMPT_WINDOW_MINUTES = 15
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+
+def _window_start_iso():
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=ATTEMPT_WINDOW_MINUTES)
+    return cutoff.isoformat(timespec='seconds')
+
+
+def is_locked_out(cursor, identifier):
+    """Sind fuer diesen Benutzernamen zu viele Fehlversuche im Zeitfenster?
+
+    Die Sperre gilt pro Benutzername, nicht pro IP: eine IP-Sperre trifft bei
+    einem Buero hinter einem gemeinsamen Anschluss alle Kolleginnen und
+    Kollegen mit, und ein Angreifer mit wechselnden Adressen umgeht sie
+    ohnehin. Sie blockiert waehrend der Sperre auch das richtige Passwort -
+    sonst waere sie als Bremse wirkungslos.
+    """
+    cursor.execute(
+        'SELECT COUNT(*) AS n FROM login_attempts '
+        'WHERE identifier = ? AND succeeded = 0 AND attempted_at >= ?',
+        (identifier, _window_start_iso()),
+    )
+    return cursor.fetchone()['n'] >= MAX_FAILED_ATTEMPTS
+
+
+def record_attempt(cursor, identifier, ip, succeeded):
+    """Protokolliert einen Versuch. Ein Erfolg loescht die Fehlversuche davor."""
+    if succeeded:
+        cursor.execute('DELETE FROM login_attempts WHERE identifier = ?', (identifier,))
+    cursor.execute(
+        'INSERT INTO login_attempts (identifier, ip, succeeded, attempted_at) VALUES (?, ?, ?, ?)',
+        (identifier, ip or 'unbekannt', 1 if succeeded else 0, _now_iso()),
+    )
+    # Gelegenheitsaufraeumen: alles ausserhalb des Zeitfensters ist wertlos.
+    cursor.execute('DELETE FROM login_attempts WHERE attempted_at < ?', (_window_start_iso(),))
