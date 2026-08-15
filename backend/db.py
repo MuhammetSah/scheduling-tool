@@ -9,7 +9,9 @@ except ImportError:  # only needed for a Postgres deployment
     psycopg2 = None
     RealDictCursor = None
 
-DB_PATH = 'schichtplan.db'
+# Ueber die Umgebung setzbar, damit Tests gegen eine eigene Wegwerf-Datei
+# laufen statt gegen die Entwicklungsdatenbank.
+DB_PATH = os.environ.get('SCHICHTPLAN_DB_PATH', 'schichtplan.db')
 
 # Weekday convention throughout this project: 0=Monday ... 6=Sunday (Python's date.weekday()).
 # Language-keyed so the same index works for both the UI (frontend has its own
