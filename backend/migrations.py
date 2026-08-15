@@ -26,6 +26,13 @@ Zwei Faellen der Dialektschicht in db.py, die beim Schreiben einer
   - Jedes blanke INSERT ohne eigenes RETURNING bekommt automatisch
     RETURNING id angehaengt; das schlaegt fehl, wenn die Zieltabelle keine
     Spalte id hat.
+
+Das Aufteilen in _statements() kennt keine Kommentare oder Zeichenketten: ein
+woertliches ; in einem -- Kommentar trennt die Datei genauso wie jedes andere.
+Fragmente, die nach Entfernen der -- Kommentare nur noch aus Leerraum
+bestehen, werden stillschweigend uebersprungen statt an cursor.execute()
+uebergeben - alles andere (Bloeckkommentare /* */, ; in Zeichenketten) bleibt
+unabsichtlich falsch aufgeteilt; siehe _statements().
 """
 
 import importlib.util
@@ -82,12 +89,28 @@ def _ensure_version_table(cursor):
     ''')
 
 
+def _has_sql(fragment):
+    """True, wenn nach Entfernen der -- Kommentare noch Code uebrig bleibt.
+
+    Nur zur Erkennung leerer Fragmente gedacht (siehe _statements()) - kein
+    SQL-Parser: Bloeckkommentare (/* */) und ; in Zeichenketten bleiben
+    absichtlich unbehandelt, siehe Modul-Docstring.
+    """
+    ohne_kommentare = re.sub(r'--[^\n]*', '', fragment)
+    return bool(ohne_kommentare.strip())
+
+
 def _statements(path):
     """SQL-Anweisungen einer Datei.
 
     Bewusst simpel: Aufteilung am Semikolon. Migrationen dieses Projekts
     enthalten keine Semikolons in Zeichenketten oder Prozedurkoerpern. Falls
-    das je noetig wird, gehoert die Migration in eine .py-Datei.
+    das je noetig wird, gehoert die Migration in eine .py-Datei. Ein
+    woertliches ; innerhalb eines -- Kommentars trennt die Datei genauso wie
+    jedes andere - das dabei entstehende Fragment enthaelt dann nur noch
+    Kommentartext und wird uebersprungen statt an cursor.execute() zu gehen
+    (siehe _has_sql()): auf Postgres waere das Fragment lexikalisch leer und
+    ein Fehler.
 
     {auto_id} wird gezielt ersetzt statt ueber str.format() auf die ganze
     Datei - ein Migrationstext mit einer woertlichen { oder } (Postgres-Array-
@@ -95,7 +118,8 @@ def _statements(path):
     sonst mit KeyError/ValueError zum Absturz bringen.
     """
     text = path.read_text(encoding='utf-8').replace('{auto_id}', _placeholders()['auto_id'])
-    return [statement.strip() for statement in text.split(';') if statement.strip()]
+    return [statement.strip() for statement in text.split(';')
+            if statement.strip() and _has_sql(statement)]
 
 
 def _python_module(path):

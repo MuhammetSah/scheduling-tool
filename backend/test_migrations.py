@@ -168,3 +168,29 @@ def test_indexmigration_laesst_sich_zurueckrollen(fresh_db):
 
     assert 'ix_assignments_date_employee' not in indizes(db_file)
     assert '0002_indexes' not in migrations.applied_versions()
+
+
+def test_semikolon_in_kommentar_erzeugt_kein_leeres_sql_fragment(leere_migrationen):
+    """Ein woertliches ; in einem -- Kommentar (wie urspruenglich in
+    0002_indexes.sql) trennt die Datei wie jedes andere Semikolon. Das dabei
+    entstehende Fragment enthaelt nur Kommentartext - auf Postgres waere das
+    ein Fehler; siehe _has_sql() in migrations.py. Es darf nicht als eigene
+    Anweisung an cursor.execute() gehen.
+    """
+    migrations, verzeichnis, db_file = leere_migrationen
+    (verzeichnis / '0001_kommentar_mit_semikolon.sql').write_text(
+        '-- Beispielhinweis mit eingebautem Semikolon: siehe Dokumentation;\n'
+        '-- und eine weitere Kommentarzeile danach.\n'
+        'CREATE TABLE test_leeres_fragment(id INTEGER PRIMARY KEY)',
+        encoding='utf-8',
+    )
+
+    statements = migrations._statements(verzeichnis / '0001_kommentar_mit_semikolon.sql')
+    assert len(statements) == 1
+    assert 'CREATE TABLE test_leeres_fragment' in statements[0]
+
+    angewandt = migrations.apply_pending()
+
+    assert '0001_kommentar_mit_semikolon' in angewandt
+    assert '0001_kommentar_mit_semikolon' in migrations.applied_versions()
+    assert 'test_leeres_fragment' in tabellen(db_file)

@@ -16,7 +16,7 @@ CREATE INDEX IF NOT EXISTS ix_absences_date
 -- Achtung Produktion: existieren bereits doppelte Plaetze, schlaegt dieser
 -- UNIQUE-Index beim Anlegen fehl. Vor dem Deploy pruefen mit:
 --   SELECT schedule_id, date, shift_type_id, slot_index, COUNT(*)
---   FROM shift_assignments GROUP BY 1,2,3,4 HAVING COUNT(*) > 1;
+--   FROM shift_assignments GROUP BY 1,2,3,4 HAVING COUNT(*) > 1
 -- und Duplikate von Hand bereinigen.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_assignment_slot
     ON shift_assignments(schedule_id, date, shift_type_id, slot_index)
