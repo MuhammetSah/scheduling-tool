@@ -4,7 +4,7 @@ import logging
 import os
 import secrets
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 from flask import Flask, g, jsonify, request, session
@@ -15,6 +15,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
 import security
+import timeutil
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes
@@ -226,7 +227,12 @@ def hash_token(token):
 def issue_invitation(cursor, user_id):
     """Replaces any open invitation, so a resend invalidates the previous link."""
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(days=INVITATION_VALID_DAYS)
+    # .replace(tzinfo=None) statt des seit 3.12 veralteten datetime.utcnow():
+    # gleicher naiver UTC-Wert, byte-identisch zum bisherigen isoformat()-String.
+    # Ein aware Zeitstempel wuerde die Spalte (Postgres: TIMESTAMP ohne
+    # Zeitzone) inkonsistent mit bestehenden Zeilen machen und load_invitation()
+    # beim Vergleich mit einem naiven datetime crashen lassen.
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=INVITATION_VALID_DAYS)
     cursor.execute('DELETE FROM password_invitations WHERE user_id = ?', (user_id,))
     cursor.execute(
         'INSERT INTO password_invitations (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
@@ -246,7 +252,7 @@ def load_invitation(cursor, token):
     invitation = cursor.fetchone()
     if not invitation:
         return None
-    if as_datetime(invitation['expires_at']) < datetime.utcnow():
+    if as_datetime(invitation['expires_at']) < datetime.now(timezone.utc).replace(tzinfo=None):
         return None
     return dict(invitation)
 
@@ -778,11 +784,11 @@ def current_month_bounds():
     """The server's own idea of "this month", as (first day, last day) ISO strings.
 
     Never derived from client input - self-service reporting is only ever
-    allowed for the month the server's clock says it is right now.
+    allowed for the month the server's clock says it is right now. Die Zone
+    kommt aus timeutil, nicht aus der Serverzeitzone: siehe dortiger
+    Modulkommentar.
     """
-    today = date.today()
-    days_in_month = calendar.monthrange(today.year, today.month)[1]
-    return today.replace(day=1).isoformat(), today.replace(day=days_in_month).isoformat()
+    return timeutil.month_bounds(timeutil.today_local())
 
 
 @app.route('/employees/<int:employee_id>/absences', methods=['GET'])
@@ -792,8 +798,9 @@ def list_absences(employee_id):
         return error
 
     try:
-        year = int(request.args['year']) if 'year' in request.args else date.today().year
-        month = int(request.args['month']) if 'month' in request.args else date.today().month
+        heute = timeutil.today_local()
+        year = int(request.args['year']) if 'year' in request.args else heute.year
+        month = int(request.args['month']) if 'month' in request.args else heute.month
     except (TypeError, ValueError):
         return jsonify({'message': t(g.lang, 'year_month_must_be_numbers')}), 400
     if not 1 <= month <= 12:

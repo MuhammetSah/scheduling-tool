@@ -5,6 +5,8 @@ Regeln, um die es hier geht, stecken in Decorators (@hr_required) und im
 Sitzungs-Handling, nicht im Funktionsrumpf.
 """
 
+from datetime import datetime, timezone
+
 
 def test_erste_registrierung_legt_hr_konto_an(client):
     response = client.post('/register', json={'username': 'hr', 'password': 'passwort-123'})
@@ -57,6 +59,42 @@ def test_mitarbeiterkonto_darf_die_belegschaft_nicht_lesen(hr_client):
     response = hr_client.get('/employees')
 
     assert response.status_code == 403
+
+
+def test_einladung_ist_gueltig_und_expires_at_traegt_keine_zeitzone(hr_client):
+    """datetime.utcnow() ist seit Python 3.12 veraltet. Der Ersatz
+    (datetime.now(timezone.utc).replace(tzinfo=None)) muss denselben naiven
+    UTC-String liefern wie vorher: expires_at steht in Postgres in einer Spalte
+    ohne Zeitzone, und as_datetime() liest einen SQLite-String ueber
+    datetime.fromisoformat(). Ein Suffix wie '+00:00' wuerde dort ein aware
+    datetime erzeugen, das beim Vergleich mit einem naiven datetime.now(...)
+    mit TypeError abstuerzt - und zwar nur fuer neu ausgestellte Zeilen, waehrend
+    Bestandszeilen naiv bleiben. Der Token wird nie ueber die API zurueckgegeben,
+    deshalb wird direkt in der Datenbank nachgesehen statt einen Link einzuloesen.
+    """
+    import db
+    from app import as_datetime
+
+    employee = hr_client.post('/employees', json={'name': 'Anna', 'email': 'anna@example.com'}).json
+    response = hr_client.post('/register', json={
+        'username': 'anna',
+        'role': 'employee',
+        'employee_id': employee['id'],
+    })
+    assert response.status_code == 201, response.json
+
+    connection = db.get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute('SELECT expires_at FROM password_invitations ORDER BY id DESC LIMIT 1')
+    expires_at = cursor.fetchone()['expires_at']
+    connection.close()
+
+    # Genau das Format, das das alte datetime.utcnow() erzeugte: kein Offset-Suffix.
+    assert '+' not in expires_at
+    assert 'Z' not in expires_at
+
+    jetzt_naiv = datetime.now(timezone.utc).replace(tzinfo=None)
+    assert as_datetime(expires_at) > jetzt_naiv
 
 
 def test_sprache_folgt_dem_x_lang_header(client):
