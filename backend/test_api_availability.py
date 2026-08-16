@@ -231,3 +231,229 @@ def test_planer_haelt_sich_end_to_end_an_die_ueber_die_api_gesetzten_fenster(hr_
     assert anna_termine, antwort.json['assignments']
     for termin in anna_termine:
         assert date.fromisoformat(termin['date']).weekday() == 1, termin
+
+
+# ---------- Handkorrektur ausserhalb des Fensters: nicht-blockierende Warnung ----------
+#
+# Der Planer verbietet (siehe oben); die Handkorrektur ueber PUT /assignments/<id>
+# warnt nur. 2026-09-01 ist ein Dienstag (Wochentag 1) - fester Bezugspunkt fuer
+# alle folgenden Tests.
+
+def test_ausserhalb_des_fensters_warnt_und_die_zuweisung_greift_trotzdem(hr_client):
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '12:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Spaet', 'start_time': '14:00', 'end_time': '18:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    # Die Zuweisung greift (200) - der Planer wuerde das verbieten, die
+    # Handkorrektur warnt nur.
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['warnings'] == [
+        'Anna arbeitet dienstags normalerweise nur 08:00–12:00.',
+    ]
+
+    plan = hr_client.get('/schedules/2026/9').json
+    termin = next(a for a in plan['assignments'] if a['id'] == slot['id'])
+    assert termin['employee_id'] == anna['id'], termin
+
+
+def test_anytime_modus_warnt_nicht_obwohl_derselbe_fall_im_windows_modus_warnen_wuerde(hr_client):
+    """Fenster, Schicht und Datum sind fuer Anna und Bert identisch - nur
+    availability_mode unterscheidet sich. Ohne diesen Vergleich waere unklar, ob
+    Berts fehlende Warnung wirklich am Modus liegt oder schlicht daran, dass hier
+    niemand mehr prueft."""
+    fenster = [{'weekday': 1, 'start_time': '08:00', 'end_time': '12:00', 'valid_from': None, 'valid_until': None}]
+
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna', 'availability_mode': 'windows', 'availability': fenster,
+    }).json
+    bert = hr_client.post('/employees', json={
+        'name': 'Bert', 'availability_mode': 'anytime', 'availability': fenster,
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Spaet', 'start_time': '14:00', 'end_time': '18:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot_anna = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    slot_bert = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort_anna = hr_client.put(f'/assignments/{slot_anna["id"]}', json={'employee_id': anna['id']})
+    antwort_bert = hr_client.put(f'/assignments/{slot_bert["id"]}', json={'employee_id': bert['id']})
+
+    assert antwort_anna.status_code == 200, antwort_anna.json
+    assert antwort_anna.json['warnings'] == ['Anna arbeitet dienstags normalerweise nur 08:00–12:00.']
+
+    assert antwort_bert.status_code == 200, antwort_bert.json
+    assert antwort_bert.json['warnings'] == []
+
+
+def test_mehrere_fenster_am_selben_wochentag_werden_in_der_meldung_zusammengefasst(hr_client):
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '16:00', 'end_time': '20:00', 'valid_from': None, 'valid_until': None},
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '12:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Mittag', 'start_time': '12:00', 'end_time': '14:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    # Sortiert nach Startzeit, nicht nach Einfuegereihenfolge (das zweite Fenster
+    # wurde zuerst gesendet).
+    assert antwort.json['warnings'] == [
+        'Anna arbeitet dienstags normalerweise nur 08:00–12:00, 16:00–20:00.',
+    ]
+
+
+def test_kein_fenster_an_diesem_wochentag_erzeugt_eine_meldung_ohne_zeitangabe(hr_client):
+    """Anna hat nur montags ein Fenster - fuer Dienstag existiert gar keines. Die
+    Meldung darf dann keine Uhrzeiten behaupten, die es nicht gibt."""
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 0, 'start_time': '08:00', 'end_time': '12:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Spaet', 'start_time': '14:00', 'end_time': '18:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['warnings'] == ['Anna arbeitet dienstags normalerweise gar nicht.']
+
+
+def test_innerhalb_des_fensters_gibt_es_keine_warnung(hr_client):
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '16:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['warnings'] == []
+
+
+def test_abgelaufenes_fenster_warnt_weil_es_nicht_mehr_gilt(hr_client):
+    """valid_until liegt vor dem Zuweisungsdatum - ein abgelaufenes Fenster ist
+    kein anwendbares Fenster, die Meldung faellt deshalb auf die
+    'gar nicht'-Variante zurueck statt ein laengst verfallenes Fenster zu nennen."""
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '16:00', 'valid_from': None, 'valid_until': '2026-08-01'},
+        ],
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['warnings'] == ['Anna arbeitet dienstags normalerweise gar nicht.']
+
+
+def test_pruefung_nutzt_die_per_datum_ueberschriebene_uhrzeit_statt_der_nominalen(hr_client):
+    """Die Schichtart liegt nominell (14:00-18:00) ausserhalb von Annas Fenster -
+    fuer dieses eine Datum ist sie aber auf 08:00-12:00 verkuerzt. Wuerde die
+    Pruefung effective_shift_hours() nicht nutzen, warnte sie hier faelschlich
+    trotz der Verkuerzung."""
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '12:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Spaet', 'start_time': '14:00', 'end_time': '18:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    override = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+        'start_time': '08:00', 'end_time': '12:00',
+    })
+    assert override.status_code == 200, override.json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['warnings'] == []
+
+
+def test_verfuegbarkeitseintrag_ohne_objekt_ist_400_statt_500(hr_client):
+    """Ergaenzung zum Review von Task 3: ein Listenelement, das kein Objekt ist,
+    darf keinen AttributeError (500) ausloesen. Der Nachbar-Block fuer
+    unavailable_dates ein paar Zeilen weiter oben macht das schon richtig vor."""
+    antwort = hr_client.post('/employees', json={
+        'name': 'Anna', 'availability_mode': 'windows', 'availability': ['oops'],
+    })
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == 'Jeder Eintrag unter "availability" muss ein Objekt mit Wochentag und Uhrzeiten sein.'

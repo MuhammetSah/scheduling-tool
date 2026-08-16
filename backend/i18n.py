@@ -143,6 +143,10 @@ TRANSLATIONS = {
         'de': 'Unbekannter Verfügbarkeitsmodus. Erlaubt sind "anytime" und "windows".',
         'en': 'Unknown availability mode. Allowed values are "anytime" and "windows".',
     },
+    'availability_entry_invalid': {
+        'de': 'Jeder Eintrag unter "availability" muss ein Objekt mit Wochentag und Uhrzeiten sein.',
+        'en': 'Each entry under "availability" must be an object with a weekday and times.',
+    },
     'availability_time_invalid': {
         'de': 'Ungültige Uhrzeit "{value}". Erwartet wird HH:MM.',
         'en': 'Invalid time "{value}". Expected HH:MM.',
@@ -366,6 +370,14 @@ TRANSLATIONS = {
     'warn_rest_period_too_short': {
         'de': '{name} hätte dann nur {gap:.1f} Std. Ruhezeit statt der geforderten {required:g} Std.',
         'en': '{name} would then have only {gap:.1f}h of rest instead of the required {required:g}h',
+    },
+    'warn_outside_availability': {
+        'de': '{name} arbeitet {weekday} normalerweise nur {windows}.',
+        'en': '{name} normally only works {weekday} {windows}.',
+    },
+    'warn_outside_availability_no_window': {
+        'de': '{name} arbeitet {weekday} normalerweise gar nicht.',
+        'en': '{name} normally does not work {weekday} at all.',
     },
 
     # ---- misc ----

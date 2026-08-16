@@ -19,7 +19,10 @@ import security
 import timeutil
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
-from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes
+from scheduler import (
+    generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes,
+    window_contains_shift, window_is_valid_on,
+)
 
 # Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
 # init_db() weiter unten. Stand diese Konfiguration erst am Dateiende (wie
@@ -665,6 +668,8 @@ def replace_employee_constraints(connection, employee_id, data):
 
     cursor.execute('DELETE FROM employee_availability WHERE employee_id = ?', (employee_id,))
     for entry in data.get('availability') or []:
+        if not isinstance(entry, dict):
+            raise ValueError(t(g.lang, 'availability_entry_invalid'))
         try:
             weekday = int(entry.get('weekday'))
         except (TypeError, ValueError):
@@ -1675,6 +1680,37 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
         cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ? AND shift_type_id = ?', (employee_id, shift_type_id))
         if not cursor.fetchone():
             warnings.append(t(g.lang, 'warn_restricted_shift_types', name=employee['name']))
+
+    if employee['availability_mode'] == 'windows':
+        cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
+        shift_type_row = cursor.fetchone()
+        if shift_type_row:
+            # The actual hours this assignment runs, respecting a per-date
+            # override - same source of truth the rest-period check below uses,
+            # so a shortened shift is judged against the times it now runs, not
+            # the shift type's nominal ones.
+            start_time, end_time = effective_shift_hours(
+                cursor, schedule_id, assignment_date, shift_type_id,
+                shift_type_row['start_time'], shift_type_row['end_time'])
+
+            cursor.execute(
+                'SELECT weekday, start_time, end_time, valid_from, valid_until FROM employee_availability '
+                'WHERE employee_id = ? AND weekday = ? ORDER BY start_time',
+                (employee_id, weekday),
+            )
+            windows_today = [dict(row) for row in cursor.fetchall()]
+            # An expired/not-yet-valid window is not an applicable one - same
+            # rule the scheduler's structurally_eligible() enforces.
+            applicable_windows = [w for w in windows_today if window_is_valid_on(w, assignment_date)]
+
+            if not any(window_contains_shift(w, start_time, end_time) for w in applicable_windows):
+                if applicable_windows:
+                    windows_text = ', '.join(f"{w['start_time']}–{w['end_time']}" for w in applicable_windows)
+                    warnings.append(t(g.lang, 'warn_outside_availability', name=employee['name'],
+                                     weekday=weekday_adverb(g.lang, weekday), windows=windows_text))
+                else:
+                    warnings.append(t(g.lang, 'warn_outside_availability_no_window', name=employee['name'],
+                                     weekday=weekday_adverb(g.lang, weekday)))
 
     query = 'SELECT 1 FROM shift_assignments WHERE date = ? AND employee_id = ?'
     params = [assignment_date, employee_id]
