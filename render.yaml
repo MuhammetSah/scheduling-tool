@@ -15,13 +15,24 @@ services:
     buildCommand: pip install -r requirements.txt
     # Der Planer rechnet bis zu 8 Sekunden (DEFAULT_TIME_BUDGET_SECONDS in
     # scheduler.py). Mit einem einzigen synchronen Worker antwortet die API in
-    # dieser Zeit niemandem sonst. Zwei Worker mit je vier Threads halten den
-    # Rest bedienbar; --timeout 60 laesst dem Planer Luft, ohne einen wirklich
-    # haengenden Worker ewig stehen zu lassen. Jeder Request oeffnet eine
-    # eigene DB-Verbindung (siehe db.py/app.py get_db()), also sind hoechstens
-    # 2 Worker * 4 Threads = 8 gleichzeitige Verbindungen zu erwarten - klein
-    # gemessen an ueblichen Postgres-Grenzen, aber die genaue
-    # Verbindungsobergrenze des kostenlosen Plans wurde nicht geprueft.
+    # dieser Zeit niemandem sonst. Vier Threads halten den Rest bedienbar;
+    # --timeout 60 laesst dem Planer Luft, ohne einen wirklich haengenden
+    # Worker ewig stehen zu lassen.
+    #
+    # Ein Worker, nicht zwei: Threads teilen sich den Speicher des Prozesses,
+    # ein zweiter Worker verdoppelt ihn. Der kostenlose Plan hat 512 MB, und
+    # der Grund, der urspruenglich fuer zwei Worker sprach, ist entfallen -
+    # das Migrations-Rennen ist seit dem Postgres-Advisory-Lock in
+    # migrations.py im Code geschlossen, nicht mehr nur durch --preload. Was
+    # von mehreren Workern uebrig bliebe, waere Nebenlaeufigkeit waehrend
+    # einer Planberechnung, und die liefern Threads hier zum Nulltarif.
+    # Wer spaeter doch aufstockt, sollte vorher den Speicherverbrauch messen.
+    #
+    # Jeder Request oeffnet eine eigene DB-Verbindung (siehe db.py/app.py
+    # get_db()), also sind hoechstens 1 Worker * 4 Threads = 4 gleichzeitige
+    # Verbindungen zu erwarten - klein gemessen an ueblichen Postgres-Grenzen,
+    # aber die genaue Verbindungsobergrenze des kostenlosen Plans wurde nicht
+    # geprueft.
     #
     # --preload: app.py ruft init_db() (-> migrations.apply_pending()) beim
     # Import auf. Ohne --preload importiert jeder geforkte Worker app.py fuer
@@ -39,9 +50,19 @@ services:
     # sonst keine Ressource (Socket, Datei, Thread) offen haelt, die ein
     # Fork problematisch erben wuerde - logging.basicConfig() schreibt nur
     # nach stderr, das jeder Kindprozess ohnehin von Gunicorn erbt.
+    #
+    # Mit nur einem Worker kann das Rennen ohnehin nicht auftreten, und der
+    # Advisory-Lock deckt es zusaetzlich ab. --preload bleibt trotzdem
+    # stehen: es kostet nichts und ist die Absicherung fuer den Tag, an dem
+    # jemand die Worker-Zahl erhoeht, ohne diesen Kommentar zu lesen.
+    #
+    # ACHTUNG: Ein im Render-Dashboard eingetragener Start Command
+    # ueberschreibt diese Zeile vollstaendig. Wer hier etwas aendert, muss
+    # pruefen, ob der Dienst nicht in Wirklichkeit einem Dashboard-Wert
+    # folgt - genau das war hier schon einmal der Fall.
     startCommand: >-
       gunicorn app:app --bind 0.0.0.0:$PORT --preload
-      --workers 2 --threads 4 --timeout 60 --access-logfile -
+      --threads 4 --timeout 60 --access-logfile -
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
