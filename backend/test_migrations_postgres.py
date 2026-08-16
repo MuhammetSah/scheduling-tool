@@ -44,6 +44,8 @@ pytestmark = pytest.mark.skipif(
 
 BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.py'
 INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexes.sql'
+LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
+AVAILABILITY_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.sql'
 
 
 @pytest.fixture
@@ -106,7 +108,8 @@ def test_frische_datenbank_bekommt_alle_tabellen(pg_db):
 
     assert '0001_baseline' in angewandt
     assert {'employees', 'users', 'shift_types', 'shift_assignments',
-            'schedules', 'schema_migrations', 'login_attempts'} <= tabellen(schema_url, schema)
+            'schedules', 'schema_migrations', 'login_attempts',
+            'employee_availability'} <= tabellen(schema_url, schema)
 
 
 def test_auto_id_wird_als_serial_primary_key_angelegt(pg_db):
@@ -174,6 +177,80 @@ def test_returning_id_wird_bei_blankem_insert_in_login_attempts_verwendet(pg_db)
         connection.commit()
     finally:
         connection.close()
+
+
+def test_availability_mode_hat_anytime_als_standard(pg_leere_migrationen):
+    """Postgres-Gegenstueck zu test_availability_mode_hat_anytime_als_standard
+    in test_migrations.py: ALTER TABLE employees ADD COLUMN ... NOT NULL
+    DEFAULT 'anytime' (0004_employee_availability.sql) ist genau die Art
+    Anweisung, deren Verhalten auf bereits vorhandenen Zeilen zwischen
+    Dialekten abweichen kann - deshalb hier gegen echtes Postgres geprueft,
+    nicht nur auf SQLite angenommen.
+
+    Baut wie das SQLite-Original die echte Reihenfolge nach: erst 0001-0003
+    anwenden, dann eine Mitarbeiterzeile einfuegen, dann erst 0004 obendrauf
+    - statt einen Insert erst nach einer bereits vollstaendigen Migration zu
+    machen, was einen fehlenden DEFAULT gar nicht bemerken wuerde, weil die
+    Spalte dann schon existiert, bevor ueberhaupt etwas eingefuegt wird.
+    """
+    migrations, verzeichnis, schema_url, schema = pg_leere_migrationen
+    (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0002_indexes.sql').write_text(INDEXES_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0003_login_attempts.sql').write_text(
+        LOGIN_ATTEMPTS_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    (verzeichnis / '0004_employee_availability.sql').write_text(
+        AVAILABILITY_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT availability_mode FROM employees WHERE name = 'Anna'")
+            modus = cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+    assert modus == 'anytime'
+
+
+def test_fenster_werden_beim_loeschen_des_mitarbeiters_mitgeloescht(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py:
+    ON DELETE CASCADE ist auf Postgres immer aktiv (anders als bei SQLite,
+    das PRAGMA foreign_keys = ON pro Verbindung braucht, siehe
+    db.get_db_connection()) - trotzdem hier explizit gegen echtes Postgres
+    geprueft statt nur angenommen.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    import db
+    connection = db.get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        employee_id = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO employee_availability (employee_id, weekday, start_time, end_time) '
+            'VALUES (?, 0, ?, ?)', (employee_id, '08:00', '14:00'))
+        connection.commit()
+        cursor.execute('DELETE FROM employees WHERE id = ?', (employee_id,))
+        connection.commit()
+        cursor.execute('SELECT COUNT(*) AS anzahl FROM employee_availability')
+        rest = cursor.fetchone()['anzahl']
+    finally:
+        connection.close()
+
+    assert rest == 0
 
 
 def test_fehlgeschlagene_migration_hinterlaesst_keine_spur_dank_impliziter_transaktion(pg_leere_migrationen):
