@@ -263,6 +263,12 @@ TRANSLATIONS = {
         'de': 'Plan gelöscht',
         'en': 'Plan deleted',
     },
+    'regenerate_would_discard_edits': {
+        'de': 'Der Plan enthaelt {n} von Hand bearbeitete Schichten, die beim '
+              'Neuerzeugen verloren gehen. Zum Fortfahren bestaetigen.',
+        'en': 'The schedule contains {n} manually edited shifts that would be lost '
+              'by regenerating. Confirm to continue.',
+    },
 
     # ---- day-level editing (times, extra places) ----
     'time_format_hint': {

@@ -80,12 +80,11 @@ function SchedulePage({ setFlash, user }) {
     setSwapSelection(null)
   }
 
-  async function generate() {
+  // Der Parameter heißt bewusst nicht `confirm`: das würde window.confirm
+  // innerhalb dieser Funktion verdecken, und genau die brauchen wir unten.
+  async function generate(bestaetigt = false) {
     if (shiftTypes.length === 0) {
       setFlash({ type: 'error', text: t('schedule.needShiftTypeFlash') })
-      return
-    }
-    if (schedule && !confirm(t('schedule.confirmRegenerate'))) {
       return
     }
     try {
@@ -93,6 +92,7 @@ function SchedulePage({ setFlash, user }) {
         year,
         month,
         weekend_weight: weekendEquity ? 5 : 0,
+        ...(bestaetigt ? { confirm: true } : {}),
       })
       setSchedule(data)
       setWarnings([])
@@ -103,6 +103,13 @@ function SchedulePage({ setFlash, user }) {
           : t('schedule.generatedFullFlash'),
       })
     } catch (err) {
+      // Der Plan enthält Handkorrekturen - einmal nachfragen, dann bestätigt
+      // wiederholen. err.data trägt manually_edited_count aus der Antwort.
+      if (err.data?.manually_edited_count) {
+        const weiter = window.confirm(
+          t('schedule.confirmRegenerate', { n: err.data.manually_edited_count }))
+        return weiter ? generate(true) : undefined
+      }
       setFlash({ type: 'error', text: err.message })
     }
   }
@@ -227,7 +234,10 @@ function SchedulePage({ setFlash, user }) {
                     {t('schedule.weekendEquityLabel')}
                   </label>
                 </div>
-                <button onClick={generate}>{schedule ? t('schedule.regenerateButton') : t('schedule.generateButton')}</button>
+                {/* generate() darf hier nicht direkt als Handler stehen: onClick
+                    reicht das Klick-Event durch, das als erstes Argument sonst
+                    `bestaetigt` waer und faelschlich als "confirm: true" zaehlt. */}
+                <button onClick={() => generate()}>{schedule ? t('schedule.regenerateButton') : t('schedule.generateButton')}</button>
                 {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>{t('schedule.deleteButton')}</button>}
               </>
             )}

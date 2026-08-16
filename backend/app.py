@@ -1283,13 +1283,32 @@ def generate_schedule_route():
 
     employees = load_employees_for_scheduling(cursor)
 
+    cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
+    existing = cursor.fetchone()
+    if existing:
+        # Neuerzeugen verwirft jede Zuweisung des Monats, auch die von Hand
+        # gesetzten. Ohne Rueckfrage waere das ein Klick, der stunden- bis
+        # tagelange Nacharbeit still loescht - und es gibt kein Zurueck. Die
+        # Pruefung steht bewusst vor dem Scheduler-Lauf: der hat ein
+        # 8-Sekunden-Budget, das eine ohnehin abgelehnte Anfrage nicht
+        # verbrauchen soll.
+        cursor.execute(
+            'SELECT COUNT(*) AS n FROM shift_assignments '
+            'WHERE schedule_id = ? AND manually_edited = 1',
+            (existing['id'],),
+        )
+        manually_edited = cursor.fetchone()['n']
+        if manually_edited and not data.get('confirm'):
+            return jsonify({
+                'message': t(g.lang, 'regenerate_would_discard_edits', n=manually_edited),
+                'manually_edited_count': manually_edited,
+            }), 409
+
     try:
         result = generate_schedule(year, month, employees, shift_types, weekend_weight=weekend_weight)
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_year_or_month')}), 400
 
-    cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
-    existing = cursor.fetchone()
     if existing:
         schedule_id = existing['id']
         cursor.execute('DELETE FROM shift_assignments WHERE schedule_id = ?', (schedule_id,))

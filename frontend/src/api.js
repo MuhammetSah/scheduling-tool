@@ -93,7 +93,12 @@ async function request(path, options = {}) {
       error.data = data
       throw error
     }
-    throw new Error(message)
+    // Der Antwortkoerper haengt am Fehler, damit Aufrufer strukturierte
+    // Zusatzangaben lesen koennen (z.B. manually_edited_count beim 409 von
+    // /schedules/generate) statt die Meldung parsen zu muessen.
+    const error = new Error(message)
+    error.data = data
+    throw error
   }
 
   if (parseFailed) {
