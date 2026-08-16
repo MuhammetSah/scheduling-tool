@@ -1,26 +1,55 @@
 import calendar
 import hashlib
+import logging
 import os
 import secrets
-from datetime import date, datetime, timedelta
+import uuid
+from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
 from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
+import security
+import timeutil
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes
 
-app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'schichtplan-local-dev')
+# Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
+# init_db() weiter unten. Stand diese Konfiguration erst am Dateiende (wie
+# vor diesem Fix), lief init_db() mit dem Root-Logger auf dem WARNING-Default:
+# jede Migration, die beim Start angewandt wurde, verschwand spurlos, obwohl
+# init_db() sie protokolliert (siehe db.py) - auf Renders Free-Plan ohne Shell
+# ist migrations.py status dort nicht mal als Notloesung erreichbar.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+)
 
-if os.environ.get('FLASK_ENV') == 'production':
+app = Flask(__name__)
+app.secret_key = security.resolve_secret_key()
+
+if security.is_production():
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
     app.config['SESSION_COOKIE_SECURE'] = True
+
+    # Nur in Produktion vertrauenswuerdig: Render terminiert TLS vor dieser
+    # App und schreibt X-Forwarded-For/X-Forwarded-Proto selbst - der eine
+    # Hop (x_for=1, x_proto=1), dem wir hier vertrauen, kommt also nachweislich
+    # vom Render-Proxy, nicht vom Client. Lokal (und ueberall ohne Proxy davor)
+    # gibt es diese Garantie nicht: ein direkt erreichbarer Flask-Dev-Server
+    # wuerde jedem Client erlauben, X-Forwarded-For selbst zu setzen und damit
+    # die in login_attempts.ip protokollierte Adresse zu faelschen - deshalb
+    # bedingt auf is_production(), nicht global. Eine Bereitstellung, die diese
+    # App direkt ohne vorgeschalteten Proxy exponiert, darf dies nicht
+    # unveraendert uebernehmen.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 # supports_credentials is required for the session cookie to survive the
 # cross-origin hop from the Vite dev server to this API. X-Lang and
@@ -40,6 +69,8 @@ CORS(
     allow_headers=['Content-Type', 'X-Lang', 'Authorization'],
 )
 
+security.register_security_headers(app)
+
 init_db()
 
 
@@ -51,6 +82,9 @@ def resolve_request_lang():
     string - see i18n.py.
     """
     g.lang = resolve_lang(request.headers.get('X-Lang', DEFAULT_LANG))
+    # Kurze Kennung, die in der Fehlerantwort und im Log steht, damit eine
+    # Nutzermeldung ("Fehler a1b2c3d4") im Protokoll wiederfindbar ist.
+    g.request_id = uuid.uuid4().hex[:8]
 
 
 def get_db():
@@ -217,7 +251,12 @@ def hash_token(token):
 def issue_invitation(cursor, user_id):
     """Replaces any open invitation, so a resend invalidates the previous link."""
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(days=INVITATION_VALID_DAYS)
+    # .replace(tzinfo=None) statt des seit 3.12 veralteten datetime.utcnow():
+    # gleicher naiver UTC-Wert, byte-identisch zum bisherigen isoformat()-String.
+    # Ein aware Zeitstempel wuerde die Spalte (Postgres: TIMESTAMP ohne
+    # Zeitzone) inkonsistent mit bestehenden Zeilen machen und load_invitation()
+    # beim Vergleich mit einem naiven datetime crashen lassen.
+    expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=INVITATION_VALID_DAYS)
     cursor.execute('DELETE FROM password_invitations WHERE user_id = ?', (user_id,))
     cursor.execute(
         'INSERT INTO password_invitations (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
@@ -237,7 +276,7 @@ def load_invitation(cursor, token):
     invitation = cursor.fetchone()
     if not invitation:
         return None
-    if as_datetime(invitation['expires_at']) < datetime.utcnow():
+    if as_datetime(invitation['expires_at']) < datetime.now(timezone.utc).replace(tzinfo=None):
         return None
     return dict(invitation)
 
@@ -406,6 +445,11 @@ def login():
 
     connection = get_db()
     cursor = connection.cursor()
+
+    if username and security.is_locked_out(cursor, username):
+        return jsonify({'message': t(g.lang, 'too_many_login_attempts',
+                                     minutes=security.ATTEMPT_WINDOW_MINUTES)}), 429
+
     cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
     user = cursor.fetchone()
 
@@ -418,7 +462,13 @@ def login():
     # Same message either way, so the response cannot be used to find out which
     # usernames exist.
     if not user or not check_password_hash(user['hash'], password):
+        if username:
+            security.record_attempt(cursor, username, request.remote_addr, succeeded=False)
+            connection.commit()
         return jsonify({'message': t(g.lang, 'login_failed')}), 401
+
+    security.record_attempt(cursor, username, request.remote_addr, succeeded=True)
+    connection.commit()
 
     session.clear()
     session['user_id'] = user['id']
@@ -460,8 +510,19 @@ def redeem_invitation(token):
 
     connection = get_db()
     cursor = connection.cursor()
+
+    # Ein Treffer hier uebernimmt ein Konto, also wird auch das Einloesen
+    # gedrosselt. Gezaehlt wird pro Token, nicht pro Konto - welches Konto
+    # gemeint ist, weiss man ohne gueltigen Token gar nicht.
+    attempt_key = f'invitation:{hash_token(token)}'
+    if security.is_locked_out(cursor, attempt_key):
+        return jsonify({'message': t(g.lang, 'too_many_login_attempts',
+                                     minutes=security.ATTEMPT_WINDOW_MINUTES)}), 429
+
     invitation = load_invitation(cursor, token)
     if not invitation:
+        security.record_attempt(cursor, attempt_key, request.remote_addr, succeeded=False)
+        connection.commit()
         return jsonify({'message': t(g.lang, 'invitation_invalid')}), 404
 
     cursor.execute('UPDATE users SET hash = ? WHERE id = ?',
@@ -747,11 +808,11 @@ def current_month_bounds():
     """The server's own idea of "this month", as (first day, last day) ISO strings.
 
     Never derived from client input - self-service reporting is only ever
-    allowed for the month the server's clock says it is right now.
+    allowed for the month the server's clock says it is right now. Die Zone
+    kommt aus timeutil, nicht aus der Serverzeitzone: siehe dortiger
+    Modulkommentar.
     """
-    today = date.today()
-    days_in_month = calendar.monthrange(today.year, today.month)[1]
-    return today.replace(day=1).isoformat(), today.replace(day=days_in_month).isoformat()
+    return timeutil.month_bounds(timeutil.today_local())
 
 
 @app.route('/employees/<int:employee_id>/absences', methods=['GET'])
@@ -761,8 +822,9 @@ def list_absences(employee_id):
         return error
 
     try:
-        year = int(request.args['year']) if 'year' in request.args else date.today().year
-        month = int(request.args['month']) if 'month' in request.args else date.today().month
+        heute = timeutil.today_local()
+        year = int(request.args['year']) if 'year' in request.args else heute.year
+        month = int(request.args['month']) if 'month' in request.args else heute.month
     except (TypeError, ValueError):
         return jsonify({'message': t(g.lang, 'year_month_must_be_numbers')}), 400
     if not 1 <= month <= 12:
@@ -1245,13 +1307,32 @@ def generate_schedule_route():
 
     employees = load_employees_for_scheduling(cursor)
 
+    cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
+    existing = cursor.fetchone()
+    if existing:
+        # Neuerzeugen verwirft jede Zuweisung des Monats, auch die von Hand
+        # gesetzten. Ohne Rueckfrage waere das ein Klick, der stunden- bis
+        # tagelange Nacharbeit still loescht - und es gibt kein Zurueck. Die
+        # Pruefung steht bewusst vor dem Scheduler-Lauf: der hat ein
+        # 8-Sekunden-Budget, das eine ohnehin abgelehnte Anfrage nicht
+        # verbrauchen soll.
+        cursor.execute(
+            'SELECT COUNT(*) AS n FROM shift_assignments '
+            'WHERE schedule_id = ? AND manually_edited = 1',
+            (existing['id'],),
+        )
+        manually_edited = cursor.fetchone()['n']
+        if manually_edited and not data.get('confirm'):
+            return jsonify({
+                'message': t(g.lang, 'regenerate_would_discard_edits', n=manually_edited),
+                'manually_edited_count': manually_edited,
+            }), 409
+
     try:
         result = generate_schedule(year, month, employees, shift_types, weekend_weight=weekend_weight)
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_year_or_month')}), 400
 
-    cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
-    existing = cursor.fetchone()
     if existing:
         schedule_id = existing['id']
         cursor.execute('DELETE FROM shift_assignments WHERE schedule_id = ?', (schedule_id,))
@@ -1718,6 +1799,46 @@ def replacement_suggestions(assignment_id):
 
     candidates.sort(key=lambda c: (c['current_load'], c['name']))
     return jsonify(candidates)
+
+
+# ---------- error handling ----------
+# (logging.basicConfig() lives near the top of this file now, above init_db()
+# - see the comment there.)
+
+
+def _request_lang():
+    """g.lang, oder die Standardsprache falls der before_request-Hook nie lief."""
+    return getattr(g, 'lang', DEFAULT_LANG)
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(error):
+    """Flasks eigene Fehler (404, 405, 413 ...) als JSON statt als HTML.
+
+    Ohne das bekommt frontend/src/api.js eine HTML-Seite mit Fehlerstatus,
+    scheitert beim Parsen und meldet "unerwartete Antwort" - was nach einer
+    falsch konfigurierten API-URL aussieht statt nach dem, was wirklich war.
+    """
+    keys = {404: 'not_found', 405: 'method_not_allowed'}
+    key = keys.get(error.code)
+    message = t(_request_lang(), key) if key else (error.description or error.name)
+    return jsonify({'message': message}), error.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Alles, was sonst als Stacktrace beim Nutzer landen wuerde.
+
+    Die Kennung geht an den Aufrufer, der Grund nur ins Protokoll - eine
+    Ausnahmemeldung kann Tabellen-, Spalten- oder Dateinamen enthalten.
+    """
+    request_id = getattr(g, 'request_id', '-')
+    app.logger.exception(
+        'Unbehandelter Fehler [%s] %s %s', request_id, request.method, request.path)
+    return jsonify({
+        'message': t(_request_lang(), 'server_error'),
+        'request_id': request_id,
+    }), 500
 
 
 @app.route('/')

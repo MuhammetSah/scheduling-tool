@@ -91,9 +91,19 @@ async function request(path, options = {}) {
       clearAuthToken()
       const error = new UnauthorizedError(message)
       error.data = data
+      error.status = response.status
       throw error
     }
-    throw new Error(message)
+    // Der Antwortkoerper haengt am Fehler, damit Aufrufer strukturierte
+    // Zusatzangaben lesen koennen (z.B. manually_edited_count beim 409 von
+    // /schedules/generate) statt die Meldung parsen zu muessen. Der Status
+    // haengt genauso dran (z.B. fuer SchedulePage.jsx's fetchSchedule(), das
+    // nur ein echtes 404 "kein Plan" von jedem anderen Fehler unterscheiden
+    // muss statt jeden Fehlschlag gleich zu behandeln).
+    const error = new Error(message)
+    error.data = data
+    error.status = response.status
+    throw error
   }
 
   if (parseFailed) {

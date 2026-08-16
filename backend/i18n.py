@@ -81,6 +81,10 @@ TRANSLATIONS = {
         'de': 'Benutzername oder Passwort ist falsch',
         'en': 'Incorrect username or password',
     },
+    'too_many_login_attempts': {
+        'de': 'Zu viele fehlgeschlagene Anmeldeversuche. Bitte in {minutes} Minuten erneut versuchen.',
+        'en': 'Too many failed sign-in attempts. Please try again in {minutes} minutes.',
+    },
     'logged_out': {
         'de': 'Abgemeldet',
         'en': 'Signed out',
@@ -259,6 +263,12 @@ TRANSLATIONS = {
         'de': 'Plan gelöscht',
         'en': 'Plan deleted',
     },
+    'regenerate_would_discard_edits': {
+        'de': 'Der Plan enthält {n} von Hand bearbeitete Schichten, die beim '
+              'Neuerzeugen verloren gehen. Zum Fortfahren bestätigen.',
+        'en': 'The schedule contains {n} manually edited shifts that would be lost '
+              'by regenerating. Confirm to continue.',
+    },
 
     # ---- day-level editing (times, extra places) ----
     'time_format_hint': {
@@ -346,6 +356,20 @@ TRANSLATIONS = {
     'api_root': {
         'de': 'Schichtplan-Tool API',
         'en': 'Schichtplan-Tool API',
+    },
+
+    # ---- error handling ----
+    'server_error': {
+        'de': 'Unerwarteter Serverfehler. Bitte erneut versuchen.',
+        'en': 'Unexpected server error. Please try again.',
+    },
+    'not_found': {
+        'de': 'Diese Adresse gibt es nicht',
+        'en': 'This address does not exist',
+    },
+    'method_not_allowed': {
+        'de': 'Diese Methode ist hier nicht erlaubt',
+        'en': 'This method is not allowed here',
     },
 }
 

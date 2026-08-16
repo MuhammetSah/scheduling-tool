@@ -223,16 +223,18 @@ On first launch the app has no accounts, so opening it lands on "Erstes Konto ei
 
 **Invitation emails.** Set `SMTP_HOST` (plus `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `MAIL_FROM`) to send them for real, and `APP_BASE_URL` so the link points at the deployed frontend. Without `SMTP_HOST` — which is the default locally — the invitation is written to the server log instead of being sent, so the flow still works end to end. The link is deliberately never returned through the API: only the recipient is supposed to learn the token.
 
-Run the scheduler's unit tests with:
-
-```bash
-./venv/bin/python -m unittest test_scheduler -v
-```
-
-To run the algorithm comparison (installs OR-Tools for the exact CP-SAT reference):
+**Tests.** The suite covers the scheduler itself plus the API, the migration runner, request throttling and timezone handling. It needs `requirements-dev.txt` (not just `requirements.txt`) for `pytest`:
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/python -m pytest
+```
+
+`pytest.ini` picks up every `test_*.py`, including `test_scheduler.py`'s existing `unittest.TestCase`s — pytest runs those unmodified alongside the rest, so there's no separate `unittest` invocation to remember. `.github/workflows/ci.yml` runs the same command on every push to `main` and every pull request, against Python 3.13 (the production version — see `render.yaml`) and 3.14 (so local development on a newer interpreter doesn't drift unnoticed); the workflow's second job runs the frontend's `npm run lint` and `npm run build` the same way.
+
+To run the algorithm comparison instead (same `requirements-dev.txt`, which also installs OR-Tools for the exact CP-SAT reference):
+
+```bash
 ./venv/bin/python benchmark.py
 ```
 
@@ -272,6 +274,47 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 **Mail.** Add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` and `MAIL_FROM` to the backend service to send invitations for real. Without them the app still works — invitations are written to the service log instead of being sent. `backend/.env.example` lists every variable.
 
 **First run.** Opening the deployed frontend lands on "Erstes Konto einrichten"; that first account is HR and sets its own password. Everyone after that is invited by email.
+
+## Operations
+
+**Gunicorn.** `render.yaml`'s `startCommand` runs `gunicorn app:app --bind 0.0.0.0:$PORT --preload --workers 2 --threads 4 --timeout 60 --access-logfile -`, instead of Gunicorn's single-worker, single-thread default. The scheduler can run for up to `DEFAULT_TIME_BUDGET_SECONDS` (8s, `backend/scheduler.py`) computing a plan; a single synchronous worker would leave the API unresponsive to everyone else for that whole time. Two worker processes mean a second request can make real progress in parallel past Python's GIL while one worker is busy scheduling; the four threads per worker keep the rest of the API — which is mostly waiting on the database, not the CPU — responsive underneath. `--timeout 60` gives the scheduler room without leaving a genuinely stuck worker running forever. Each request opens its own database connection (`get_db()` in `backend/app.py`), so this setup caps concurrent connections at 8 (2 workers × 4 threads) — small by any commonly-known Postgres standard, though the free plan's exact connection ceiling hasn't been checked against these numbers.
+
+**Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
+
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`. To manage by hand:
+
+```bash
+cd backend
+./venv/bin/python migrations.py status   # what's applied
+./venv/bin/python migrations.py up       # apply anything pending
+./venv/bin/python migrations.py down     # roll back the most recently applied one
+```
+
+**Backup.** Render's free Postgres plan is widely described as having no automated backups and being removed after a period of inactivity or age — but that has not been verified here against Render's current terms, so check the dashboard directly before relying on either claim. What holds regardless of the exact policy: don't treat a free-tier database as durable storage for schedules the organisation depends on, and a paid plan is a precondition for real operation, not an optional upgrade. Until that's in place, back up by hand — at least weekly:
+
+```bash
+pg_dump "$DATABASE_URL" --no-owner --format=custom --file="schichtplan-$(date +%Y-%m-%d).dump"
+```
+
+Restore:
+
+```bash
+pg_restore --clean --no-owner --dbname="$DATABASE_URL" schichtplan-2026-08-16.dump
+```
+
+**Environment variables.** Full list in `backend/.env.example`. Required in production:
+
+| Variable | Without it |
+|---|---|
+| `SECRET_KEY` | The app refuses to start (`backend/security.py`) — it signs the session cookie and bearer token; a known key would let anyone forge a valid login |
+| `DATABASE_URL` | Falls back to a local SQLite file on a filesystem that's wiped on every restart — every schedule would be lost |
+| `ALLOWED_ORIGINS` | The frontend gets a CORS error on every call |
+| `APP_BASE_URL` | Invitation links point at `localhost` |
+| `FLASK_ENV=production` | No secure cookie flag, no HSTS header, and `SECRET_KEY` is no longer enforced |
+
+`APP_TIMEZONE` (default `Europe/Berlin`) is not required — it decides which calendar month counts as "current" when an employee reports their own sick/vacation day; set it only if the deployment serves a different timezone.
+
+**Troubleshooting.** Every unexpected error response carries a `request_id`; the same identifier is written to the server log next to the exception (`app.logger.exception` in `backend/app.py`). Search the Render service's log output for that id to find the underlying stack trace — the exact path through Render's current dashboard UI hasn't been verified here.
 
 ## API Endpoints
 

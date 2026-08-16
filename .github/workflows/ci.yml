@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  # Nur main, sonst laeuft CI fuer einen Pull-Request-Branch zweimal: einmal
+  # ueber push (jeder Branch, ohne Filter) und einmal ueber pull_request -
+  # fuer denselben Commit derselbe Suite, doppelt bezahlt.
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 ist die Produktionsversion (siehe render.yaml). 3.14 laeuft
+        # mit, damit lokale Entwicklung darauf nicht unbemerkt abdriftet.
+        python-version: ['3.13', '3.14']
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements-dev.txt
+      - name: Tests
+        run: python -m pytest
+
+  # Der obige Job laeuft ausschliesslich gegen SQLite - unveraendert. Dieser
+  # hier deckt zusaetzlich die Dialektschicht und den Migrations-Runner gegen
+  # ein echtes Postgres ab (siehe backend/pg_testsupport.py und
+  # backend/test_migrations_postgres.py): SERIAL statt AUTOINCREMENT,
+  # RETURNING id, die auf Postgres implizite Transaktion hinter _begin(),
+  # information_schema-Spaltenpruefung und CREATE UNIQUE INDEX IF NOT EXISTS
+  # auf einer Tabelle mit bereits vorhandenen Zeilen - das ist genau das, was
+  # bei jedem Deploy auf Render zum ersten Mal wirklich passiert.
+  #
+  # TEST_DATABASE_URL statt DATABASE_URL: siehe pg_testsupport.py - DATABASE_URL
+  # ist zugleich das Signal, an dem db.use_postgres() eine Produktionsumgebung
+  # erkennt, und darf nicht allein durch das Ausfuehren der Testsuite gesetzt
+  # sein. PGSSLMODE=disable, weil der Service-Container hier kein TLS anbietet;
+  # db.py verlangt sonst per Default sslmode=require (siehe get_db_connection()).
+  #
+  # Nur ein Python-Stand (die Produktionsversion, siehe render.yaml) statt der
+  # vollen Matrix oben: die Matrix testet Python-Versionsdrift, dieser Job
+  # testet einen Datenbankdialekt - beides gleichzeitig zu kreuzen bringt
+  # keine zusaetzliche Sicherheit, nur mehr Laufzeit.
+  backend-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      PGSSLMODE: disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Abhaengigkeiten installieren
+        run: pip install -r requirements-dev.txt
+      - name: Tests gegen Postgres
+        # test_scheduler.py ist reine Algorithmuslogik ohne Datenbankzugriff -
+        # fuer diesen Job irrelevant (siehe backend/test_scheduler.py).
+        run: python -m pytest --ignore=test_scheduler.py -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Abhaengigkeiten installieren
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
