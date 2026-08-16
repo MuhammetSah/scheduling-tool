@@ -139,6 +139,22 @@ TRANSLATIONS = {
         'de': 'Ungültiges Datum: {date}',
         'en': 'Invalid date: {date}',
     },
+    'availability_mode_invalid': {
+        'de': 'Unbekannter Verfügbarkeitsmodus. Erlaubt sind "anytime" und "windows".',
+        'en': 'Unknown availability mode. Allowed values are "anytime" and "windows".',
+    },
+    'availability_time_invalid': {
+        'de': 'Ungültige Uhrzeit "{value}". Erwartet wird HH:MM.',
+        'en': 'Invalid time "{value}". Expected HH:MM.',
+    },
+    'availability_window_empty': {
+        'de': 'Start- und Endzeit eines Fensters dürfen nicht gleich sein.',
+        'en': 'A window\'s start and end time must differ.',
+    },
+    'availability_valid_range_invalid': {
+        'de': 'Das Gültigkeitsende darf nicht vor dem Gültigkeitsbeginn liegen.',
+        'en': 'The validity end date must not be before its start date.',
+    },
 
     # ---- self-service absences (sick / vacation) ----
     'year_month_must_be_numbers': {

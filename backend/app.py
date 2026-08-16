@@ -590,6 +590,22 @@ def serialize_employee(cursor, row):
     cursor.execute('SELECT shift_type_id FROM employee_allowed_shift_types WHERE employee_id = ? ORDER BY shift_type_id', (employee_id,))
     allowed_shift_types = [r['shift_type_id'] for r in cursor.fetchall()]
 
+    cursor.execute(
+        'SELECT weekday, start_time, end_time, valid_from, valid_until FROM employee_availability '
+        'WHERE employee_id = ? ORDER BY weekday, start_time',
+        (employee_id,),
+    )
+    availability = [
+        {
+            'weekday': r['weekday'],
+            'start_time': r['start_time'],
+            'end_time': r['end_time'],
+            'valid_from': r['valid_from'],
+            'valid_until': r['valid_until'],
+        }
+        for r in cursor.fetchall()
+    ]
+
     return {
         'id': employee_id,
         'name': row['name'],
@@ -601,6 +617,8 @@ def serialize_employee(cursor, row):
         'unavailable_weekdays': unavailable_weekdays,
         'unavailable_dates': unavailable_dates,
         'allowed_shift_types': allowed_shift_types,
+        'availability_mode': row['availability_mode'],
+        'availability': availability,
     }
 
 
@@ -644,6 +662,42 @@ def replace_employee_constraints(connection, employee_id, data):
     cursor.execute('DELETE FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
     for shift_type_id in parse_int_list(data.get('allowed_shift_types')):
         cursor.execute('INSERT INTO employee_allowed_shift_types (employee_id, shift_type_id) VALUES (?, ?)', (employee_id, shift_type_id))
+
+    cursor.execute('DELETE FROM employee_availability WHERE employee_id = ?', (employee_id,))
+    for entry in data.get('availability') or []:
+        try:
+            weekday = int(entry.get('weekday'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if not 0 <= weekday <= 6:
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+
+        start_time = entry.get('start_time')
+        end_time = entry.get('end_time')
+        if not valid_time(start_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=start_time))
+        if not valid_time(end_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=end_time))
+        if start_time == end_time:
+            raise ValueError(t(g.lang, 'availability_window_empty'))
+
+        valid_from = entry.get('valid_from')
+        valid_until = entry.get('valid_until')
+        for bound in (valid_from, valid_until):
+            if bound is None:
+                continue
+            try:
+                date.fromisoformat(bound)
+            except (TypeError, ValueError):
+                raise ValueError(t(g.lang, 'invalid_date_value', date=bound))
+        if valid_from and valid_until and valid_until < valid_from:
+            raise ValueError(t(g.lang, 'availability_valid_range_invalid'))
+
+        cursor.execute(
+            'INSERT INTO employee_availability (employee_id, weekday, start_time, end_time, valid_from, valid_until) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (employee_id, weekday, start_time, end_time, valid_from, valid_until),
+        )
 
 
 def serialize_shift_type(cursor, row):
@@ -710,11 +764,14 @@ def create_employee():
         cursor = connection.cursor()
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
+        availability_mode = data.get('availability_mode') or 'anytime'
+        if availability_mode not in ('anytime', 'windows'):
+            raise ValueError(t(g.lang, 'availability_mode_invalid'))
         cursor.execute(
-            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours, availability_mode) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
             (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
-             weekly_hours, min_rest_hours if min_rest_hours is not None else 11),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, availability_mode),
         )
         employee_id = cursor.lastrowid
         replace_employee_constraints(connection, employee_id, data)
@@ -756,11 +813,14 @@ def update_employee(employee_id):
     try:
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
+        availability_mode = data.get('availability_mode') or 'anytime'
+        if availability_mode not in ('anytime', 'windows'):
+            raise ValueError(t(g.lang, 'availability_mode_invalid'))
         cursor.execute(
             'UPDATE employees SET name = ?, email = ?, active = ?, max_shifts_per_month = ?, '
-            'weekly_hours = ?, min_rest_hours = ? WHERE id = ?',
+            'weekly_hours = ?, min_rest_hours = ?, availability_mode = ? WHERE id = ?',
             (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
-             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, employee_id),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, availability_mode, employee_id),
         )
         replace_employee_constraints(connection, employee_id, data)
         connection.commit()
@@ -1140,6 +1200,20 @@ def load_employees_for_scheduling(cursor):
         unavailable_dates |= {r['date'] for r in cursor.fetchall()}
         cursor.execute('SELECT shift_type_id FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
         allowed = {r['shift_type_id'] for r in cursor.fetchall()}
+        cursor.execute(
+            'SELECT weekday, start_time, end_time, valid_from, valid_until FROM employee_availability WHERE employee_id = ?',
+            (employee_id,),
+        )
+        availability = [
+            {
+                'weekday': r['weekday'],
+                'start_time': r['start_time'],
+                'end_time': r['end_time'],
+                'valid_from': r['valid_from'],
+                'valid_until': r['valid_until'],
+            }
+            for r in cursor.fetchall()
+        ]
         employees.append({
             'id': employee_id,
             'max_shifts_per_month': row['max_shifts_per_month'],
@@ -1148,6 +1222,8 @@ def load_employees_for_scheduling(cursor):
             'unavailable_weekdays': unavailable_weekdays,
             'unavailable_dates': unavailable_dates,
             'allowed_shift_types': allowed if allowed else None,
+            'availability_mode': row['availability_mode'],
+            'availability': availability,
         })
     return employees
 
