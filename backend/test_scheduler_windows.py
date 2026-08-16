@@ -168,7 +168,16 @@ class ModusWindows(unittest.TestCase):
         self.assertTrue(structurally_eligible(mitarbeiter, _slot(weekday=4, start_time='16:00', end_time='20:00')))
 
     def test_gueltigkeitszeitraum_grenzen_sind_einschliessend(self):
-        """valid_from == Slotdatum und valid_until == Slotdatum gelten beide noch."""
+        """valid_from == Slotdatum und valid_until == Slotdatum gelten beide noch.
+
+        Der Wochentag bleibt auf allen drei Slots Freitag (4) - nur das Datum
+        wandert um je eine Woche. Wuerde man hier stattdessen den Wochentag
+        mitaendern (wie bei einem "ein Tag davor/danach"), wuerde bereits das
+        `weekday`-Filter in structurally_eligible() beide Negativfaelle
+        abfangen, bevor window_is_valid_on() ueberhaupt aufgerufen wird - der
+        Test wuerde dann auch mit einer kaputten Gueltigkeitspruefung gruen
+        bleiben (siehe Review-Befund).
+        """
         fenster = {'weekday': 4, 'start_time': '08:00', 'end_time': '14:00',
                    'valid_from': '2026-08-14', 'valid_until': '2026-08-14'}
         mitarbeiter = _employee(availability_mode='windows', availability=[fenster])
@@ -176,11 +185,11 @@ class ModusWindows(unittest.TestCase):
         schicht_am_stichtag = _slot(date='2026-08-14', weekday=4, start_time='08:00', end_time='14:00')
         self.assertTrue(structurally_eligible(mitarbeiter, schicht_am_stichtag))
 
-        schicht_einen_tag_davor = _slot(date='2026-08-13', weekday=3, start_time='08:00', end_time='14:00')
-        self.assertFalse(structurally_eligible(mitarbeiter, schicht_einen_tag_davor))
+        schicht_eine_woche_davor = _slot(date='2026-08-07', weekday=4, start_time='08:00', end_time='14:00')
+        self.assertFalse(structurally_eligible(mitarbeiter, schicht_eine_woche_davor))
 
-        schicht_einen_tag_danach = _slot(date='2026-08-15', weekday=5, start_time='08:00', end_time='14:00')
-        self.assertFalse(structurally_eligible(mitarbeiter, schicht_einen_tag_danach))
+        schicht_eine_woche_danach = _slot(date='2026-08-21', weekday=4, start_time='08:00', end_time='14:00')
+        self.assertFalse(structurally_eligible(mitarbeiter, schicht_eine_woche_danach))
 
     def test_nachtschicht_wird_gegen_den_wochentag_des_beginns_geprueft(self):
         """Freitag 22:00-06:00 gegen Freitagsfenster, nicht gegen Samstag."""

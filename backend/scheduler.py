@@ -148,13 +148,12 @@ def structurally_eligible(employee, slot):
         # Without known shift hours there is nothing to check - same stance
         # as the rest-period check (see rest_period_ok).
         if slot.get('start_time') and slot.get('end_time'):
-            matching = [
-                window for window in employee.get('availability', ())
+            if not any(
+                window_contains_shift(window, slot['start_time'], slot['end_time'])
+                for window in employee.get('availability', ())
                 if window['weekday'] == slot['weekday']
                 and window_is_valid_on(window, slot['date'])
-            ]
-            if not any(window_contains_shift(w, slot['start_time'], slot['end_time'])
-                       for w in matching):
+            ):
                 return False
     return True
 
