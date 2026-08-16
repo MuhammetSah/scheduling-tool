@@ -4,7 +4,6 @@ Der Runner ist die Stelle, an der ein Fehler still Daten kostet, deshalb wird
 er direkt getestet statt nur ueber die App.
 """
 
-import re
 import sqlite3
 from pathlib import Path
 
@@ -12,17 +11,29 @@ import pytest
 
 BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.py'
 
-
-def _baseline_table_names():
-    """Every table 0001_baseline.py creates, read from its own source rather
-    than hand-copied here - so an edit that drops or renames a table in the
-    frozen baseline breaks this test instead of passing silently.
-    """
-    # \( required right after the name: a real CREATE always opens its column
-    # list immediately, which is what tells an actual statement apart from a
-    # comment mentioning "CREATE TABLE IF NOT EXISTS ... above" in prose.
-    source = BASELINE_PATH.read_text(encoding='utf-8')
-    return set(re.findall(r'CREATE TABLE IF NOT EXISTS (\w+)\s*\(', source))
+# Die von 0001_baseline.py angelegten Tabellen, als Literal statt aus der
+# Datei abgeleitet. 0001_baseline aendert sich per Konvention nie wieder
+# (siehe dessen eigenes down(), das eine Ruecknahme verweigert) - jede
+# Aenderung an ihr waere also per Definition ein Fehler. Wuerde die Erwartung
+# stattdessen per Regex aus genau der Datei gelesen, die hier ausgefuehrt und
+# geprueft wird, wuerden eine geloeschte CREATE TABLE-Anweisung und die
+# tatsaechlich entstandene Tabellenmenge gemeinsam schrumpfen - die Assertion
+# unten bliebe dann bei jedem denkbaren Fehler gruen. Nicht wieder auf eine
+# Ableitung aus der Datei umstellen, so verlockend "DRY" das wirkt.
+BASELINE_TABELLEN = {
+    'employees',
+    'users',
+    'password_invitations',
+    'employee_unavailable_weekdays',
+    'employee_unavailable_dates',
+    'employee_absences',
+    'shift_types',
+    'shift_requirements',
+    'employee_allowed_shift_types',
+    'schedules',
+    'shift_time_overrides',
+    'shift_assignments',
+}
 
 
 @pytest.fixture
@@ -92,7 +103,7 @@ def test_baseline_erzeugt_genau_die_erwarteten_tabellen_nicht_nur_eine_teilmenge
     # sqlite_sequence ist SQLite's eigene Buchfuehrung fuer die
     # AUTOINCREMENT-Spalten, die {auto_id} erzeugt - beides gehoert nicht zur
     # Tabellenliste der Migration selbst, taucht aber unvermeidlich mit auf.
-    erwartet = _baseline_table_names() | {'schema_migrations', 'sqlite_sequence'}
+    erwartet = BASELINE_TABELLEN | {'schema_migrations', 'sqlite_sequence'}
     assert tabellen(db_file) == erwartet
 
 
