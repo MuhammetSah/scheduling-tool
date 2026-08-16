@@ -1,0 +1,31 @@
+# Repository-weite Ausnahmen. backend/ und frontend/ haben zusätzlich ihre
+# eigenen .gitignore-Dateien für werkzeugspezifische Artefakte.
+
+# Geheimnisse - dürfen nie ins Repo. .env.example ist die versionierte Vorlage.
+.env
+.env.*
+!.env.example
+
+# Lokale Datenbank
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+
+# Betriebssystem und Editoren
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
