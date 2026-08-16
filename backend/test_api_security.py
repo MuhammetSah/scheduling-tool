@@ -87,3 +87,46 @@ def test_sperrmeldung_kommt_in_der_angeforderten_sprache(hr_client):
     antwort = hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'},
                              headers={'X-Lang': 'en'})
     assert 'too many' in antwort.json['message'].lower()
+
+
+def test_unbekannte_route_liefert_json(client):
+    response = client.get('/gibt-es-nicht')
+
+    assert response.status_code == 404
+    assert response.is_json
+    assert response.json['message']
+
+
+def test_falsche_methode_liefert_json(client):
+    response = client.delete('/login')
+
+    assert response.status_code == 405
+    assert response.is_json
+
+
+def test_unerwarteter_fehler_liefert_json_mit_request_id(client, monkeypatch):
+    import app as app_module
+
+    def kaputt():
+        raise RuntimeError('absichtlich')
+
+    monkeypatch.setitem(app_module.app.view_functions, 'index', kaputt)
+    # Ohne einen registrierten Exception-Handler wuerde Flask im Testmodus die
+    # Ausnahme durchreichen statt sie zu behandeln (PROPAGATE_EXCEPTIONS
+    # default True bei TESTING=True) - dann wuerde client.get() selbst mit dem
+    # RuntimeError abbrechen statt eine Response zurueckzugeben. Sobald unten
+    # ein @app.errorhandler(Exception) registriert ist, greift Flask ihn schon
+    # in handle_user_exception, bevor PROPAGATE_EXCEPTIONS ueberhaupt geprueft
+    # wird - diese Zeile wird dann redundant, schadet aber nicht.
+    app_module.app.config['PROPAGATE_EXCEPTIONS'] = False
+
+    response = client.get('/')
+
+    assert response.status_code == 500
+    assert response.is_json
+    assert response.json['request_id']
+    # Kein Stacktrace und keine Ausnahmemeldung nach aussen.
+    body = response.get_data(as_text=True)
+    assert 'absichtlich' not in body
+    assert 'RuntimeError' not in body
+    assert 'Traceback' not in body

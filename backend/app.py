@@ -1,13 +1,16 @@
 import calendar
 import hashlib
+import logging
 import os
 import secrets
+import uuid
 from datetime import date, datetime, timedelta
 from functools import wraps
 
 from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
@@ -19,7 +22,7 @@ from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_
 app = Flask(__name__)
 app.secret_key = security.resolve_secret_key()
 
-if os.environ.get('FLASK_ENV') == 'production':
+if security.is_production():
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
     app.config['SESSION_COOKIE_SECURE'] = True
 
@@ -54,6 +57,9 @@ def resolve_request_lang():
     string - see i18n.py.
     """
     g.lang = resolve_lang(request.headers.get('X-Lang', DEFAULT_LANG))
+    # Kurze Kennung, die in der Fehlerantwort und im Log steht, damit eine
+    # Nutzermeldung ("Fehler a1b2c3d4") im Protokoll wiederfindbar ist.
+    g.request_id = uuid.uuid4().hex[:8]
 
 
 def get_db():
@@ -1743,6 +1749,49 @@ def replacement_suggestions(assignment_id):
 
     candidates.sort(key=lambda c: (c['current_load'], c['name']))
     return jsonify(candidates)
+
+
+# ---------- error handling ----------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+)
+
+
+def _request_lang():
+    """g.lang, oder die Standardsprache falls der before_request-Hook nie lief."""
+    return getattr(g, 'lang', DEFAULT_LANG)
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(error):
+    """Flasks eigene Fehler (404, 405, 413 ...) als JSON statt als HTML.
+
+    Ohne das bekommt frontend/src/api.js eine HTML-Seite mit Fehlerstatus,
+    scheitert beim Parsen und meldet "unerwartete Antwort" - was nach einer
+    falsch konfigurierten API-URL aussieht statt nach dem, was wirklich war.
+    """
+    keys = {404: 'not_found', 405: 'method_not_allowed'}
+    key = keys.get(error.code)
+    message = t(_request_lang(), key) if key else (error.description or error.name)
+    return jsonify({'message': message}), error.code
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Alles, was sonst als Stacktrace beim Nutzer landen wuerde.
+
+    Die Kennung geht an den Aufrufer, der Grund nur ins Protokoll - eine
+    Ausnahmemeldung kann Tabellen-, Spalten- oder Dateinamen enthalten.
+    """
+    request_id = getattr(g, 'request_id', '-')
+    app.logger.exception(
+        'Unbehandelter Fehler [%s] %s %s', request_id, request.method, request.path)
+    return jsonify({
+        'message': t(_request_lang(), 'server_error'),
+        'request_id': request_id,
+    }), 500
 
 
 @app.route('/')

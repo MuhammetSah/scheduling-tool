@@ -351,6 +351,20 @@ TRANSLATIONS = {
         'de': 'Schichtplan-Tool API',
         'en': 'Schichtplan-Tool API',
     },
+
+    # ---- error handling ----
+    'server_error': {
+        'de': 'Unerwarteter Serverfehler. Bitte erneut versuchen.',
+        'en': 'Unexpected server error. Please try again.',
+    },
+    'not_found': {
+        'de': 'Diese Adresse gibt es nicht',
+        'en': 'This address does not exist',
+    },
+    'method_not_allowed': {
+        'de': 'Diese Methode ist hier nicht erlaubt',
+        'en': 'This method is not allowed here',
+    },
 }
 
 
