@@ -4,9 +4,25 @@ Der Runner ist die Stelle, an der ein Fehler still Daten kostet, deshalb wird
 er direkt getestet statt nur ueber die App.
 """
 
+import re
 import sqlite3
+from pathlib import Path
 
 import pytest
+
+BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.py'
+
+
+def _baseline_table_names():
+    """Every table 0001_baseline.py creates, read from its own source rather
+    than hand-copied here - so an edit that drops or renames a table in the
+    frozen baseline breaks this test instead of passing silently.
+    """
+    # \( required right after the name: a real CREATE always opens its column
+    # list immediately, which is what tells an actual statement apart from a
+    # comment mentioning "CREATE TABLE IF NOT EXISTS ... above" in prose.
+    source = BASELINE_PATH.read_text(encoding='utf-8')
+    return set(re.findall(r'CREATE TABLE IF NOT EXISTS (\w+)\s*\(', source))
 
 
 @pytest.fixture
@@ -55,6 +71,31 @@ def test_frische_datenbank_bekommt_alle_tabellen(fresh_db):
             'schedules', 'schema_migrations'} <= tabellen(db_file)
 
 
+def test_baseline_erzeugt_genau_die_erwarteten_tabellen_nicht_nur_eine_teilmenge(leere_migrationen):
+    """0001_baseline aendert sich per Definition nie wieder (siehe dessen
+    eigenes down(), das eine Ruecknahme verweigert) - gerade deshalb lohnt
+    sich eine erschoepfende statt einer stichprobenartigen Pruefung: eine
+    still entfernte Tabelle (z.B. employee_allowed_shift_types oder
+    shift_time_overrides) faellt sonst durch jeden Test, der nur eine
+    Teilmenge der Tabellen abfragt.
+
+    Laeuft isoliert nur mit 0001_baseline (leere_migrationen), nicht mit dem
+    echten Migrationsordner - 0002/0003 duerften sonst jede spaetere,
+    voellig legitime neue Tabelle zu einem Fehlschlag hier machen.
+    """
+    migrations, verzeichnis, db_file = leere_migrationen
+    (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+
+    migrations.apply_pending()
+
+    # schema_migrations legt der Runner selbst an (_ensure_version_table);
+    # sqlite_sequence ist SQLite's eigene Buchfuehrung fuer die
+    # AUTOINCREMENT-Spalten, die {auto_id} erzeugt - beides gehoert nicht zur
+    # Tabellenliste der Migration selbst, taucht aber unvermeidlich mit auf.
+    erwartet = _baseline_table_names() | {'schema_migrations', 'sqlite_sequence'}
+    assert tabellen(db_file) == erwartet
+
+
 def test_zweiter_lauf_aendert_nichts(fresh_db):
     migrations, _ = fresh_db
     migrations.apply_pending()
@@ -68,6 +109,32 @@ def test_angewandte_versionen_werden_protokolliert(fresh_db):
 
     assert migrations.applied_versions() == sorted(migrations.applied_versions())
     assert '0001_baseline' in migrations.applied_versions()
+
+
+def test_init_db_protokolliert_angewandte_migrationen(fresh_db, caplog):
+    """Auf Renders Free-Plan gibt es keine Shell und damit kein migrations.py
+    status - dieses Log ist dort die einzige Stelle, an der nach einem Deploy
+    sichtbar wird, dass (und welche) Migration gerade lief.
+    """
+    migrations, _ = fresh_db
+    import db as db_module
+
+    with caplog.at_level('INFO', logger='db'):
+        db_module.init_db()
+
+    assert '0001_baseline' in caplog.text
+
+
+def test_init_db_protokolliert_wenn_nichts_offen_ist(fresh_db, caplog):
+    migrations, _ = fresh_db
+    import db as db_module
+    db_module.init_db()
+    caplog.clear()
+
+    with caplog.at_level('INFO', logger='db'):
+        db_module.init_db()
+
+    assert 'Keine Migrationen ausstehend' in caplog.text
 
 
 def test_down_datei_ohne_up_skript_wird_nicht_still_als_angewandt_protokolliert(leere_migrationen):

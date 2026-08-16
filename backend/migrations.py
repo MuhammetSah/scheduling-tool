@@ -18,7 +18,7 @@ SQL-Dateien duerfen den Platzhalter {auto_id} verwenden; er wird je nach
 Datenbank durch SERIAL PRIMARY KEY oder INTEGER PRIMARY KEY AUTOINCREMENT
 ersetzt.
 
-Zwei Faellen der Dialektschicht in db.py, die beim Schreiben einer
+Drei Faelle der Dialektschicht in db.py, die beim Schreiben einer
 .sql-Migration leicht uebersehen werden:
   - _PostgresCursor.execute() interpoliert mit %, auch ohne uebergebene
     Parameter - ein woertliches % in einer .sql-Migration (z.B. in einem
@@ -26,6 +26,9 @@ Zwei Faellen der Dialektschicht in db.py, die beim Schreiben einer
   - Jedes blanke INSERT ohne eigenes RETURNING bekommt automatisch
     RETURNING id angehaengt; das schlaegt fehl, wenn die Zieltabelle keine
     Spalte id hat.
+  - _PostgresCursor.execute() ersetzt jedes ? bedingungslos durch %s, auch
+    ausserhalb einer Parameterliste; ein woertliches ? in einer kuenftigen
+    Migration wird auf Postgres genauso stillschweigend verstuemmelt.
 
 Das Aufteilen in _statements() kennt keine Kommentare oder Zeichenketten: ein
 woertliches ; in einem -- Kommentar trennt die Datei genauso wie jedes andere.

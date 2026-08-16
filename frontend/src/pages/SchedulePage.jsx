@@ -46,13 +46,27 @@ function SchedulePage({ setFlash, user }) {
   async function fetchSchedule() {
     try {
       return await api.get(`/schedules/${year}/${month}`)
-    } catch {
-      return null
+    } catch (err) {
+      // Nur ein echtes "kein Plan fuer diesen Monat" wird als null behandelt -
+      // das ist ausschliesslich das 404, das GET /schedules/<year>/<month>
+      // liefert (backend/app.py: no_schedule_generated_yet). Jeder andere
+      // Fehlschlag (500, Netzwerkausfall, CORS) muss als Fehler sichtbar
+      // werden: fiele er hier auch auf null, sähe die Seite "kein Plan fuer
+      // diesen Monat" fuer einen Monat, der in Wirklichkeit einen hat -
+      // generate() ueberspringt dann seine Rueckfrage vor dem Ueberschreiben
+      // eines bestehenden Plans (siehe dort), und ohne Handkorrekturen
+      // darauf hat auch der Server nichts, worauf er ein 409 stuetzen koennte.
+      if (err.status === 404) return null
+      throw err
     }
   }
 
   async function refreshSchedule() {
-    setSchedule(await fetchSchedule())
+    try {
+      setSchedule(await fetchSchedule())
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
   }
 
   // Mount-only fetch; setState happens after the await inside loadStaticData(), not synchronously.
@@ -60,15 +74,13 @@ function SchedulePage({ setFlash, user }) {
   useEffect(() => { loadStaticData() }, [])
 
   // Loading/warnings/selection are reset in handleMonthChange (the event that
-  // causes them), so this effect only ever sets state inside the .then().
+  // causes them), so this effect only ever sets state inside .then()/.catch().
   useEffect(() => {
     let cancelled = false
-    fetchSchedule().then(data => {
-      if (!cancelled) {
-        setSchedule(data)
-        setLoading(false)
-      }
-    })
+    fetchSchedule()
+      .then(data => { if (!cancelled) setSchedule(data) })
+      .catch(err => { if (!cancelled) setFlash({ type: 'error', text: err.message }) })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ym])
@@ -76,6 +88,10 @@ function SchedulePage({ setFlash, user }) {
   function handleMonthChange(newYm) {
     setYm(newYm)
     setLoading(true)
+    // Ohne das haengt bis zum Ende des Fetches oben noch der Plan des vorigen
+    // Monats im State - ein Klick auf "Neu erzeugen" waehrend dieser Luecke
+    // wuerde dann faelschlich gegen den alten Monat pruefen/generieren.
+    setSchedule(null)
     setWarnings([])
     setSwapSelection(null)
   }
@@ -127,7 +143,7 @@ function SchedulePage({ setFlash, user }) {
   }
 
   async function deleteSchedule() {
-    if (!confirm(t('schedule.confirmDelete'))) return
+    if (!window.confirm(t('schedule.confirmDelete'))) return
     try {
       const result = await api.delete(`/schedules/${year}/${month}`)
       setSchedule(null)
@@ -249,7 +265,7 @@ function SchedulePage({ setFlash, user }) {
                 {/* generate() darf hier nicht direkt als Handler stehen: onClick
                     reicht das Klick-Event durch, das als erstes Argument sonst
                     `bestaetigt` waer und faelschlich als "confirm: true" zaehlt. */}
-                <button onClick={() => generate()}>{schedule ? t('schedule.regenerateButton') : t('schedule.generateButton')}</button>
+                <button onClick={() => generate()} disabled={loading}>{schedule ? t('schedule.regenerateButton') : t('schedule.generateButton')}</button>
                 {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>{t('schedule.deleteButton')}</button>}
               </>
             )}

@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import sqlite3
@@ -106,12 +107,25 @@ def table_columns(cursor, table):
     return {row['name'] for row in cursor.fetchall()}
 
 
+_logger = logging.getLogger(__name__)
+
+
 def init_db():
     """Bringt das Schema auf den aktuellen Stand.
 
     Der eigentliche Inhalt liegt jetzt in backend/migrations/ - siehe
     migrations.py. Diese Funktion bleibt als Einstiegspunkt bestehen, damit
     app.py sich nicht aendern muss.
+
+    Protokolliert das Ergebnis, statt es wegzuwerfen: das ist auf Renders
+    Free-Plan ohne Shell-Zugriff die einzige Stelle, an der nach einem Deploy
+    sichtbar wird, ob und welche Migration gerade angewandt wurde (siehe
+    app.py fuer die Logging-Konfiguration, die dafuer vor diesem Aufruf
+    stehen muss).
     """
     from migrations import apply_pending
-    apply_pending()
+    applied = apply_pending()
+    if applied:
+        _logger.info('Migrationen angewandt: %s', ', '.join(applied))
+    else:
+        _logger.info('Keine Migrationen ausstehend')

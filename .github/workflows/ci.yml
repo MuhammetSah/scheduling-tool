@@ -1,8 +1,15 @@
 name: CI
 
 on:
+  # Nur main, sonst laeuft CI fuer einen Pull-Request-Branch zweimal: einmal
+  # ueber push (jeder Branch, ohne Filter) und einmal ueber pull_request -
+  # fuer denselben Commit derselbe Suite, doppelt bezahlt.
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   backend:

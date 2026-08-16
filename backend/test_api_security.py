@@ -1,6 +1,9 @@
 """Absicherung der HTTP-Schicht: Schluesselpflicht und Antwort-Header."""
 
+import sys
+
 import pytest
+from flask import request
 
 import security
 
@@ -40,6 +43,48 @@ def test_hsts_in_produktion_gesetzt(client, monkeypatch):
     # client-Fixture bereits ohne FLASK_ENV importiert.
     monkeypatch.setenv('FLASK_ENV', 'production')
     assert 'Strict-Transport-Security' in client.get('/').headers
+
+
+def test_ip_wird_ausserhalb_der_produktion_nicht_aus_x_forwarded_for_uebernommen(client, monkeypatch):
+    """Ohne is_production() ist ProxyFix nicht eingehaengt (siehe app.py):
+    lokal gibt es keinen Proxy, der den Header setzt, also darf ein Client
+    ihn nicht selbst setzen koennen, um die in login_attempts.ip
+    protokollierte Adresse zu faelschen.
+    """
+    import app as app_module
+
+    def erfasse_ip():
+        return {'ip': request.remote_addr}, 200
+    monkeypatch.setitem(app_module.app.view_functions, 'index', erfasse_ip)
+
+    antwort = client.get('/', headers={'X-Forwarded-For': '203.0.113.5'})
+
+    assert antwort.json['ip'] != '203.0.113.5'
+
+
+def test_ip_wird_in_produktion_ueber_proxyfix_aus_x_forwarded_for_gelesen(monkeypatch, tmp_path):
+    """In Produktion (Render) schreibt der vorgeschaltete Proxy diesen Header
+    selbst, deshalb ist er dort vertrauenswuerdig - siehe die Begruendung bei
+    ProxyFix in app.py.
+    """
+    monkeypatch.setenv('SCHICHTPLAN_DB_PATH', str(tmp_path / 'proxyfix.db'))
+    monkeypatch.delenv('DATABASE_URL', raising=False)
+    monkeypatch.setenv('SECRET_KEY', 'test-secret-nur-fuer-tests')
+    monkeypatch.delenv('SMTP_HOST', raising=False)
+    monkeypatch.setenv('FLASK_ENV', 'production')
+
+    for module in ('app', 'db', 'migrations'):
+        sys.modules.pop(module, None)
+    import app as app_module
+
+    def erfasse_ip():
+        return {'ip': request.remote_addr}, 200
+    monkeypatch.setitem(app_module.app.view_functions, 'index', erfasse_ip)
+
+    with app_module.app.test_client() as test_client:
+        antwort = test_client.get('/', headers={'X-Forwarded-For': '203.0.113.5'})
+
+    assert antwort.json['ip'] == '203.0.113.5'
 
 
 def test_zu_viele_fehlversuche_werden_gesperrt(hr_client):

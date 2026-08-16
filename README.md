@@ -223,16 +223,18 @@ On first launch the app has no accounts, so opening it lands on "Erstes Konto ei
 
 **Invitation emails.** Set `SMTP_HOST` (plus `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_USE_TLS`, `MAIL_FROM`) to send them for real, and `APP_BASE_URL` so the link points at the deployed frontend. Without `SMTP_HOST` — which is the default locally — the invitation is written to the server log instead of being sent, so the flow still works end to end. The link is deliberately never returned through the API: only the recipient is supposed to learn the token.
 
-Run the scheduler's unit tests with:
-
-```bash
-./venv/bin/python -m unittest test_scheduler -v
-```
-
-To run the algorithm comparison (installs OR-Tools for the exact CP-SAT reference):
+**Tests.** The suite covers the scheduler itself plus the API, the migration runner, request throttling and timezone handling. It needs `requirements-dev.txt` (not just `requirements.txt`) for `pytest`:
 
 ```bash
 ./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/python -m pytest
+```
+
+`pytest.ini` picks up every `test_*.py`, including `test_scheduler.py`'s existing `unittest.TestCase`s — pytest runs those unmodified alongside the rest, so there's no separate `unittest` invocation to remember. `.github/workflows/ci.yml` runs the same command on every push to `main` and every pull request, against Python 3.13 (the production version — see `render.yaml`) and 3.14 (so local development on a newer interpreter doesn't drift unnoticed); the workflow's second job runs the frontend's `npm run lint` and `npm run build` the same way.
+
+To run the algorithm comparison instead (same `requirements-dev.txt`, which also installs OR-Tools for the exact CP-SAT reference):
+
+```bash
 ./venv/bin/python benchmark.py
 ```
 

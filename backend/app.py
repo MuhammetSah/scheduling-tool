@@ -11,6 +11,7 @@ from flask import Flask, g, jsonify, request, session
 from flask_cors import CORS
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import mailer
@@ -20,12 +21,35 @@ from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes
 
+# Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
+# init_db() weiter unten. Stand diese Konfiguration erst am Dateiende (wie
+# vor diesem Fix), lief init_db() mit dem Root-Logger auf dem WARNING-Default:
+# jede Migration, die beim Start angewandt wurde, verschwand spurlos, obwohl
+# init_db() sie protokolliert (siehe db.py) - auf Renders Free-Plan ohne Shell
+# ist migrations.py status dort nicht mal als Notloesung erreichbar.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
+)
+
 app = Flask(__name__)
 app.secret_key = security.resolve_secret_key()
 
 if security.is_production():
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'
     app.config['SESSION_COOKIE_SECURE'] = True
+
+    # Nur in Produktion vertrauenswuerdig: Render terminiert TLS vor dieser
+    # App und schreibt X-Forwarded-For/X-Forwarded-Proto selbst - der eine
+    # Hop (x_for=1, x_proto=1), dem wir hier vertrauen, kommt also nachweislich
+    # vom Render-Proxy, nicht vom Client. Lokal (und ueberall ohne Proxy davor)
+    # gibt es diese Garantie nicht: ein direkt erreichbarer Flask-Dev-Server
+    # wuerde jedem Client erlauben, X-Forwarded-For selbst zu setzen und damit
+    # die in login_attempts.ip protokollierte Adresse zu faelschen - deshalb
+    # bedingt auf is_production(), nicht global. Eine Bereitstellung, die diese
+    # App direkt ohne vorgeschalteten Proxy exponiert, darf dies nicht
+    # unveraendert uebernehmen.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 # supports_credentials is required for the session cookie to survive the
 # cross-origin hop from the Vite dev server to this API. X-Lang and
@@ -1778,11 +1802,8 @@ def replacement_suggestions(assignment_id):
 
 
 # ---------- error handling ----------
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(name)s %(message)s',
-)
+# (logging.basicConfig() lives near the top of this file now, above init_db()
+# - see the comment there.)
 
 
 def _request_lang():
