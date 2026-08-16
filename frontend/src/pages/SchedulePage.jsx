@@ -87,6 +87,18 @@ function SchedulePage({ setFlash, user }) {
       setFlash({ type: 'error', text: t('schedule.needShiftTypeFlash') })
       return
     }
+    // Zwei getrennte Rückfragen für zwei unterschiedliche Risiken, aber nie
+    // beide auf einen Klick: Hat der geladene Plan Handkorrekturen, weiß das
+    // hier nur der Server (der 409 unten trägt die genaue Anzahl) - diese
+    // lokale Frage überspringen wir dann, sonst kämen zwei Dialoge
+    // hintereinander. Hat er keine, kann der Server das nicht mehr melden
+    // (nichts zu verlieren), also fragen wir hier vorab: ein bereits
+    // erzeugter Plan wird sonst wortlos ersetzt, z. B. durch einen
+    // versehentlichen Doppelklick.
+    const hatHandkorrekturen = schedule?.assignments?.some(a => a.manually_edited)
+    if (schedule && !hatHandkorrekturen && !window.confirm(t('schedule.confirmRegenerateExisting'))) {
+      return
+    }
     try {
       const data = await api.post('/schedules/generate', {
         year,
