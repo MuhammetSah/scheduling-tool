@@ -19,11 +19,28 @@ services:
     # Rest bedienbar; --timeout 60 laesst dem Planer Luft, ohne einen wirklich
     # haengenden Worker ewig stehen zu lassen. Jeder Request oeffnet eine
     # eigene DB-Verbindung (siehe db.py/app.py get_db()), also sind hoechstens
-    # 2 Worker * 4 Threads = 8 gleichzeitige Verbindungen zu erwarten - das
-    # sollte im kostenlosen Postgres-Plan unproblematisch sein, aber die
-    # genaue Verbindungsobergrenze dieses Plans wurde nicht geprueft.
+    # 2 Worker * 4 Threads = 8 gleichzeitige Verbindungen zu erwarten - klein
+    # gemessen an ueblichen Postgres-Grenzen, aber die genaue
+    # Verbindungsobergrenze des kostenlosen Plans wurde nicht geprueft.
+    #
+    # --preload: app.py ruft init_db() (-> migrations.apply_pending()) beim
+    # Import auf. Ohne --preload importiert jeder geforkte Worker app.py fuer
+    # sich selbst, mit nur 0-100ms Versatz zwischen den Forks (siehe
+    # gunicorn/arbiter.py) - bei einem Deploy mit offener Migration koennen
+    # dann zwei Worker gleichzeitig apply_pending() ausfuehren. Das ist kein
+    # harmloser Einzel-Worker-Neustart: schlaegt ein Worker beim Boot fehl,
+    # meldet Gunicorn WORKER_BOOT_ERROR, reap_workers() wirft HaltServer, und
+    # der Arbiter beendet den gesamten Dienst - auch den Worker, der die
+    # Migration bereits erfolgreich angewandt hat. --preload laesst den
+    # Import (und damit init_db()) genau einmal im Master-Prozess vor dem
+    # Fork laufen, wodurch das Rennen entfaellt. Sicher hier, weil init_db()
+    # seine DB-Verbindung noch vor der Rueckkehr wieder schliesst (siehe
+    # migrations.py apply_pending(), finally: connection.close()) und app.py
+    # sonst keine Ressource (Socket, Datei, Thread) offen haelt, die ein
+    # Fork problematisch erben wuerde - logging.basicConfig() schreibt nur
+    # nach stderr, das jeder Kindprozess ohnehin von Gunicorn erbt.
     startCommand: >-
-      gunicorn app:app --bind 0.0.0.0:$PORT
+      gunicorn app:app --bind 0.0.0.0:$PORT --preload
       --workers 2 --threads 4 --timeout 60 --access-logfile -
     healthCheckPath: /
     envVars:
