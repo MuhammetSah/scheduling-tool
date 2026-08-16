@@ -13,7 +13,18 @@ services:
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    # Der Planer rechnet bis zu 8 Sekunden (DEFAULT_TIME_BUDGET_SECONDS in
+    # scheduler.py). Mit einem einzigen synchronen Worker antwortet die API in
+    # dieser Zeit niemandem sonst. Zwei Worker mit je vier Threads halten den
+    # Rest bedienbar; --timeout 60 laesst dem Planer Luft, ohne einen wirklich
+    # haengenden Worker ewig stehen zu lassen. Jeder Request oeffnet eine
+    # eigene DB-Verbindung (siehe db.py/app.py get_db()), also sind hoechstens
+    # 2 Worker * 4 Threads = 8 gleichzeitige Verbindungen zu erwarten - das
+    # sollte im kostenlosen Postgres-Plan unproblematisch sein, aber die
+    # genaue Verbindungsobergrenze dieses Plans wurde nicht geprueft.
+    startCommand: >-
+      gunicorn app:app --bind 0.0.0.0:$PORT
+      --workers 2 --threads 4 --timeout 60 --access-logfile -
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION

@@ -273,6 +273,47 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **First run.** Opening the deployed frontend lands on "Erstes Konto einrichten"; that first account is HR and sets its own password. Everyone after that is invited by email.
 
+## Operations
+
+**Gunicorn.** `render.yaml`'s `startCommand` runs `gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 60 --access-logfile -`, instead of Gunicorn's single-worker, single-thread default. The scheduler can run for up to `DEFAULT_TIME_BUDGET_SECONDS` (8s, `backend/scheduler.py`) computing a plan; a single synchronous worker would leave the API unresponsive to everyone else for that whole time. Two worker processes mean a second request can make real progress in parallel past Python's GIL while one worker is busy scheduling; the four threads per worker keep the rest of the API — which is mostly waiting on the database, not the CPU — responsive underneath. `--timeout 60` gives the scheduler room without leaving a genuinely stuck worker running forever. Each request opens its own database connection (`get_db()` in `backend/app.py`), so this setup caps concurrent connections at 8 (2 workers × 4 threads) — modest for Postgres, though the free plan's exact connection ceiling hasn't been checked against these numbers.
+
+One consequence worth knowing: `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations, so every Gunicorn worker does this independently on startup. That was already true with one worker; with two it means two processes can now start applying the same pending migration at close to the same time. Each migration runs in its own transaction (see `backend/migrations.py`), which narrows the window, but the race itself is a known, deferred issue, not something this change fixes.
+
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`. To manage by hand:
+
+```bash
+cd backend
+./venv/bin/python migrations.py status   # what's applied
+./venv/bin/python migrations.py up       # apply anything pending
+./venv/bin/python migrations.py down     # roll back the most recently applied one
+```
+
+**Backup.** Render's free Postgres plan is widely described as having no automated backups and being removed after a period of inactivity or age — but that has not been verified here against Render's current terms, so check the dashboard directly before relying on either claim. What holds regardless of the exact policy: don't treat a free-tier database as durable storage for schedules the organisation depends on, and a paid plan is a precondition for real operation, not an optional upgrade. Until that's in place, back up by hand — at least weekly:
+
+```bash
+pg_dump "$DATABASE_URL" --no-owner --format=custom --file="schichtplan-$(date +%Y-%m-%d).dump"
+```
+
+Restore:
+
+```bash
+pg_restore --clean --no-owner --dbname="$DATABASE_URL" schichtplan-2026-08-16.dump
+```
+
+**Environment variables.** Full list in `backend/.env.example`. Required in production:
+
+| Variable | Without it |
+|---|---|
+| `SECRET_KEY` | The app refuses to start (`backend/security.py`) — it signs the session cookie and bearer token; a known key would let anyone forge a valid login |
+| `DATABASE_URL` | Falls back to a local SQLite file on a filesystem that's wiped on every restart — every schedule would be lost |
+| `ALLOWED_ORIGINS` | The frontend gets a CORS error on every call |
+| `APP_BASE_URL` | Invitation links point at `localhost` |
+| `FLASK_ENV=production` | No secure cookie flag, no HSTS header, and `SECRET_KEY` is no longer enforced |
+
+`APP_TIMEZONE` (default `Europe/Berlin`) is not required — it decides which calendar month counts as "current" when an employee reports their own sick/vacation day; set it only if the deployment serves a different timezone.
+
+**Troubleshooting.** Every unexpected error response carries a `request_id`; the same identifier is written to the server log next to the exception (`app.logger.exception` in `backend/app.py`). Search the Render service's log output for that id to find the underlying stack trace — the exact path through Render's current dashboard UI hasn't been verified here.
+
 ## API Endpoints
 
 Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
