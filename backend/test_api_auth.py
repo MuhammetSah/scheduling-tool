@@ -89,9 +89,18 @@ def test_einladung_ist_gueltig_und_expires_at_traegt_keine_zeitzone(hr_client):
     expires_at = cursor.fetchone()['expires_at']
     connection.close()
 
-    # Genau das Format, das das alte datetime.utcnow() erzeugte: kein Offset-Suffix.
-    assert '+' not in expires_at
-    assert 'Z' not in expires_at
+    # as_datetime() dokumentiert es schon: Postgres liefert fuer eine
+    # TIMESTAMP-Spalte selbst ein natives datetime zurueck, SQLite einen
+    # String. Auf Postgres gibt es also keinen String, an dem sich ein
+    # Offset-Suffix ablesen liesse - das Postgres-Aequivalent von "kein
+    # Offset-Suffix" ist ein datetime ohne tzinfo, also naiv, genau wie
+    # .replace(tzinfo=None) es in issue_invitation() erzeugt.
+    if isinstance(expires_at, datetime):
+        assert expires_at.tzinfo is None
+    else:
+        # Genau das Format, das das alte datetime.utcnow() erzeugte: kein Offset-Suffix.
+        assert '+' not in expires_at
+        assert 'Z' not in expires_at
 
     jetzt_naiv = datetime.now(timezone.utc).replace(tzinfo=None)
     assert as_datetime(expires_at) > jetzt_naiv
