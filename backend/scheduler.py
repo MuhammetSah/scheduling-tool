@@ -16,6 +16,49 @@ class _BudgetExceeded(Exception):
     pass
 
 
+def time_to_minutes(hhmm):
+    """Minutes since midnight for an "HH:MM" string."""
+    hours, _, minutes = hhmm.partition(':')
+    return int(hours) * 60 + int(minutes)
+
+
+def window_contains_shift(window, start_time, end_time):
+    """Does the shift fit entirely inside this one window?
+
+    Entirely, not partially - partial coverage is a later stage. Computed in
+    minutes since midnight of the start day, using the same midnight
+    convention as shift_duration_minutes(): an end at or before its start is
+    taken to lie on the following day and gets 1440 added. That lets a night
+    shift compare correctly against a window that also crosses midnight.
+    """
+    shift_start = time_to_minutes(start_time)
+    shift_end = time_to_minutes(end_time)
+    if shift_end <= shift_start:
+        shift_end += 24 * 60
+
+    window_start = time_to_minutes(window['start_time'])
+    window_end = time_to_minutes(window['end_time'])
+    if window_end <= window_start:
+        window_end += 24 * 60
+
+    return window_start <= shift_start and shift_end <= window_end
+
+
+def window_is_valid_on(window, iso_date):
+    """Is this window in effect on this date? Both bounds are inclusive.
+
+    Plain string comparison - ISO dates sort lexicographically correctly, and
+    the bounds come from the same source as the slot date.
+    """
+    valid_from = window.get('valid_from')
+    valid_until = window.get('valid_until')
+    if valid_from and iso_date < valid_from:
+        return False
+    if valid_until and iso_date > valid_until:
+        return False
+    return True
+
+
 def shift_duration_minutes(start_time, end_time):
     """Minutes a shift lasts, given "HH:MM" strings.
 
@@ -101,6 +144,18 @@ def structurally_eligible(employee, slot):
     allowed = employee['allowed_shift_types']
     if allowed and slot['shift_type_id'] not in allowed:
         return False
+    if employee.get('availability_mode', 'anytime') == 'windows':
+        # Without known shift hours there is nothing to check - same stance
+        # as the rest-period check (see rest_period_ok).
+        if slot.get('start_time') and slot.get('end_time'):
+            matching = [
+                window for window in employee.get('availability', ())
+                if window['weekday'] == slot['weekday']
+                and window_is_valid_on(window, slot['date'])
+            ]
+            if not any(window_contains_shift(w, slot['start_time'], slot['end_time'])
+                       for w in matching):
+                return False
     return True
 
 
@@ -412,7 +467,11 @@ def generate_schedule(
 
     employees: [{id, max_shifts_per_month, unavailable_weekdays: set[int],
                  unavailable_dates: set[str ISO date], allowed_shift_types: set[int] or None,
-                 weekly_hours: number or None, min_rest_hours: number or None}]
+                 weekly_hours: number or None, min_rest_hours: number or None,
+                 availability_mode: 'anytime' or 'windows', optional, default 'anytime',
+                 availability: list of {weekday: int, start_time: "HH:MM", end_time: "HH:MM",
+                                        valid_from: str or None, valid_until: str or None},
+                 optional, only consulted when availability_mode == 'windows'}]
     shift_types: [{id, requirements: {weekday(0-6): required_count},
                    start_time: "HH:MM" or None, end_time: "HH:MM" or None}]
 
@@ -420,7 +479,10 @@ def generate_schedule(
     same "no guarantee, reports gaps rather than failing" philosophy as
     max_shifts_per_month - and both fall back to doing nothing when a shift
     type has no start/end time, so existing callers that only ever dealt in
-    shift counts are unaffected.
+    shift counts are unaffected. availability_mode/availability follow the
+    same pattern: callers (including all existing tests) that never supply
+    them get 'anytime' behaviour, i.e. no restriction at all - see
+    structurally_eligible().
 
     Benchmarking the two slot orderings against each other (see benchmark.py)
     showed they win in different situations, so neither is right on its own:
