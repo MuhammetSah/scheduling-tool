@@ -5,3 +5,11 @@ flask==3.1.3
 flask-cors==6.0.5
 gunicorn==26.0.0
 psycopg2-binary==2.9.12
+
+# zoneinfo (Standardbibliothek) liefert selbst keine Zonendaten und verlaesst
+# sich auf die Zonendatenbank des Systems, mit tzdata als vorgesehenem
+# Rueckfall-Paket. Linux-Hosts (u.a. Render) haben die Systemdatenbank, ein
+# schlankes Container-Image oder ein Windows-Checkout, das nur diese Datei
+# installiert, nicht. Ohne dieses Paket scheitert selbst Europe/Berlin, das
+# Fallback in timeutil.py inklusive - siehe dort.
+tzdata==2026.3

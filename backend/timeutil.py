@@ -15,24 +15,30 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 DEFAULT_TIMEZONE = 'Europe/Berlin'
 
 
-def timezone_name():
-    """Der konfigurierte Zonenname, oder Berlin falls er unbekannt ist.
+def _configured_zone():
+    """Die konfigurierte Zeitzone als ZoneInfo, oder Berlin falls sie unbekannt ist.
 
     Ein Tippfehler in der Umgebungsvariablen soll den Start nicht verhindern -
     eine falsche Zone ist ein Schoenheitsfehler, eine nicht startende
-    Anwendung ist ein Ausfall.
+    Anwendung ist ein Ausfall. ZoneInfo(...) wird hier genau einmal, geschuetzt,
+    aufgeloest; timezone_name() und today_local() nutzen beide dieses Ergebnis,
+    statt die Zone ein zweites Mal ungeschuetzt aufzuloesen.
     """
     name = os.environ.get('APP_TIMEZONE', DEFAULT_TIMEZONE)
     try:
-        ZoneInfo(name)
+        return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        return DEFAULT_TIMEZONE
-    return name
+        return ZoneInfo(DEFAULT_TIMEZONE)
+
+
+def timezone_name():
+    """Der konfigurierte Zonenname, oder Berlin falls er unbekannt ist."""
+    return _configured_zone().key
 
 
 def today_local():
     """Das Datum, das gerade am Betriebsstandort gilt."""
-    return datetime.now(ZoneInfo(timezone_name())).date()
+    return datetime.now(_configured_zone()).date()
 
 
 def month_bounds(day):
