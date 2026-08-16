@@ -36,10 +36,32 @@ Fragmente, die nach Entfernen der -- Kommentare nur noch aus Leerraum
 bestehen, werden stillschweigend uebersprungen statt an cursor.execute()
 uebergeben - alles andere (Bloeckkommentare /* */, ; in Zeichenketten) bleibt
 unabsichtlich falsch aufgeteilt; siehe _statements().
+
+Nebenlaeufigkeit auf Postgres: apply_pending() und rollback_last() serialisieren
+sich ueber einen Postgres-Session-Advisory-Lock (siehe _migration_lock()), auf
+SQLite tun sie das nicht - und zwar bewusst asymmetrisch, nicht aus
+Nachlaessigkeit. Der Grund fuer den Lock: backend/app.py ruft init_db() beim
+Modulimport auf, und Render startet den Produktionsprozess mit mehreren
+Gunicorn-Workern, von denen jeder die App nach dem Forken selbststaendig
+importiert (ausser --preload ist gesetzt - ein Deployment-Flag, das dieses
+Projekt schon einmal ohne Wirkung im tatsaechlich laufenden Startbefehl hatte,
+weil der Render-Dashboard-Startbefehl render.yaml ueberschreibt). Ohne Lock
+koennen zwei Worker gleichzeitig apply_pending() ausfuehren; die DDL ist
+IF NOT EXISTS und uebersteht das, aber das INSERT INTO schema_migrations
+(version) laeuft gegen eine UNIQUE-Spalte, und der Verlierer bekommt einen
+IntegrityError, der apply_pending() verlaesst und beim Boot den ganzen
+Gunicorn-Arbiter mitreisst - inklusive des Workers, der gerade erfolgreich
+migriert hat. SQLite kommt in diesem Projekt nur lokal vor (siehe der
+Kommentar bei DB_PATH in db.py) und dort immer als einzelner Prozess ohne
+nebenlaeufige Worker - die Race ist dort nicht erreichbar, und ein Lock ohne
+erreichbare Race waere nur zusaetzlicher, ungetesteter Code auf dem Pfad, den
+jeder Entwickler ohne Postgres taeglich benutzt.
 """
 
+import contextlib
 import importlib.util
 import re
+import zlib
 from pathlib import Path
 
 from db import get_db_connection, use_postgres
@@ -79,6 +101,57 @@ def _begin(cursor):
     """Startet die Transaktion einer einzelnen Migration (siehe _connection())."""
     if not use_postgres():
         cursor.execute('BEGIN')
+
+
+# Herleitung: crc32 einer festen, projektspezifischen Zeichenkette statt einer
+# frei erfundenen Zahl - so ist nachvollziehbar, woher der Wert kommt, und er
+# bleibt ueber Deployments hinweg stabil (derselbe String, derselbe Schluessel,
+# unabhaengig von Prozess-IDs oder Tabellen-OIDs). pg_advisory_lock() nimmt
+# einen bigint (64 Bit); crc32 liefert einen Wert zwischen 0 und 2**32-1 und
+# passt dort ohne Vorzeichenprobleme hinein. 32 Bit sind kein Kollisionsschutz
+# im kryptographischen Sinn, aber der projekt- und zweckgebundene Namensraum
+# ("scheduling-tool-main:migrations") macht eine zufaellige Kollision mit
+# einem fremden Advisory-Lock in derselben Datenbank unwahrscheinlich - eine
+# frei gewuerfelte Zahl haette dagegen keinerlei Herkunft, an der sich ein
+# spaeterer Autor orientieren koennte, um denselben Wert zu vermeiden.
+_ADVISORY_LOCK_KEY = zlib.crc32(b'scheduling-tool-main:migrations')
+
+
+@contextlib.contextmanager
+def _migration_lock(cursor):
+    """Serialisiert apply_pending()/rollback_last() ueber Prozessgrenzen hinweg.
+
+    Nur auf Postgres aktiv (siehe Modul-Docstring fuer das Warum). Blockierend
+    (pg_advisory_lock), nicht pg_try_advisory_lock: ein zweiter Worker, der
+    beim Boot auf den ersten wartet, ist harmlos und dauert normalerweise nur
+    so lange wie ein paar CREATE-TABLE/INSERT-Anweisungen. Ein Try-Lock waere
+    hier die falsche Wahl - der zweite Worker muesste bei einem Fehlschlag
+    trotzdem irgendwie warten, bis der erste fertig ist, bevor er
+    schema_migrations liest, sonst saehe er einen Zwischenstand; das laeuft
+    letztlich wieder auf ein Warten hinaus, nur selbst gebaut und ungetestet
+    statt von Postgres bereitgestellt. Die Kehrseite eines blockierenden Locks
+    - ein Worker haengt fest, wenn der Halter nie freigibt - ist hier
+    begrenzt: ein Session-Lock faellt spaetestens beim Verbindungsende, und
+    dieser Codepfad haelt die Verbindung nur fuer die Dauer der Migration
+    offen (siehe _connection()).
+
+    Sitzungsgebundene Advisory-Locks werden zwar auch beim Schliessen der
+    Verbindung freigegeben (siehe _connection()/das finally in apply_pending()
+    und rollback_last()) - das ist ein Sicherheitsnetz, kein Ersatz fuer die
+    explizite Freigabe hier: sie ist unmissverstaendlich im Code sichtbar und
+    gibt den Lock frei, sobald diese Funktion fertig ist, statt erst wenn die
+    Verbindung irgendwann spaeter geschlossen wird. Im finally, damit auch ein
+    Fehler mitten in der Migration (siehe apply_pending()/rollback_last(), die
+    ihrerseits per rollback() aufraeumen) den Lock nicht laenger haelt als
+    noetig.
+    """
+    if use_postgres():
+        cursor.execute('SELECT pg_advisory_lock(?)', (_ADVISORY_LOCK_KEY,))
+    try:
+        yield
+    finally:
+        if use_postgres():
+            cursor.execute('SELECT pg_advisory_unlock(?)', (_ADVISORY_LOCK_KEY,))
 
 
 def _ensure_version_table(cursor):
@@ -187,62 +260,78 @@ def apply_pending():
     _begin()): schlaegt die dritte fehl, bleiben die ersten beiden angewandt
     und protokolliert, und von der dritten selbst bleibt nichts zurueck -
     statt dass alles in einem unklaren Zwischenzustand endet.
+
+    Auf Postgres haelt _migration_lock() den Advisory-Lock schon fuer
+    _ensure_version_table() und das anschliessende SELECT, nicht erst fuer das
+    INSERT weiter unten: zwei Worker, die beide "0004 steht noch aus" lesen,
+    bevor irgendeiner zu schreiben beginnt, wuerden sonst beide versuchen,
+    dieselbe Version anzuwenden - der Lock muss also schon vor dem Lesen
+    stehen, nicht erst vor dem Schreiben (siehe Modul-Docstring).
     """
     connection = _connection()
     newly_applied = []
     try:
         cursor = connection.cursor()
-        _ensure_version_table(cursor)
-        connection.commit()
+        with _migration_lock(cursor):
+            _ensure_version_table(cursor)
+            connection.commit()
 
-        cursor.execute('SELECT version FROM schema_migrations')
-        already = {row['version'] for row in cursor.fetchall()}
+            cursor.execute('SELECT version FROM schema_migrations')
+            already = {row['version'] for row in cursor.fetchall()}
 
-        for version in available_versions():
-            if version in already:
-                continue
-            _begin(cursor)
-            try:
-                if not _run(cursor, version, 'up'):
-                    # available_versions() findet eine Version auch anhand
-                    # einer .down.sql ohne zugehoeriges Up-Skript. Ohne diese
-                    # Pruefung wuerde eine solche Datei unten als
-                    # "angewandt" protokolliert, obwohl nie etwas lief - und
-                    # jeder spaetere Lauf wuerde sie fuer immer ueberspringen.
-                    raise RuntimeError(f'Migration {version} hat kein Up-Skript')
-                cursor.execute('INSERT INTO schema_migrations (version) VALUES (?)', (version,))
-                connection.commit()
-            except Exception:
-                connection.rollback()
-                raise
-            newly_applied.append(version)
-        return newly_applied
+            for version in available_versions():
+                if version in already:
+                    continue
+                _begin(cursor)
+                try:
+                    if not _run(cursor, version, 'up'):
+                        # available_versions() findet eine Version auch anhand
+                        # einer .down.sql ohne zugehoeriges Up-Skript. Ohne diese
+                        # Pruefung wuerde eine solche Datei unten als
+                        # "angewandt" protokolliert, obwohl nie etwas lief - und
+                        # jeder spaetere Lauf wuerde sie fuer immer ueberspringen.
+                        raise RuntimeError(f'Migration {version} hat kein Up-Skript')
+                    cursor.execute('INSERT INTO schema_migrations (version) VALUES (?)', (version,))
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+                newly_applied.append(version)
+            return newly_applied
     finally:
         connection.close()
 
 
 def rollback_last():
-    """Nimmt die zuletzt angewandte Migration zurueck. Gibt deren Namen zurueck."""
+    """Nimmt die zuletzt angewandte Migration zurueck. Gibt deren Namen zurueck.
+
+    Denselben Advisory-Lock wie apply_pending() zu nehmen (siehe
+    _migration_lock()), nicht einen eigenen: beide mutieren dieselbe
+    schema_migrations-Tabelle, und ein rollback_last() waehrend eines
+    laufenden apply_pending() in einem anderen Prozess ist derselbe
+    Lese-dann-Schreib-Race wie zwischen zwei apply_pending()-Aufrufen.
+    """
     connection = _connection()
     try:
         cursor = connection.cursor()
-        _ensure_version_table(cursor)
-        cursor.execute('SELECT version FROM schema_migrations ORDER BY version DESC')
-        rows = cursor.fetchall()
-        if not rows:
-            return None
+        with _migration_lock(cursor):
+            _ensure_version_table(cursor)
+            cursor.execute('SELECT version FROM schema_migrations ORDER BY version DESC')
+            rows = cursor.fetchall()
+            if not rows:
+                return None
 
-        version = rows[0]['version']
-        _begin(cursor)
-        try:
-            if not _run(cursor, version, 'down'):
-                raise RuntimeError(f'Migration {version} hat keine Ruecknahme')
-            cursor.execute('DELETE FROM schema_migrations WHERE version = ?', (version,))
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        return version
+            version = rows[0]['version']
+            _begin(cursor)
+            try:
+                if not _run(cursor, version, 'down'):
+                    raise RuntimeError(f'Migration {version} hat keine Ruecknahme')
+                cursor.execute('DELETE FROM schema_migrations WHERE version = ?', (version,))
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            return version
     finally:
         connection.close()
 

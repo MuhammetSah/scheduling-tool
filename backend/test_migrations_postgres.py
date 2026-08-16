@@ -8,8 +8,10 @@ die Postgres-spezifischen Risiken nach, die in db.py/migrations.py nie
 gegen eine echte Datenbank gelaufen sind: SERIAL statt AUTOINCREMENT,
 RETURNING id, die auf Postgres implizite Transaktion hinter _begin(), das
 Verhalten von CREATE UNIQUE INDEX IF NOT EXISTS auf einer Tabelle mit
-bereits vorhandenen doppelten Zeilen, information_schema-Spaltenpruefung und
-der Text-Vergleich in security.py.
+bereits vorhandenen doppelten Zeilen, information_schema-Spaltenpruefung, der
+Text-Vergleich in security.py und der Advisory-Lock in _migration_lock(), der
+zwei gleichzeitige apply_pending()-Aufrufe serialisiert (siehe
+test_gleichzeitige_worker_wenden_dieselbe_migration_nicht_doppelt_an unten).
 
 Uebersprungen, wenn TEST_DATABASE_URL nicht gesetzt ist (siehe
 pg_testsupport.py) - das ist der Normalfall fuer eine lokale
@@ -27,6 +29,7 @@ gezeigt.
 """
 
 import sys
+import threading
 from pathlib import Path
 
 import psycopg2
@@ -444,3 +447,102 @@ def test_table_columns_ist_schemaspezifisch_nicht_global(monkeypatch):
         f"{{'id', 'name'}}. Vermutlich Spalten aus Schema {schema_b} mit hineingemischt, weil "
         'db.table_columns() information_schema.columns nicht nach table_schema filtert.'
     )
+
+
+def test_advisory_lock_wird_gehalten_und_nach_freigabe_wieder_verfuegbar(pg_db):
+    """Minimaler Beweis, dass der Advisory-Lock selbst tut, was er soll -
+    unabhaengig vom Runner drumherum: eine zweite Sitzung darf denselben
+    Schluessel nicht bekommen, waehrend eine erste ihn haelt, und muss ihn
+    bekommen, sobald die erste ihn freigibt.
+
+    Advisory-Locks sind datenbankweit, nicht schemaweit - die schema-scoped
+    URL aus pg_db zeigt trotzdem auf dieselbe zugrunde liegende Datenbank wie
+    jede andere Verbindung in dieser Testdatei, das Schema selbst spielt hier
+    keine Rolle.
+    """
+    migrations, schema_url, _schema = pg_db
+    schluessel = migrations._ADVISORY_LOCK_KEY
+
+    haltende_verbindung = psycopg2.connect(schema_url)
+    haltende_verbindung.autocommit = True
+    pruef_verbindung = psycopg2.connect(schema_url)
+    pruef_verbindung.autocommit = True
+    try:
+        with haltende_verbindung.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_lock(%s)', (schluessel,))
+
+        with pruef_verbindung.cursor() as cursor:
+            cursor.execute('SELECT pg_try_advisory_lock(%s)', (schluessel,))
+            assert cursor.fetchone()[0] is False, (
+                'zweite Sitzung konnte denselben Advisory-Lock-Schluessel bekommen, '
+                'obwohl die erste ihn noch haelt'
+            )
+
+        with haltende_verbindung.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_unlock(%s)', (schluessel,))
+
+        with pruef_verbindung.cursor() as cursor:
+            cursor.execute('SELECT pg_try_advisory_lock(%s)', (schluessel,))
+            assert cursor.fetchone()[0] is True, (
+                'zweite Sitzung bekam den Advisory-Lock-Schluessel nicht, '
+                'obwohl die erste ihn zuvor freigegeben hat'
+            )
+            cursor.execute('SELECT pg_advisory_unlock(%s)', (schluessel,))
+    finally:
+        haltende_verbindung.close()
+        pruef_verbindung.close()
+
+
+def test_gleichzeitige_worker_wenden_dieselbe_migration_nicht_doppelt_an(pg_leere_migrationen):
+    """Bildet die Race nach, die zum Advisory-Lock in _migration_lock() gefuehrt
+    hat: zwei Gunicorn-Worker, die nach dem Forken beide app.py importieren
+    und dabei beide apply_pending() gegen dieselbe Datenbank ausfuehren (siehe
+    Modul-Docstring in migrations.py). Hier als zwei Threads mit je einer
+    eigenen psycopg2-Verbindung nachgebaut - das ist naeher am echten
+    Mehrprozess-Fall als an nebenlaeufigem Python-Code, weil jede Verbindung
+    ihre eigene Postgres-Sitzung hat, genau wie zwei separate Worker-Prozesse.
+
+    Damit die Race zuverlaessig eintritt statt nur gelegentlich (ein
+    "hoffentlich gewinnt der Scheduler beide Threads gleichzeitig"-Test waere
+    genau die Art von flakigem Test, die schlimmer ist als keiner): die
+    Testmigration schlaeft 0.5s, bevor sie irgendetwas tut. Beide Threads
+    starten binnen weniger Millisekunden - weit unter dieser Schlafzeit -,
+    sodass ohne Lock garantiert beide schema_migrations lesen, bevor
+    irgendeiner dort etwas eingetragen hat. Mit Lock blockiert der zweite
+    Thread in pg_advisory_lock(), bis der erste committet und wieder
+    freigegeben hat, und sieht die Migration danach schon als angewandt.
+    """
+    migrations, verzeichnis, _schema_url, _schema = pg_leere_migrationen
+    (verzeichnis / '0001_race.py').write_text(
+        "import time\n\n"
+        "def up(cursor):\n"
+        "    time.sleep(0.5)\n"
+        "    cursor.execute('CREATE TABLE IF NOT EXISTS race_marker(id INTEGER PRIMARY KEY)')\n\n"
+        "def down(cursor):\n"
+        "    cursor.execute('DROP TABLE IF EXISTS race_marker')\n",
+        encoding='utf-8',
+    )
+
+    fehler = []
+
+    def worker():
+        try:
+            migrations.apply_pending()
+        except Exception as exc:
+            fehler.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert not any(thread.is_alive() for thread in threads), (
+        'mindestens ein Worker haengt noch fest - deutet auf einen Deadlock im Advisory-Lock hin'
+    )
+    assert fehler == [], (
+        f'apply_pending() ist in mindestens einem Worker fehlgeschlagen: {fehler!r}. '
+        'Ohne den Advisory-Lock waere das genau der IntegrityError aus dem UNIQUE-Verstoss '
+        'auf schema_migrations.version, der beim Deploy den Gunicorn-Worker beim Boot toetet.'
+    )
+    assert migrations.applied_versions().count('0001_race') == 1
