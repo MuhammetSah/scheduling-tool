@@ -5,10 +5,21 @@
 -- ausserdem der erste Baustein des Audit-Logs aus Etappe 5.
 --
 -- attempted_at ist TEXT im ISO-Format mit Offset (z.B. ...+00:00), nicht
--- TIMESTAMP: is_locked_out() in security.py vergleicht ihn direkt in SQL
--- (attempted_at >= ?) gegen einen in Python berechneten Grenzwert-String -
--- das muss auf SQLite und Postgres als reiner Zeichenkettenvergleich
--- identisch funktionieren, deshalb TEXT statt TIMESTAMP.
+-- TIMESTAMP: is_locked_out() in security.py vergleicht ihn direkt in SQL als
+-- Zeichenkette (attempted_at >= Grenzwert) gegen einen in Python berechneten
+-- Grenzwert-String - das muss auf SQLite und Postgres als reiner
+-- Zeichenkettenvergleich identisch funktionieren, deshalb TEXT statt
+-- TIMESTAMP.
+--
+-- Absichtlich ohne den SQL-Platzhalter fuer einen einzelnen Parameter oder
+-- das Prozentzeichen, das ihn auf Postgres ersetzt, in diesem Kommentar
+-- (siehe der Modul-Docstring von migrations.py): _PostgresCursor.execute()
+-- in db.py tauscht jedes Vorkommen dieses Platzhalterzeichens bedingungslos
+-- gegen die Postgres-Form aus, auch innerhalb eines -- Kommentars. Eine
+-- fruehere Fassung dieser Datei enthielt genau so ein Zeichen hier und
+-- scheiterte damit beim ersten echten Postgres-Lauf dieser Migration mit
+-- IndexError: tuple index out of range (ein Platzhalter ohne zugehoerigen
+-- Parameter).
 --
 -- password_invitations.expires_at macht es NICHT genauso, auch wenn der
 -- Name es nahelegt: das ist eine echte TIMESTAMP-Spalte und traegt einen

@@ -96,10 +96,25 @@ def get_db_connection():
 
 
 def table_columns(cursor, table):
-    """Existing column names, however the database likes to be asked."""
+    """Existing column names, however the database likes to be asked.
+
+    information_schema.columns is not restricted by search_path - it lists
+    every table the connecting role can see, in every schema. Filtering by
+    table_name alone (without table_schema) is invisible on a single-schema
+    database, which is what every deployment of this project has been so
+    far, but merges columns from unrelated same-named tables together on any
+    Postgres database that has more than one schema - found while adding
+    Postgres test coverage: two temporary per-test schemas, each with their
+    own 'employees' table, made this query return the union of both. Scoping
+    to current_schema() (the first entry of search_path, which is exactly
+    the schema each connection here is meant to see - see the per-test
+    search_path override in pg_testsupport.py) fixes that without needing to
+    know the schema name up front.
+    """
     if use_postgres():
         cursor.execute(
-            'SELECT column_name AS name FROM information_schema.columns WHERE table_name = ?',
+            'SELECT column_name AS name FROM information_schema.columns '
+            'WHERE table_name = ? AND table_schema = current_schema()',
             (table,),
         )
     else:
