@@ -19,7 +19,7 @@
 - **Migrationen:** Datei muss `NNNN_name.sql` heißen (`0004_...`), ein abweichender Name wirft. **Kein literales `?` in SQL, auch nicht in Kommentaren** — die Dialektschicht ersetzt es bedingungslos durch `%s`. Das hat in Etappe 0 bereits einen Produktionsausfall verursacht.
 - Wochentagskonvention: 0 = Montag … 6 = Sonntag.
 - Zeiten sind `"HH:MM"`-Strings. `end <= start` bedeutet Überschreitung nach Mitternacht.
-- Testnamen und Codekommentare auf Deutsch, Dokumentation auf Englisch.
+- **Sprache: der Datei folgen, die du anfasst.** Das Projekt ist hier gemischt, und das ist keine Nachlässigkeit, sondern Geschichte: die ursprünglichen Dateien (`scheduler.py`, `test_scheduler.py`, `app.py`, `db.py`) haben durchgehend englische Kommentare, die in Etappe 0 hinzugekommenen (`security.py`, `timeutil.py`, `migrations.py` und die neuen Testdateien) deutsche. Neue Dateien deshalb auf Deutsch, Ergänzungen in bestehenden englischen Dateien auf Englisch. Eine einzelne Datei in zwei Sprachen zu führen ist das einzige, was hier wirklich falsch ist — das Abschluss-Review von Etappe 0 hat genau diese Vermischung als Mangel notiert. Dokumentation (README) bleibt durchgehend Englisch, Commit-Nachrichten durchgehend Deutsch.
 - Commit-Nachrichten auf Deutsch, Präfix `feat:`, `fix:`, `test:`, `chore:` oder `docs:`.
 - Jede Aufgabe endet mit genau einem Commit und grüner CI.
 
