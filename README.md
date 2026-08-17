@@ -59,7 +59,7 @@ Reporting an absence for a day the employee already holds a shift on:
 - **still shows on the employee's own calendar** – as "Krank"/"Sick" or "Urlaub"/"Vacation", not as a normal shift, even though the slot itself no longer has their name on it
 - **feeds back into the scheduler** – a later regeneration of that month won't reassign the same person straight back onto a day they reported as unavailable
 
-HR gets a **"Vorschläge"/"Suggestions"** action on any freed slot: it re-runs the same eligibility checks used for manual reassignment (weekday/date availability, allowed shift types, not already working that day, monthly cap, weekly-hours cap, rest period) against every active employee and ranks the eligible ones by current workload, so the least-loaded suitable person is offered first. Picking one is a normal reassignment — nothing special has to be undone if it turns out to be wrong.
+HR gets a **"Vorschläge"/"Suggestions"** action on any freed slot: it re-runs the same eligibility checks used for manual reassignment (weekday/date availability, availability windows for `windows`-mode employees, allowed shift types, not already working that day, monthly cap, weekly-hours cap, rest period) against every active employee and ranks the eligible ones by current workload, so the least-loaded suitable person is offered first. Picking one is a normal reassignment — nothing special has to be undone if it turns out to be wrong.
 
 ## Language
 
