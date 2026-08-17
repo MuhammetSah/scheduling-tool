@@ -146,6 +146,47 @@ def test_valid_until_vor_valid_from_ist_400(hr_client):
     assert antwort.json['message'] == 'Das Gültigkeitsende darf nicht vor dem Gültigkeitsbeginn liegen.'
 
 
+def test_gueltigkeitsdatum_im_basisformat_wird_normalisiert_gespeichert(hr_client):
+    """date.fromisoformat() akzeptiert seit Python 3.11 auch das Basisformat
+    ('20260901'). Woertlich gespeichert kaeme das durch die Validierung, waere
+    danach aber fuer immer wirkungslos: scheduler.window_is_valid_on()
+    vergleicht die Grenzen als reine Zeichenketten gegen ein ISO-Datum, und
+    '2026-09-01' < '20260901' liesse das Fenster nie gelten.
+
+    Prueft deshalb beides - die kanonische Form in der Antwort und dass das
+    Fenster an 2026-09-01 (Dienstag) tatsaechlich greift: ohne die
+    Normalisierung warnt die Handkorrektur hier mit 'arbeitet dienstags
+    normalerweise gar nicht', weil das Fenster als noch nicht gueltig gilt.
+    """
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [{
+            'weekday': 1, 'start_time': '08:00', 'end_time': '16:00',
+            'valid_from': '20260901', 'valid_until': '20261231',
+        }],
+    }).json
+
+    assert anna['availability'] == [{
+        'weekday': 1, 'start_time': '08:00', 'end_time': '16:00',
+        'valid_from': '2026-09-01', 'valid_until': '2026-12-31',
+    }]
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    }).json
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    slot = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    antwort = hr_client.put(f'/assignments/{slot["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['warnings'] == []
+
+
 def test_start_gleich_ende_ist_400(hr_client):
     antwort = hr_client.post('/employees', json={
         'name': 'Anna',

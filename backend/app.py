@@ -686,15 +686,24 @@ def replace_employee_constraints(connection, employee_id, data):
         if start_time == end_time:
             raise ValueError(t(g.lang, 'availability_window_empty'))
 
-        valid_from = entry.get('valid_from')
-        valid_until = entry.get('valid_until')
-        for bound in (valid_from, valid_until):
+        # Store the canonical YYYY-MM-DD form, not whatever came in: since
+        # Python 3.11 date.fromisoformat() also accepts the basic format
+        # ('20260901'), which passes this validation but is then dead weight -
+        # scheduler.window_is_valid_on() compares the bounds as plain strings
+        # against an ISO slot date, and '2026-09-15' < '20260901' makes such a
+        # window silently never apply. Normalising is also what keeps the
+        # valid_until < valid_from comparison below honest, since it compares
+        # the same two strings.
+        bounds = []
+        for bound in (entry.get('valid_from'), entry.get('valid_until')):
             if bound is None:
+                bounds.append(None)
                 continue
             try:
-                date.fromisoformat(bound)
+                bounds.append(date.fromisoformat(bound).isoformat())
             except (TypeError, ValueError):
                 raise ValueError(t(g.lang, 'invalid_date_value', date=bound))
+        valid_from, valid_until = bounds
         if valid_from and valid_until and valid_until < valid_from:
             raise ValueError(t(g.lang, 'availability_valid_range_invalid'))
 

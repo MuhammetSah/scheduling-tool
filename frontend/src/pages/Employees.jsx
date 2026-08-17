@@ -157,9 +157,23 @@ function Employees({ setFlash }) {
       allowed_shift_types: form.allowed_shift_types,
       unavailable_dates: form.unavailable_dates,
       availability_mode: form.availability_mode,
-      // Strip the local-only _key/_expanded fields (see nextWindowKey above) -
-      // the API knows nothing about them.
-      availability: form.availability.map(w => ({
+      // Drop windows that never got any hours typed into them, and strip the
+      // local-only _key/_expanded fields (see nextWindowKey above) - the API
+      // knows nothing about them.
+      //
+      // The filter is not a second validation layer duplicating backend rules
+      // (it checks nothing about the *values*, and produces no message of its
+      // own): it only skips a row the user added but left completely empty.
+      // Without it, adding a window, leaving it blank and switching back to
+      // 'anytime' submits `start_time: ''` - the time inputs are unmounted by
+      // then, so the browser's `required` no longer fires, and the backend
+      // answers 400 about a field that is not on screen. A half-filled window
+      // in 'windows' mode is still caught by `required` and never reaches
+      // here. Filtering rather than clearing `availability` on the mode switch
+      // keeps the entered windows around when HR toggles back and forth -
+      // silently discarding them would be the same data loss the mode switch
+      // deliberately avoids for unavailable_weekdays.
+      availability: form.availability.filter(w => w.start_time && w.end_time).map(w => ({
         weekday: w.weekday,
         start_time: w.start_time,
         end_time: w.end_time,
@@ -397,23 +411,33 @@ function Employees({ setFlash }) {
                 </div>
               </div>
             )}
-            {form.availability_mode !== 'windows' && (
-              <div className="field">
-                <label>{t('employees.notWorkingLabel')}</label>
-                <div className="weekday-picker">
-                  {weekdayLabels.map((label, wd) => (
-                    <button
-                      type="button"
-                      key={wd}
-                      className={`weekday-chip ${form.unavailable_weekdays.includes(wd) ? 'selected' : ''}`}
-                      onClick={() => toggleWeekday(wd)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+            {/* Shown in both modes. Hiding it in 'windows' mode looked tidy, but
+                unavailable_weekdays is still sent and is still a hard check in
+                the scheduler, applied *before* the window check and able only to
+                forbid, never to allow (see structurally_eligible() in
+                scheduler.py): someone switched to windows mode kept an invisible
+                "never Wednesdays" that no window could override, with no way to
+                clear it from this form. The list is deliberately not wiped on the
+                mode switch - silent data loss would be worse - so the fix is to
+                make it visible and explain that it stacks on top of the windows. */}
+            <div className="field">
+              <label>{t('employees.notWorkingLabel')}</label>
+              <div className="weekday-picker">
+                {weekdayLabels.map((label, wd) => (
+                  <button
+                    type="button"
+                    key={wd}
+                    className={`weekday-chip ${form.unavailable_weekdays.includes(wd) ? 'selected' : ''}`}
+                    onClick={() => toggleWeekday(wd)}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            )}
+              {form.availability_mode === 'windows' && (
+                <p className="hint">{t('employees.notWorkingWindowsHint')}</p>
+              )}
+            </div>
             {shiftTypes.length > 0 && (
               <div className="field">
                 <label>{t('employees.onlyShiftTypesLabel')}</label>

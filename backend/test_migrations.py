@@ -12,7 +12,7 @@ import pytest
 BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.py'
 INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexes.sql'
 LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
-AVAILABILITY_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.sql'
+AVAILABILITY_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.py'
 
 # Die von 0001_baseline.py angelegten Tabellen, als Literal statt aus der
 # Datei abgeleitet. 0001_baseline aendert sich per Konvention nie wieder
@@ -327,8 +327,8 @@ def test_availability_mode_hat_anytime_als_standard(leere_migrationen):
     finally:
         connection.close()
 
-    (verzeichnis / '0004_employee_availability.sql').write_text(
-        AVAILABILITY_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0004_employee_availability.py').write_text(
+        AVAILABILITY_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
     migrations.apply_pending()
 
     connection = sqlite3.connect(db_file)
@@ -339,6 +339,48 @@ def test_availability_mode_hat_anytime_als_standard(leere_migrationen):
         connection.close()
 
     assert modus == 'anytime'
+
+
+def spalten(db_file, tabelle):
+    connection = sqlite3.connect(db_file)
+    try:
+        rows = connection.execute(f'PRAGMA table_info({tabelle})').fetchall()
+    finally:
+        connection.close()
+    return {row[1] for row in rows}
+
+
+def test_fenstermigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fresh_db):
+    """Der Rundlauf up -> down -> up, nicht nur die Ruecknahme allein.
+
+    down() entfernt employees.availability_mode bewusst nicht (SQLite kennt
+    DROP COLUMN erst ab 3.35 und auch dann nicht ueberall; die Begruendung
+    steht in 0004_employee_availability.py). Genau deshalb muss der zweite
+    Vorwaertslauf die Spalte vorfinden duerfen: mit einem blanken
+    ALTER TABLE ADD COLUMN scheitert er hier an "duplicate column name" - und
+    weil app.py init_db() beim Modulimport aufruft, waere das eine Anwendung,
+    die nach einem einzigen "migrations.py down" gar nicht mehr startet.
+
+    Vorbild fuer den Aufbau ist test_indexmigration_laesst_sich_zurueckrollen
+    oben: nicht auf "die letzte Migration" verlassen, sondern zurueckrollen,
+    bis 0004 weg ist.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    while '0004_employee_availability' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    assert 'employee_availability' not in tabellen(db_file)
+    # Die Spalte ueberlebt die Ruecknahme - das ist die bewusste Entscheidung,
+    # nicht der Fehler.
+    assert 'availability_mode' in spalten(db_file, 'employees')
+
+    erneut = migrations.apply_pending()
+
+    assert '0004_employee_availability' in erneut
+    assert 'employee_availability' in tabellen(db_file)
+    assert 'availability_mode' in spalten(db_file, 'employees')
 
 
 def test_fenster_werden_beim_loeschen_des_mitarbeiters_mitgeloescht(fresh_db):

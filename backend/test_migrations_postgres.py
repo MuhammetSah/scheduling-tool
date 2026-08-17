@@ -45,7 +45,7 @@ pytestmark = pytest.mark.skipif(
 BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.py'
 INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexes.sql'
 LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
-AVAILABILITY_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.sql'
+AVAILABILITY_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.py'
 
 
 @pytest.fixture
@@ -182,7 +182,7 @@ def test_returning_id_wird_bei_blankem_insert_in_login_attempts_verwendet(pg_db)
 def test_availability_mode_hat_anytime_als_standard(pg_leere_migrationen):
     """Postgres-Gegenstueck zu test_availability_mode_hat_anytime_als_standard
     in test_migrations.py: ALTER TABLE employees ADD COLUMN ... NOT NULL
-    DEFAULT 'anytime' (0004_employee_availability.sql) ist genau die Art
+    DEFAULT 'anytime' (0004_employee_availability.py) ist genau die Art
     Anweisung, deren Verhalten auf bereits vorhandenen Zeilen zwischen
     Dialekten abweichen kann - deshalb hier gegen echtes Postgres geprueft,
     nicht nur auf SQLite angenommen.
@@ -208,8 +208,8 @@ def test_availability_mode_hat_anytime_als_standard(pg_leere_migrationen):
     finally:
         connection.close()
 
-    (verzeichnis / '0004_employee_availability.sql').write_text(
-        AVAILABILITY_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0004_employee_availability.py').write_text(
+        AVAILABILITY_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
     migrations.apply_pending()
 
     connection = psycopg2.connect(schema_url)
@@ -221,6 +221,50 @@ def test_availability_mode_hat_anytime_als_standard(pg_leere_migrationen):
         connection.close()
 
     assert modus == 'anytime'
+
+
+def spalten(schema_url, schema, tabelle):
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT column_name FROM information_schema.columns '
+                'WHERE table_schema = %s AND table_name = %s',
+                (schema, tabelle),
+            )
+            return {row[0] for row in cursor.fetchall()}
+    finally:
+        connection.close()
+
+
+def test_fenstermigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py.
+
+    Der Rundlauf up -> down -> up scheitert ohne die bedingte Pruefung in
+    0004_employee_availability.py auf beiden Dialekten, nur mit
+    unterschiedlichem Fehler: SQLite meldet "duplicate column name", Postgres
+    einen DuplicateColumn - ADD COLUMN IF NOT EXISTS gaebe es zwar auf
+    Postgres, aber nicht auf SQLite, deshalb prueft die Migration die Spalte
+    selbst ueber db.table_columns(). Genau dieser Zweig laeuft hier gegen
+    information_schema statt gegen PRAGMA table_info - eine andere
+    Implementierung derselben Pruefung, die deshalb auch hier belegt gehoert.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    while '0004_employee_availability' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    assert 'employee_availability' not in tabellen(schema_url, schema)
+    # Die Spalte ueberlebt die Ruecknahme absichtlich (siehe down() in
+    # 0004_employee_availability.py) - das ist die Entscheidung, nicht der Fehler.
+    assert 'availability_mode' in spalten(schema_url, schema, 'employees')
+
+    erneut = migrations.apply_pending()
+
+    assert '0004_employee_availability' in erneut
+    assert 'employee_availability' in tabellen(schema_url, schema)
+    assert 'availability_mode' in spalten(schema_url, schema, 'employees')
 
 
 def test_fenster_werden_beim_loeschen_des_mitarbeiters_mitgeloescht(pg_db):
