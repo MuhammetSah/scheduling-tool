@@ -10,6 +10,9 @@ from pathlib import Path
 import pytest
 
 BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.py'
+INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexes.sql'
+LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
+AVAILABILITY_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.py'
 
 # Die von 0001_baseline.py angelegten Tabellen, als Literal statt aus der
 # Datei abgeleitet. 0001_baseline aendert sich per Konvention nie wieder
@@ -34,6 +37,15 @@ BASELINE_TABELLEN = {
     'shift_time_overrides',
     'shift_assignments',
 }
+
+# Alle Tabellen aus dem echten Migrationsordner (0001-0004), nicht nur aus
+# der Baseline - ebenfalls von Hand gepflegtes Literal statt aus den
+# Migrationsdateien abgeleitet, aus demselben Grund wie BASELINE_TABELLEN
+# oben. Verwendet von test_alle_migrationen_erzeugen_genau_die_erwarteten_tabellen
+# unten, dem Gegenstueck zu test_baseline_erzeugt_genau_die_erwarteten_tabellen...
+# fuer den vollstaendigen, echten Migrationsordner statt nur fuer 0001_baseline
+# isoliert.
+ALLE_MIGRATIONEN_TABELLEN = BASELINE_TABELLEN | {'login_attempts', 'employee_availability'}
 
 
 @pytest.fixture
@@ -80,6 +92,21 @@ def test_frische_datenbank_bekommt_alle_tabellen(fresh_db):
     assert '0001_baseline' in angewandt
     assert {'employees', 'users', 'shift_types', 'shift_assignments',
             'schedules', 'schema_migrations'} <= tabellen(db_file)
+
+
+def test_alle_migrationen_erzeugen_genau_die_erwarteten_tabellen(fresh_db):
+    """Gegenstueck zu test_baseline_erzeugt_genau_die_erwarteten_tabellen...
+    unten, aber fuer den echten Migrationsordner (0001-0004) statt fuer
+    0001_baseline isoliert: erschoepfend statt stichprobenartig, damit eine
+    still entfernte oder vergessene Tabelle (z.B. employee_availability aus
+    0004) durch jeden Test faellt, der nur eine Teilmenge abfragt.
+    """
+    migrations, db_file = fresh_db
+
+    migrations.apply_pending()
+
+    erwartet = ALLE_MIGRATIONEN_TABELLEN | {'schema_migrations', 'sqlite_sequence'}
+    assert tabellen(db_file) == erwartet
 
 
 def test_baseline_erzeugt_genau_die_erwarteten_tabellen_nicht_nur_eine_teilmenge(leere_migrationen):
@@ -272,3 +299,106 @@ def test_semikolon_in_kommentar_erzeugt_kein_leeres_sql_fragment(leere_migration
     assert '0001_kommentar_mit_semikolon' in angewandt
     assert '0001_kommentar_mit_semikolon' in migrations.applied_versions()
     assert 'test_leeres_fragment' in tabellen(db_file)
+
+
+def test_availability_mode_hat_anytime_als_standard(leere_migrationen):
+    """Bestandsdaten muessen unveraendert gueltig bleiben: eine Mitarbeiter-
+    zeile, die schon VOR 0004 existierte, muss danach denselben Standard
+    tragen wie ein neu eingefuegter Datensatz - nicht bloss ein Insert, das
+    erst nach einer bereits vollstaendigen Migration passiert (das haette
+    auch einen fehlenden DEFAULT nicht bemerkt, weil die Spalte dann schon
+    da waere, bevor irgendetwas eingefuegt wird).
+
+    Baut deshalb die echte Reihenfolge nach: erst 0001-0003 anwenden, dann
+    die Zeile einfuegen, dann erst 0004 obendrauf - genau der Ablauf, den
+    ein bestehendes Produktionsdeployment beim naechsten Start durchlaeuft.
+    """
+    migrations, verzeichnis, db_file = leere_migrationen
+    (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0002_indexes.sql').write_text(INDEXES_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0003_login_attempts.sql').write_text(
+        LOGIN_ATTEMPTS_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    (verzeichnis / '0004_employee_availability.py').write_text(
+        AVAILABILITY_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        modus = connection.execute(
+            "SELECT availability_mode FROM employees WHERE name = 'Anna'").fetchone()[0]
+    finally:
+        connection.close()
+
+    assert modus == 'anytime'
+
+
+def spalten(db_file, tabelle):
+    connection = sqlite3.connect(db_file)
+    try:
+        rows = connection.execute(f'PRAGMA table_info({tabelle})').fetchall()
+    finally:
+        connection.close()
+    return {row[1] for row in rows}
+
+
+def test_fenstermigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fresh_db):
+    """Der Rundlauf up -> down -> up, nicht nur die Ruecknahme allein.
+
+    down() entfernt employees.availability_mode bewusst nicht (SQLite kennt
+    DROP COLUMN erst ab 3.35 und auch dann nicht ueberall; die Begruendung
+    steht in 0004_employee_availability.py). Genau deshalb muss der zweite
+    Vorwaertslauf die Spalte vorfinden duerfen: mit einem blanken
+    ALTER TABLE ADD COLUMN scheitert er hier an "duplicate column name" - und
+    weil app.py init_db() beim Modulimport aufruft, waere das eine Anwendung,
+    die nach einem einzigen "migrations.py down" gar nicht mehr startet.
+
+    Vorbild fuer den Aufbau ist test_indexmigration_laesst_sich_zurueckrollen
+    oben: nicht auf "die letzte Migration" verlassen, sondern zurueckrollen,
+    bis 0004 weg ist.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    while '0004_employee_availability' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    assert 'employee_availability' not in tabellen(db_file)
+    # Die Spalte ueberlebt die Ruecknahme - das ist die bewusste Entscheidung,
+    # nicht der Fehler.
+    assert 'availability_mode' in spalten(db_file, 'employees')
+
+    erneut = migrations.apply_pending()
+
+    assert '0004_employee_availability' in erneut
+    assert 'employee_availability' in tabellen(db_file)
+    assert 'availability_mode' in spalten(db_file, 'employees')
+
+
+def test_fenster_werden_beim_loeschen_des_mitarbeiters_mitgeloescht(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.execute(
+            'INSERT INTO employee_availability (employee_id, weekday, start_time, end_time) '
+            'VALUES (1, 0, ?, ?)', ('08:00', '14:00'))
+        connection.commit()
+        connection.execute('DELETE FROM employees WHERE id = 1')
+        connection.commit()
+        rest = connection.execute('SELECT COUNT(*) FROM employee_availability').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert rest == 0
