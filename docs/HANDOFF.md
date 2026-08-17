@@ -22,11 +22,11 @@ Schichtzahlen). Diese Suche wurde in beiden Etappen **nicht** angefasst.
 
 | | |
 |---|---|
-| `main` | `4c2be23` — Etappe 0 gemergt (PR #9) + Blueprint-Anpassung (PR #10) |
-| Arbeitsbranch | `etappe-1-arbeitszeitfenster` bei `7524e83`, **fertig und reviewt**, PR #11 offen |
+| `main` | `b65db6e` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11) gemergt |
+| Arbeitsbranch | keiner. Etappe 2 beginnt auf einem neuen Branch ab `main` |
 | Testsuite | 112 passed / 17 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning` |
-| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` — alle grün auf `7524e83` |
-| Migrationen | `0001`–`0003` in Produktion angewandt, `0004` auf dem Branch |
+| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` — alle grün auf `main` |
+| Migrationen | `0001`–`0003` in Produktion angewandt, `0004` gemergt und beim nächsten Deploy fällig |
 | Laufzeitabhängigkeiten | fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 
 ## Etappe 0 — abgeschlossen, gemergt, deployt
@@ -45,7 +45,7 @@ Produktionsreife-Fundament. 17 Commits, Suite von 23 auf 66 Tests.
 - Postgres in der CI; Advisory Lock gegen das Migrations-Rennen
 - Betriebsrunbook im README
 
-## Etappe 1 — fertig, reviewt, wartet auf den Merge
+## Etappe 1 — abgeschlossen und gemergt
 
 Plan: [`docs/superpowers/plans/2026-08-16-etappe-1-arbeitszeitfenster.md`](superpowers/plans/2026-08-16-etappe-1-arbeitszeitfenster.md)
 Ledger: `.superpowers/sdd/2026-08-16-etappe-1-arbeitszeitfenster/progress.md` (gitignoriert)
@@ -62,9 +62,13 @@ Bedingung respektiert und ist über das Mitarbeiterformular pflegbar.
 | 5 Frontend-Editor | ✅ Review sauber | `4aa2bb0` |
 | 6 Dokumentation | ✅ Review sauber nach einer Fix-Runde | `e3963c3` |
 | Abschluss-Review + Fix-Welle | ✅ Re-Review sauber | `7524e83` |
+| Merge nach `main` | ✅ PR #11 | `b65db6e` |
 
-**Erster Schritt einer neuen Sitzung:** PR #11 mergen (oder die Entscheidung dazu einholen),
-danach Etappe 2. Es ist nichts offen, was vor dem Merge noch zu tun wäre.
+**Erster Schritt einer neuen Sitzung:** Etappe 2 planen und auf einem neuen Branch ab `main`
+beginnen. Aus Etappe 1 ist nichts offen.
+
+**Beim nächsten Deploy:** Migration `0004` ist noch nicht in Produktion angewandt — sie läuft
+beim ersten Start nach dem Deploy. Danach `python migrations.py status` gegenprüfen.
 
 ### Was das Abschluss-Review gefunden hat — die Lehre daraus
 
