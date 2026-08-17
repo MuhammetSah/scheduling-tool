@@ -344,6 +344,42 @@ button.btn-small {
   text-align: center;
 }
 
+/* Per-employee availability windows editor */
+
+.availability-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.availability-day {
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+}
+
+.availability-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.availability-day-label {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.availability-row {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.availability-row .toolbar {
+  margin-bottom: 0;
+}
+
 /* Lists (employees / shift types) */
 
 .item-list {

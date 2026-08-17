@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { useTranslation } from '../i18n/context'
 
@@ -13,6 +13,24 @@ const emptyForm = {
   unavailable_weekdays: [],
   allowed_shift_types: [],
   unavailable_dates: [],
+  availability_mode: 'anytime',
+  availability: [],
+}
+
+// Groups a weekday/start_time-sorted availability list (as returned by the
+// API) into one entry per weekday, for the compact per-weekday badge in the
+// list view. Relies on the backend's sort order rather than re-sorting here.
+function groupByWeekday(availability) {
+  const groups = []
+  for (const w of availability) {
+    const last = groups[groups.length - 1]
+    if (last && last.weekday === w.weekday) {
+      last.windows.push(w)
+    } else {
+      groups.push({ weekday: w.weekday, windows: [w] })
+    }
+  }
+  return groups
 }
 
 function Employees({ setFlash }) {
@@ -22,6 +40,10 @@ function Employees({ setFlash }) {
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
   const [newDate, setNewDate] = useState('')
+  // Local-only key for React list identity and per-window UI state (the
+  // expanded/collapsed validity range); stripped out again in submitForm()
+  // before the payload goes to the API, which knows nothing about it.
+  const nextWindowKey = useRef(0)
 
   async function load() {
     try {
@@ -54,6 +76,14 @@ function Employees({ setFlash }) {
       unavailable_weekdays: emp.unavailable_weekdays,
       allowed_shift_types: emp.allowed_shift_types,
       unavailable_dates: emp.unavailable_dates,
+      availability_mode: emp.availability_mode || 'anytime',
+      availability: emp.availability.map(w => ({
+        ...w,
+        _key: `w${++nextWindowKey.current}`,
+        // Existing windows show their validity range expanded so it isn't
+        // hidden away; only newly added windows (addWindow()) start collapsed.
+        _expanded: Boolean(w.valid_from || w.valid_until),
+      })),
     })
     setShowForm(true)
   }
@@ -73,6 +103,34 @@ function Employees({ setFlash }) {
       allowed_shift_types: f.allowed_shift_types.includes(id)
         ? f.allowed_shift_types.filter(x => x !== id)
         : [...f.allowed_shift_types, id],
+    }))
+  }
+
+  function addWindow(weekday) {
+    setForm(f => ({
+      ...f,
+      availability: [
+        ...f.availability,
+        { _key: `w${++nextWindowKey.current}`, _expanded: false, weekday, start_time: '', end_time: '', valid_from: null, valid_until: null },
+      ],
+    }))
+  }
+
+  function updateWindow(key, changes) {
+    setForm(f => ({
+      ...f,
+      availability: f.availability.map(w => (w._key === key ? { ...w, ...changes } : w)),
+    }))
+  }
+
+  function removeWindow(key) {
+    setForm(f => ({ ...f, availability: f.availability.filter(w => w._key !== key) }))
+  }
+
+  function toggleWindowValidity(key) {
+    setForm(f => ({
+      ...f,
+      availability: f.availability.map(w => (w._key === key ? { ...w, _expanded: !w._expanded } : w)),
     }))
   }
 
@@ -98,6 +156,16 @@ function Employees({ setFlash }) {
       unavailable_weekdays: form.unavailable_weekdays,
       allowed_shift_types: form.allowed_shift_types,
       unavailable_dates: form.unavailable_dates,
+      availability_mode: form.availability_mode,
+      // Strip the local-only _key/_expanded fields (see nextWindowKey above) -
+      // the API knows nothing about them.
+      availability: form.availability.map(w => ({
+        weekday: w.weekday,
+        start_time: w.start_time,
+        end_time: w.end_time,
+        valid_from: w.valid_from,
+        valid_until: w.valid_until,
+      })),
     }
     try {
       if (form.id) {
@@ -167,6 +235,17 @@ function Employees({ setFlash }) {
                     {emp.unavailable_dates.length > 0 && (
                       <span className="badge">{t('employees.freeDaysBadge', { n: emp.unavailable_dates.length })}</span>
                     )}
+                    {emp.availability_mode === 'windows' && emp.availability.length === 0 && (
+                      <span className="badge">{t('employees.windowsModeNoWindowsBadge')}</span>
+                    )}
+                    {emp.availability_mode === 'windows' && groupByWeekday(emp.availability).map(g => (
+                      <span key={g.weekday} className="badge">
+                        {t('employees.windowBadge', {
+                          weekday: weekdayLabels[g.weekday],
+                          times: g.windows.map(w => `${w.start_time}–${w.end_time}`).join(', '),
+                        })}
+                      </span>
+                    ))}
                   </div>
                 </div>
                 <div className="item-actions">
@@ -226,20 +305,115 @@ function Employees({ setFlash }) {
               <label htmlFor="emp-active">{t('employees.activeLabel')}</label>
             </div>
             <div className="field">
-              <label>{t('employees.notWorkingLabel')}</label>
-              <div className="weekday-picker">
-                {weekdayLabels.map((label, wd) => (
-                  <button
-                    type="button"
-                    key={wd}
-                    className={`weekday-chip ${form.unavailable_weekdays.includes(wd) ? 'selected' : ''}`}
-                    onClick={() => toggleWeekday(wd)}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <label>{t('employees.availabilityModeLabel')}</label>
+              <div className="view-toggle" role="group" aria-label={t('employees.availabilityModeLabel')}>
+                <button
+                  type="button"
+                  className={form.availability_mode !== 'windows' ? 'active' : ''}
+                  onClick={() => setForm(f => ({ ...f, availability_mode: 'anytime' }))}
+                >
+                  {t('employees.availabilityModeAnytime')}
+                </button>
+                <button
+                  type="button"
+                  className={form.availability_mode === 'windows' ? 'active' : ''}
+                  onClick={() => setForm(f => ({ ...f, availability_mode: 'windows' }))}
+                >
+                  {t('employees.availabilityModeWindows')}
+                </button>
               </div>
             </div>
+            {form.availability_mode === 'windows' && (
+              <div className="field">
+                <p className="hint">{t('employees.availabilityHint')}</p>
+                <div className="availability-editor">
+                  {weekdayLabels.map((label, wd) => (
+                    <div className="availability-day" key={wd}>
+                      <div className="availability-day-header">
+                        <span className="availability-day-label">{label}</span>
+                        <button type="button" className="btn-secondary btn-small" onClick={() => addWindow(wd)}>
+                          {t('employees.addWindowButton')}
+                        </button>
+                      </div>
+                      {form.availability.filter(w => w.weekday === wd).map(w => (
+                        <div className="availability-row" key={w._key}>
+                          <div className="toolbar">
+                            <input
+                              type="time"
+                              aria-label={t('employees.windowStartAria')}
+                              value={w.start_time}
+                              onChange={e => updateWindow(w._key, { start_time: e.target.value })}
+                              required
+                            />
+                            <input
+                              type="time"
+                              aria-label={t('employees.windowEndAria')}
+                              value={w.end_time}
+                              onChange={e => updateWindow(w._key, { end_time: e.target.value })}
+                              required
+                            />
+                            <button
+                              type="button"
+                              className="btn-secondary btn-small"
+                              onClick={() => toggleWindowValidity(w._key)}
+                            >
+                              {w._expanded ? t('employees.hideValidityRangeButton') : t('employees.showValidityRangeButton')}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-danger btn-small"
+                              title={t('employees.removeWindowTitle')}
+                              onClick={() => removeWindow(w._key)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                          {w._expanded && (
+                            <div className="toolbar mt-sm">
+                              <div className="field">
+                                <label htmlFor={`avail-from-${w._key}`}>{t('employees.validFromLabel')}</label>
+                                <input
+                                  id={`avail-from-${w._key}`}
+                                  type="date"
+                                  value={w.valid_from || ''}
+                                  onChange={e => updateWindow(w._key, { valid_from: e.target.value || null })}
+                                />
+                              </div>
+                              <div className="field">
+                                <label htmlFor={`avail-until-${w._key}`}>{t('employees.validUntilLabel')}</label>
+                                <input
+                                  id={`avail-until-${w._key}`}
+                                  type="date"
+                                  value={w.valid_until || ''}
+                                  onChange={e => updateWindow(w._key, { valid_until: e.target.value || null })}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {form.availability_mode !== 'windows' && (
+              <div className="field">
+                <label>{t('employees.notWorkingLabel')}</label>
+                <div className="weekday-picker">
+                  {weekdayLabels.map((label, wd) => (
+                    <button
+                      type="button"
+                      key={wd}
+                      className={`weekday-chip ${form.unavailable_weekdays.includes(wd) ? 'selected' : ''}`}
+                      onClick={() => toggleWeekday(wd)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {shiftTypes.length > 0 && (
               <div className="field">
                 <label>{t('employees.onlyShiftTypesLabel')}</label>
