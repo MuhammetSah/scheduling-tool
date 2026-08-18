@@ -1273,29 +1273,39 @@ def fetch_schedule(year, month):
 
     cursor.execute('''
         SELECT sa.id, sa.date, sa.shift_type_id, sa.slot_index, sa.employee_id, sa.manually_edited,
-               sa.absence_type, sa.absent_employee_id,
-               st.name AS shift_type_name, st.color AS shift_type_color, st.start_time, st.end_time,
+               sa.absence_type, sa.absent_employee_id, sa.start_time, sa.end_time,
+               st.name AS shift_type_name, st.color AS shift_type_color,
+               st.start_time AS type_start_time, st.end_time AS type_end_time,
                e.name AS employee_name, ae.name AS absent_employee_name
         FROM shift_assignments sa
-        JOIN shift_types st ON st.id = sa.shift_type_id
+        LEFT JOIN shift_types st ON st.id = sa.shift_type_id
         LEFT JOIN employees e ON e.id = sa.employee_id
         LEFT JOIN employees ae ON ae.id = sa.absent_employee_id
         WHERE sa.schedule_id = ?
-        ORDER BY sa.date, st.start_time, sa.slot_index
+        ORDER BY sa.date, COALESCE(sa.start_time, st.start_time), sa.slot_index
     ''', (schedule['id'],))
 
     assignments = []
     for row in cursor.fetchall():
         a = dict(row)
         a['manually_edited'] = bool(a['manually_edited'])
-        # The shift type's hours are the default; a per-date override wins.
+        # Three layers, outermost first: this assignment's own hours, then a
+        # per-date override for the shift type, then the type's usual hours.
+        # The flags tell the browser which layer won, so it can mark a cell
+        # that deviates without re-deriving the rule.
         override = overrides.get((a['date'], a['shift_type_id']))
-        a['default_start_time'] = a['start_time']
-        a['default_end_time'] = a['end_time']
+        a['default_start_time'] = a['type_start_time']
+        a['default_end_time'] = a['type_end_time']
+        a['assignment_time_set'] = bool(a['start_time'] and a['end_time'])
         a['time_overridden'] = override is not None
-        if override:
-            a['start_time'] = override['start_time']
-            a['end_time'] = override['end_time']
+        if not a['assignment_time_set']:
+            if override:
+                a['start_time'] = override['start_time']
+                a['end_time'] = override['end_time']
+            else:
+                a['start_time'] = a['type_start_time']
+                a['end_time'] = a['type_end_time']
+        del a['type_start_time'], a['type_end_time']
         assignments.append(a)
 
     cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')

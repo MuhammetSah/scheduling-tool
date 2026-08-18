@@ -142,3 +142,142 @@ def test_constraint_warnings_warnt_nicht_wenn_die_vorgeschlagene_zeit_ins_fenste
             start_time='06:00', end_time='12:00')
 
     assert warnungen == []
+
+
+# ---------- fetch_schedule() liefert die tatsaechlichen Zeiten (Task 3) ----------
+#
+# Anders als oben: hier geht es um die HTTP-Antwort von GET /schedules/<jahr>/<monat>,
+# nicht um assignment_hours() direkt - fetch_schedule() loest die drei Vorrangstufen
+# in der eigenen Schleife auf, weil es die Overrides vorab in einen Dict laedt statt
+# pro Zeile nachzufragen (siehe Kommentar in app.py). Eigene Zeiten auf einer
+# Zuweisung kann die API noch nicht setzen (kommt erst mit Task 4/5), deshalb setzen
+# die Tests unten sa.start_time/sa.end_time per direktem SQL - eine bewusste
+# Zwischenloesung, keine Bequemlichkeit.
+
+def test_plan_zeigt_die_individuelle_zeit_statt_der_schichtart(hr_client):
+    """Ben steht mit seinen eigenen Zeiten im Plan, seine Kollegin mit denen der Schichtart."""
+    from app import get_db
+
+    ben = hr_client.post('/employees', json={'name': 'Ben'}).json
+    kollegin = hr_client.post('/employees', json={'name': 'Kollegin'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # Zwei Plaetze fuer dieselbe Schichtart am selben Datum, ueber dieselben
+    # Routen, die die Anwendung auch benutzt - nicht per direktem SQL.
+    platz_kollegin = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    platz_ben = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    assert hr_client.put(f'/assignments/{platz_kollegin["id"]}',
+                          json={'employee_id': kollegin['id']}).status_code == 200
+    assert hr_client.put(f'/assignments/{platz_ben["id"]}',
+                          json={'employee_id': ben['id']}).status_code == 200
+
+    # Bens eigene Zeit weicht bewusst von der Schichtart ab (06:00-14:00),
+    # damit die beiden Faelle nicht zufaellig gleich aussehen.
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            'UPDATE shift_assignments SET start_time = ?, end_time = ? WHERE id = ?',
+            ('10:00', '16:00', platz_ben['id']),
+        )
+        connection.commit()
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    zuweisungen = {a['id']: a for a in antwort.json['assignments']}
+
+    ben_zeile = zuweisungen[platz_ben['id']]
+    assert (ben_zeile['start_time'], ben_zeile['end_time']) == ('10:00', '16:00')
+    assert ben_zeile['assignment_time_set'] is True
+    assert ben_zeile['time_overridden'] is False
+    assert (ben_zeile['default_start_time'], ben_zeile['default_end_time']) == ('06:00', '14:00')
+
+    kollegin_zeile = zuweisungen[platz_kollegin['id']]
+    assert (kollegin_zeile['start_time'], kollegin_zeile['end_time']) == ('06:00', '14:00')
+    assert kollegin_zeile['assignment_time_set'] is False
+    assert kollegin_zeile['time_overridden'] is False
+
+
+def test_block_ohne_vorlage_erscheint_im_plan(hr_client):
+    """Vor dieser Aenderung fiel er durch den inneren JOIN heraus - lautlos.
+
+    Aufbau: ein regulaerer Platz und ein freier Block am selben Datum. Geprueft
+    wird, dass BEIDE zurueckkommen; ohne den LEFT JOIN kaeme nur der regulaere,
+    und ein Test, der nur den freien Block zaehlt, koennte das nicht von
+    "gar nichts geladen" unterscheiden.
+    """
+    from app import get_db
+
+    kollegin = hr_client.post('/employees', json={'name': 'Kollegin'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    platz_regulaer = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    assert hr_client.put(f'/assignments/{platz_regulaer["id"]}',
+                          json={'employee_id': kollegin['id']}).status_code == 200
+
+    # add_slot kennt shift_type_id IS NULL noch nicht (kommt erst mit Task 4/5)
+    # - der freie Block wird deshalb per direktem SQL angelegt, bewusst als
+    # Zwischenloesung fuer diesen Test.
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            'INSERT INTO shift_assignments '
+            '(schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited, start_time, end_time) '
+            'VALUES (?, ?, NULL, 0, NULL, 1, ?, ?)',
+            (plan['id'], '2026-09-01', '20:00', '23:00'),
+        )
+        freier_block_id = cursor.lastrowid
+        connection.commit()
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    ids = {a['id'] for a in antwort.json['assignments']}
+
+    assert platz_regulaer['id'] in ids
+    assert freier_block_id in ids
+
+
+def test_freier_block_hat_keinen_schichtartnamen_aber_eine_zeit(hr_client):
+    """shift_type_name ist None, start_time/end_time sind gefuellt."""
+    from app import get_db
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            'INSERT INTO shift_assignments '
+            '(schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited, start_time, end_time) '
+            'VALUES (?, ?, NULL, 0, NULL, 1, ?, ?)',
+            (plan['id'], '2026-09-02', '20:00', '23:00'),
+        )
+        freier_block_id = cursor.lastrowid
+        connection.commit()
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    zuweisungen = {a['id']: a for a in antwort.json['assignments']}
+
+    block = zuweisungen[freier_block_id]
+    assert block['shift_type_name'] is None
+    assert (block['start_time'], block['end_time']) == ('20:00', '23:00')
