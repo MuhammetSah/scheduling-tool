@@ -18,7 +18,11 @@ import { useTranslation } from '../i18n/context'
  * ScheduleGrid adds for assignments with no shift type of their own - there's
  * nothing to add a per-date override to or add another slot against, so
  * those two cell-level controls are hidden for it (see isFreeBlockColumn
- * below).
+ * below). The same flag also has to reach AssignmentSlot: a block without a
+ * shift type can't exist without its own start/end times (the backend
+ * rejects that), so assignment_time_set is always true there and the
+ * per-person "back to default" button would otherwise show up for every row
+ * in that column and fail every time it's pressed.
  */
 function ShiftCell({
   date,
@@ -115,6 +119,7 @@ function ShiftCell({
           slot={slot}
           date={date}
           readOnly={readOnly}
+          isFreeBlockColumn={isFreeBlockColumn}
           swapSelection={swapSelection}
           employeeOptions={employeeOptions}
           onReassign={onReassign}
@@ -141,6 +146,7 @@ function AssignmentSlot({
   slot,
   date,
   readOnly,
+  isFreeBlockColumn,
   swapSelection,
   employeeOptions,
   onReassign,
@@ -238,7 +244,11 @@ function AssignmentSlot({
           <button type="button" className="btn-small" onClick={saveTime}>
             OK
           </button>
-          {slot.assignment_time_set && (
+          {/* Hidden for the free-block column: assignment_time_set is always
+              true there (no shift type to fall back to), so this would
+              otherwise always be visible and always fail with a 400 when
+              pressed. */}
+          {slot.assignment_time_set && !isFreeBlockColumn && (
             <button
               type="button"
               className="btn-secondary btn-small"
