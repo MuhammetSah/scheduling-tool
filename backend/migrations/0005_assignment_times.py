@@ -103,6 +103,18 @@ def down(cursor):
     alte Index sie nicht mehr eindeutig halten. Da down() die Spalte nicht
     wieder auf NOT NULL zieht, ist das kein Fehlerfall, sondern nur der Grund,
     warum diese Ruecknahme bewusst unvollstaendig ist.
+
+    Das hat eine Kehrseite fuer den naechsten Vorwaertslauf: der alte Index
+    behandelt zwei solche Zeilen als voneinander verschieden (NULL <> NULL in
+    einem UNIQUE-Index, auf beiden Dialekten) und laesst deshalb beide zu.
+    Kommt danach erneut up() dran, sieht COALESCE(shift_type_id, 0) fuer beide
+    denselben Platz, und CREATE UNIQUE INDEX ... ux_assignment_slot_v2
+    schlaegt an genau diesem Duplikat fehl. Heute unerreichbar, weil kein
+    Anwendungscode eine NULL-Schichtart schreibt - ab Etappe 4, wo Bloecke
+    ohne Vorlage entstehen, ist das ein echter Vorwaertsfehlschlag. Und weil
+    app.py init_db() beim Modulimport aufruft, waere das derselbe Bootpfad,
+    der jeden Gunicorn-Worker toeten wuerde (siehe der Advisory-Lock-Kommentar
+    in migrations.py).
     """
     cursor.execute('DROP INDEX IF EXISTS ux_assignment_slot_v2')
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS ux_assignment_slot '

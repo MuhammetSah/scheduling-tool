@@ -734,6 +734,62 @@ def test_schichtart_ist_jetzt_optional(pg_db):
     assert zeile[1] == '10:00'
 
 
+def test_eindeutigkeit_greift_auch_ohne_schichtart(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py - und
+    hier ist es die eigentlich wichtige Probe: der Docstring von
+    0005_assignment_times.py begruendet den Indexwechsel ausdruecklich
+    Postgres-spezifisch ("Postgres behandelt NULLs in einem UNIQUE-Index als
+    voneinander verschieden"), gegen echtes Postgres gepruefte Eindeutigkeit
+    ohne Schichtart gab es hier bisher aber gar nicht - nur den SQLite-Test
+    und einen Test, der lediglich zeigt, dass sich der Index anlegen laesst
+    (test_schichtart_ist_jetzt_optional, test_unique_index_scheitert_an_...
+    oben). Ohne COALESCE(shift_type_id, 0) waeren die beiden Inserts unten
+    zwei verschiedene NULLs und wuerden anstandslos nebeneinander existieren.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO schedules (year, month) VALUES (2026, 3) RETURNING id")
+            schedule_id = cursor.fetchone()[0]
+            cursor.execute(
+                'INSERT INTO shift_assignments '
+                '(schedule_id, date, shift_type_id, slot_index, start_time, end_time) '
+                'VALUES (%s, %s, NULL, 0, %s, %s)',
+                (schedule_id, '2026-03-17', '10:00', '16:00'))
+        connection.commit()
+
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    'INSERT INTO shift_assignments '
+                    '(schedule_id, date, shift_type_id, slot_index, start_time, end_time) '
+                    'VALUES (%s, %s, NULL, 0, %s, %s)',
+                    (schedule_id, '2026-03-17', '11:00', '17:00'))
+    finally:
+        connection.close()
+
+
+def test_ux_assignment_slot_wird_durch_v2_ersetzt(pg_db):
+    """Positiv-/Negativassertion ueber den vorhandenen indizes()-Helfer
+    (siehe oben in dieser Datei): der wird bislang nur fuer
+    Negativassertionen benutzt (test_unique_index_scheitert_an_..., unten
+    test_indexmigration_laesst_sich_zurueckrollen). Nach einem
+    vollstaendigen apply_pending()-Lauf muss ux_assignment_slot_v2 wirklich
+    existieren, nicht bloss anlegbar sein - und das alte ux_assignment_slot
+    muss weg sein, weil 0005_assignment_times.py den Index ersetzt statt ihn
+    zu aendern (siehe dessen Docstring).
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    namen = indizes(schema_url, schema)
+    assert 'ux_assignment_slot_v2' in namen
+    assert 'ux_assignment_slot' not in namen
+
+
 def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_db):
     """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py: der
     Rundlauf up -> down -> up muss auch gegen echtes Postgres funktionieren -

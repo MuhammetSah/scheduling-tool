@@ -497,6 +497,54 @@ def test_bestandszuweisungen_ueberleben_den_tabellenneubau(leere_migrationen):
     assert zeile == (1, '2026-03-17', 1, 0, 1, 1, None, None)
 
 
+def test_fremdschluessel_ueberleben_den_tabellenneubau(fresh_db):
+    """Der SQLite-Neubau in 0005_assignment_times.py schreibt die
+    REFERENCES-Klauseln der neuen Tabelle von Hand aus - ein dabei verlorenes
+    oder vertauschtes ON DELETE waere sonst nur durch Handpruefung auffindbar.
+    PRAGMA foreign_keys ist bei einer blanken sqlite3.connect()-Verbindung per
+    Default AUS (siehe test_fenster_werden_beim_loeschen_des_mitarbeiters_
+    mitgeloescht oben) - ohne es hier explizit einzuschalten, loest keine der
+    beiden Aktionen unten aus und der Test waere grundlos gruen.
+
+    Zwei Verhalten: schedules -> shift_assignments ist CASCADE (der Plan
+    reisst seine Zuweisungen mit), employees -> shift_assignments ist
+    SET NULL, und zwar auf beiden Spalten, die auf employees zeigen
+    (employee_id und absent_employee_id).
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.execute("INSERT INTO schedules (year, month) VALUES (2026, 3)")
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '06:00', '14:00')")
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.execute("INSERT INTO employees (name) VALUES ('Berta')")
+        connection.execute(
+            'INSERT INTO shift_assignments '
+            '(schedule_id, date, shift_type_id, slot_index, employee_id, absent_employee_id) '
+            "VALUES (1, '2026-03-17', 1, 0, 1, 2)")
+        connection.commit()
+
+        connection.execute('DELETE FROM employees WHERE id IN (1, 2)')
+        connection.commit()
+        zeile = connection.execute(
+            'SELECT employee_id, absent_employee_id FROM shift_assignments').fetchone()
+        assert zeile == (None, None), (
+            f'employee_id/absent_employee_id nach DELETE FROM employees: {zeile!r} - '
+            'erwartet (None, None) durch ON DELETE SET NULL')
+
+        connection.execute('DELETE FROM schedules WHERE id = 1')
+        connection.commit()
+        rest = connection.execute('SELECT COUNT(*) FROM shift_assignments').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert rest == 0
+
+
 def test_indizes_ueberleben_den_tabellenneubau(fresh_db):
     """DROP TABLE nimmt die Indizes mit - sie muessen danach wieder da sein."""
     migrations, db_file = fresh_db
@@ -538,15 +586,45 @@ def test_eindeutigkeit_greift_auch_ohne_schichtart(fresh_db):
 def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fresh_db):
     """Rueckwaerts allein reicht nicht - die Migration muss danach wieder vorwaerts laufen.
 
+    Mit einer Bestandszeile zwischen Ruecknahme und zweitem Vorwaertslauf,
+    nicht auf einer leeren Datenbank: der SQLite-Zweig von up() ist ein
+    Tabellenneubau (CREATE shift_assignments_neu, INSERT INTO ... SELECT,
+    DROP, RENAME) - auf einer leeren Tabelle liefe das auch dann klaglos
+    durch, wenn die Kopie eine Spalte verlieren wuerde. Nur eine echte Zeile
+    zeigt, dass der zweite Durchlauf des Neubaus die Daten tatsaechlich
+    unversehrt durchreicht.
+
     Vorbild: test_fenstermigration_... aus Etappe 1, entstanden aus dem Critical
     des dortigen Abschluss-Reviews.
     """
-    migrations, _ = fresh_db
+    migrations, db_file = fresh_db
     migrations.apply_pending()
     assert '0005_assignment_times' in migrations.applied_versions()
 
     migrations.rollback_last()
     assert '0005_assignment_times' not in migrations.applied_versions()
 
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO schedules (year, month) VALUES (2026, 3)")
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '06:00', '14:00')")
+        connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index) '
+            "VALUES (1, '2026-03-17', 1, 0)")
+        connection.commit()
+    finally:
+        connection.close()
+
     migrations.apply_pending()
     assert '0005_assignment_times' in migrations.applied_versions()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        zeile = connection.execute(
+            'SELECT schedule_id, date, shift_type_id, slot_index, start_time, end_time '
+            'FROM shift_assignments').fetchone()
+    finally:
+        connection.close()
+
+    assert zeile == (1, '2026-03-17', 1, 0, None, None)
