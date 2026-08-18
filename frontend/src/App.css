@@ -542,6 +542,13 @@ button.btn-small {
   box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.25);
 }
 
+.slot-time {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent-hover);
+  white-space: nowrap;
+}
+
 .swap-toggle {
   border: 1px solid var(--border-color);
   background-color: var(--surface-color);
