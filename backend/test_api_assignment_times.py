@@ -1,11 +1,14 @@
 """assignment_hours(): die Zeitaufloesung einer Zuweisung an einer Stelle.
 
-Deckt Task 2 aus dem Etappenplan ab. Reiner Funktionstest der Vorrangregel
-(eigene Zeiten > Datums-Override > Schichtart-Vorlage) - keine HTTP-Assertions,
-weil die API diese Funktion in dieser Aufgabe noch gar nicht benutzt
-(constraint_warnings() bekommt sie erst hier, aber mit start_time=end_time=None
-von allen drei Aufrufern, also unveraendertes Verhalten). Task 3 bis 5 bauen
-HTTP-Tests obendrauf.
+Deckt Task 2 aus dem Etappenplan ab. Ueberwiegend Funktionstests der Vorrangregel
+(eigene Zeiten > Datums-Override > Schichtart-Vorlage), direkt an assignment_hours()
+gefuehrt - keine HTTP-Assertions, weil kein Aufrufer von constraint_warnings() in
+dieser Aufgabe schon eigene Zeiten durchreicht (das kommt erst mit Task 5). Die
+letzten beiden Tests rufen deshalb ebenfalls direkt in constraint_warnings() hinein,
+statt ueber die HTTP-Route: sie sichern, dass die drei Stellen, die start_time/
+end_time an assignment_hours() weiterreichen, das auch tatsaechlich tun - etwas,
+das die Bestandssuite nicht pruefen kann, weil dort start_time in jeder Zeile NULL
+ist. Task 3 bis 5 bauen echte HTTP-Tests obendrauf.
 """
 
 
@@ -68,3 +71,74 @@ def test_block_ohne_vorlage_und_ohne_zeiten_liefert_keine_zeit(client):
         zeile = {'schedule_id': 1, 'date': '2026-03-17', 'shift_type_id': None,
                  'start_time': None, 'end_time': None}
         assert assignment_hours(cursor, zeile) == (None, None)
+
+
+# ---------- constraint_warnings() reicht start_time/end_time tatsaechlich durch ----------
+#
+# Regressionsschutz fuer die drei Dict-Literale in constraint_warnings(), die
+# start_time/end_time an assignment_hours() weiterreichen. Die Bestandssuite kann
+# das nicht pruefen: dort ist start_time in jeder Zeile NULL, Stufe 1 der
+# Vorrangregel feuert nie - fiele eines der drei Literale versehentlich auf None
+# zurueck statt den Parameter zu benutzen, bliebe die gesamte Suite gruen, bis
+# Task 5 die Aufrufer umstellt. 2026-09-01 ist ein Dienstag (Wochentag 1).
+
+def test_constraint_warnings_warnt_wenn_die_vorgeschlagene_zeit_das_fenster_verlaesst(hr_client):
+    """Anna darf laut Fenster dienstags nur 06:00-14:00 arbeiten. Die vorgeschlagene
+    Zuweisungszeit 10:00-16:00 passt nicht hinein. Wuerde constraint_warnings()
+    start_time/end_time nicht an assignment_hours() weiterreichen, saehe die
+    Fensterpruefung ueberhaupt keine Zeit und wuerde ueberspringen - die Warnung
+    bliebe aus. Erst zusammen mit dem Gegentest unten ist das diskriminierend:
+    eine Warnung allein koennte auch aus einer anderen Pruefung stammen."""
+    from app import constraint_warnings, get_db
+    from flask import g
+
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+
+    with hr_client.application.app_context():
+        g.lang = 'de'
+        cursor = get_db().cursor()
+        warnungen = constraint_warnings(
+            cursor, anna['id'], '2026-09-01', schicht['id'], plan['id'],
+            start_time='10:00', end_time='16:00')
+
+    assert warnungen == ['Anna arbeitet dienstags normalerweise nur 06:00–14:00.']
+
+
+def test_constraint_warnings_warnt_nicht_wenn_die_vorgeschlagene_zeit_ins_fenster_passt(hr_client):
+    """Gegentest zum vorigen: dieselbe Zuweisung, aber mit einer vorgeschlagenen
+    Zeit, die vollstaendig ins Fenster passt - keine Warnung. Nur das Paar zeigt,
+    dass start_time/end_time tatsaechlich durchwirken, statt dass der vorige Test
+    zufaellig aus einer anderen Pruefung heraus warnte."""
+    from app import constraint_warnings, get_db
+    from flask import g
+
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+
+    with hr_client.application.app_context():
+        g.lang = 'de'
+        cursor = get_db().cursor()
+        warnungen = constraint_warnings(
+            cursor, anna['id'], '2026-09-01', schicht['id'], plan['id'],
+            start_time='06:00', end_time='12:00')
+
+    assert warnungen == []
