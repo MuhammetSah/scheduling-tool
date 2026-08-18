@@ -1578,10 +1578,16 @@ def add_slot(year, month):
 
     The shift type's required headcount stays as it is - this is a one-off
     change to this date, not a change to what the shift normally needs.
+
+    shift_type_id may be omitted/null for a block with no template of its own;
+    start_time/end_time are then taken straight from the request body. Whether
+    that pair is actually filled in is Task 5's validation, not this route's yet.
     """
     data = request.get_json(silent=True) or {}
     iso_date = data.get('date')
     shift_type_id = data.get('shift_type_id')
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
 
     try:
         parsed = date.fromisoformat(iso_date)
@@ -1597,21 +1603,30 @@ def add_slot(year, month):
     if not schedule_id:
         return jsonify({'message': t(g.lang, 'no_schedule_found')}), 404
 
-    cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
-    if not cursor.fetchone():
-        return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
+    if shift_type_id is not None:
+        cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
+        if not cursor.fetchone():
+            return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
 
-    cursor.execute(
-        'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
-        'WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
-        (schedule_id, iso_date, shift_type_id),
-    )
+    # "WHERE shift_type_id = NULL" matches nothing in SQL - not even the NULL
+    # rows - so a block without a template would keep getting slot_index 0 and
+    # collide with the unique index on its second insert.
+    if shift_type_id is None:
+        cursor.execute(
+            'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
+            'WHERE schedule_id = ? AND date = ? AND shift_type_id IS NULL',
+            (schedule_id, iso_date))
+    else:
+        cursor.execute(
+            'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
+            'WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
+            (schedule_id, iso_date, shift_type_id))
     next_index = cursor.fetchone()['highest'] + 1
 
     cursor.execute(
-        'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited) '
-        'VALUES (?, ?, ?, ?, NULL, 1)',
-        (schedule_id, iso_date, shift_type_id, next_index),
+        'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited, start_time, end_time) '
+        'VALUES (?, ?, ?, ?, NULL, 1, ?, ?)',
+        (schedule_id, iso_date, shift_type_id, next_index, start_time, end_time),
     )
     assignment_id = cursor.lastrowid
     refresh_unfilled_count(cursor, schedule_id)
@@ -1641,7 +1656,13 @@ def delete_assignment(assignment_id):
 # ---------- manual editing (reassign / swap) ----------
 
 def effective_shift_hours(cursor, schedule_id, iso_date, shift_type_id, default_start, default_end):
-    """A shift's actual hours on one date: a per-date override if one exists, else the shift type's usual hours."""
+    """A shift type's actual hours on one date: a per-date override if one exists, else its usual hours.
+
+    For an assignment, prefer assignment_hours() - it puts the assignment's own
+    times in front of these two layers.
+    """
+    if shift_type_id is None:
+        return default_start, default_end
     cursor.execute(
         'SELECT start_time, end_time FROM shift_time_overrides WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
         (schedule_id, iso_date, shift_type_id),
@@ -1732,11 +1753,15 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if cursor.fetchone():
         warnings.append(t(g.lang, 'warn_marked_unavailable', name=employee['name'], date=assignment_date))
 
-    cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
-    if cursor.fetchone():
-        cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ? AND shift_type_id = ?', (employee_id, shift_type_id))
-        if not cursor.fetchone():
-            warnings.append(t(g.lang, 'warn_restricted_shift_types', name=employee['name']))
+    # A block without a template isn't any shift type, so a restriction on
+    # which types this person may work has nothing to say about it.
+    if shift_type_id is not None:
+        cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
+        if cursor.fetchone():
+            cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ? AND shift_type_id = ?',
+                           (employee_id, shift_type_id))
+            if not cursor.fetchone():
+                warnings.append(t(g.lang, 'warn_restricted_shift_types', name=employee['name']))
 
     if employee['availability_mode'] == 'windows':
         # The actual hours this assignment runs, respecting the assignment's
