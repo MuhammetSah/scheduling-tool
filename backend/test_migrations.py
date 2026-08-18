@@ -46,7 +46,10 @@ BASELINE_TABELLEN = {
 # unten, dem Gegenstueck zu test_baseline_erzeugt_genau_die_erwarteten_tabellen...
 # fuer den vollstaendigen, echten Migrationsordner statt nur fuer 0001_baseline
 # isoliert.
-ALLE_MIGRATIONEN_TABELLEN = BASELINE_TABELLEN | {'login_attempts', 'employee_availability'}
+ALLE_MIGRATIONEN_TABELLEN = BASELINE_TABELLEN | {
+    'login_attempts', 'employee_availability',
+    'business_hours', 'business_hours_exceptions', 'coverage_requirements',
+}
 
 
 @pytest.fixture
@@ -596,12 +599,18 @@ def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fres
 
     Vorbild: test_fenstermigration_... aus Etappe 1, entstanden aus dem Critical
     des dortigen Abschluss-Reviews.
+
+    Nicht auf "die letzte Migration" verlassen (wie test_indexmigration_ und
+    test_fenstermigration_ oben): spaetere Aufgaben haengen weitere
+    Migrationen hinten an - inzwischen 0006_coverage -, und rollback_last()
+    ohne Schleife wuerde dann die falsche Migration zurueckrollen.
     """
     migrations, db_file = fresh_db
     migrations.apply_pending()
     assert '0005_assignment_times' in migrations.applied_versions()
 
-    migrations.rollback_last()
+    while '0005_assignment_times' in migrations.applied_versions():
+        migrations.rollback_last()
     assert '0005_assignment_times' not in migrations.applied_versions()
 
     connection = sqlite3.connect(db_file)
@@ -628,3 +637,126 @@ def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fres
         connection.close()
 
     assert zeile == (1, '2026-03-17', 1, 0, None, None)
+
+
+def test_oeffnungszeiten_starten_rund_um_die_uhr_offen(fresh_db):
+    """Der Standard darf kein bestehendes Verhalten aendern.
+
+    Vor dieser Etappe gibt es keine Oeffnungszeiten, also darf ihre Einfuehrung
+    nichts verbieten, was vorher erlaubt war. 00:00-00:00 ist nach der
+    Mitternachtskonvention des Projekts der ganze Tag.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        zeilen = connection.execute(
+            'SELECT weekday, open_time, close_time, closed FROM business_hours ORDER BY weekday'
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]
+
+
+def test_genau_eine_oeffnungszeit_pro_wochentag(fresh_db):
+    """UNIQUE(weekday) - ein zweiter Montag waere ein Datenfehler."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO business_hours (weekday, open_time, close_time, closed) "
+                "VALUES (0, '08:00', '18:00', 0)")
+            connection.commit()
+    finally:
+        connection.close()
+
+
+def test_ausnahme_ist_pro_datum_eindeutig(fresh_db):
+    """UNIQUE(date) - zwei Sonderregeln fuer denselben Tag waeren mehrdeutig."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute(
+            "INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) "
+            "VALUES ('2026-12-24', '08:00', '14:00', 0, 'Heiligabend')")
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) "
+                "VALUES ('2026-12-24', '09:00', '13:00', 0, 'Zweite Regel fuer denselben Tag')")
+            connection.commit()
+    finally:
+        connection.close()
+
+
+def test_bedarfsbaender_starten_leer(fresh_db):
+    """Task 1 legt nur die Tabelle an. Die Ableitung ist Task 3.
+
+    Dieser Test ist die Abgrenzung zwischen den beiden Aufgaben und darf nach
+    Task 3 angepasst werden - aber bewusst und mit Begruendung, nicht nebenbei.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        anzahl = connection.execute('SELECT COUNT(*) FROM coverage_requirements').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert anzahl == 0
+
+
+def test_bedarfsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fresh_db):
+    """Rueckwaerts allein reicht nicht - die Migration muss danach wieder vorwaerts laufen.
+
+    Vorbild: test_zeitmigration_... aus Etappe 2. Bestandszeile einfuegen, damit
+    der zweite Vorwaertslauf nicht auf einer leeren Datenbank laeuft.
+
+    Anders als beim Vorbild ueberlebt keine der drei neuen Tabellen die
+    Ruecknahme selbst (down() nimmt sie vollstaendig zurueck, siehe
+    0006_coverage.py) - die Bestandszeile geht deshalb nicht in eine von
+    ihnen, sondern in employees, das schon vor dieser Migration existiert und
+    von ihrem down() unberuehrt bleibt.
+
+    Nicht auf "die letzte Migration" verlassen (wie test_indexmigration_ und
+    test_fenstermigration_ oben): eine spaetere Aufgabe koennte weitere
+    Migrationen hinter 0006_coverage anhaengen, und ein einzelnes
+    rollback_last() wuerde dann die falsche Migration zurueckrollen - genau
+    der Fehler, der test_zeitmigration_... oben erst durch das Hinzufuegen
+    dieser Migration sichtbar wurde.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    assert '0006_coverage' in migrations.applied_versions()
+
+    while '0006_coverage' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert '0006_coverage' not in migrations.applied_versions()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    erneut = migrations.apply_pending()
+    assert '0006_coverage' in erneut
+
+    connection = sqlite3.connect(db_file)
+    try:
+        zeilen = connection.execute(
+            'SELECT weekday, open_time, close_time, closed FROM business_hours ORDER BY weekday'
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]

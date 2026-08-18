@@ -796,13 +796,147 @@ def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_d
     hier ist es der ALTER-COLUMN-Zweig aus 0005_assignment_times.py statt des
     SQLite-Tabellenneubaus, ein komplett anderer Codepfad in derselben
     Migration.
+
+    Nicht auf "die letzte Migration" verlassen (wie test_indexmigration_ und
+    test_fenstermigration_ oben): spaetere Aufgaben haengen weitere
+    Migrationen hinten an - inzwischen 0006_coverage -, und rollback_last()
+    ohne Schleife wuerde dann die falsche Migration zurueckrollen.
     """
     migrations, schema_url, schema = pg_db
     migrations.apply_pending()
     assert '0005_assignment_times' in migrations.applied_versions()
 
-    migrations.rollback_last()
+    while '0005_assignment_times' in migrations.applied_versions():
+        migrations.rollback_last()
     assert '0005_assignment_times' not in migrations.applied_versions()
 
     migrations.apply_pending()
     assert '0005_assignment_times' in migrations.applied_versions()
+
+
+def test_oeffnungszeiten_starten_rund_um_die_uhr_offen(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py: der
+    Standard darf kein bestehendes Verhalten aendern, auch nicht auf dem
+    Dialekt, auf dem {auto_id} zu SERIAL PRIMARY KEY statt zu
+    AUTOINCREMENT wird.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT weekday, open_time, close_time, closed FROM business_hours ORDER BY weekday')
+            zeilen = cursor.fetchall()
+    finally:
+        connection.close()
+
+    assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]
+
+
+def test_genau_eine_oeffnungszeit_pro_wochentag(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py:
+    UNIQUE(weekday) - ein zweiter Montag waere ein Datenfehler.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO business_hours (weekday, open_time, close_time, closed) "
+                    "VALUES (0, '08:00', '18:00', 0)")
+    finally:
+        connection.close()
+
+
+def test_ausnahme_ist_pro_datum_eindeutig(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py:
+    UNIQUE(date) - zwei Sonderregeln fuer denselben Tag waeren mehrdeutig.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) "
+                "VALUES ('2026-12-24', '08:00', '14:00', 0, 'Heiligabend')")
+        connection.commit()
+
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) "
+                    "VALUES ('2026-12-24', '09:00', '13:00', 0, 'Zweite Regel fuer denselben Tag')")
+    finally:
+        connection.close()
+
+
+def test_bedarfsbaender_starten_leer(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py:
+    Task 1 legt nur die Tabelle an, ohne Bedarf abzuleiten - das ist Task 3.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) FROM coverage_requirements')
+            anzahl = cursor.fetchone()[0]
+    finally:
+        connection.close()
+
+    assert anzahl == 0
+
+
+def test_bedarfsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py: der
+    Rundlauf up -> down -> up muss auch gegen echtes Postgres funktionieren.
+    Anders als beim ALTER-COLUMN-Zweig von 0005_assignment_times.py nimmt
+    down() hier alle drei Tabellen vollstaendig zurueck (siehe
+    0006_coverage.py) - die Bestandszeile fuer den zweiten Vorwaertslauf geht
+    deshalb nicht in eine der drei neuen Tabellen, sondern in employees, das
+    schon vor dieser Migration existiert und von ihrem down() unberuehrt
+    bleibt.
+
+    Nicht auf "die letzte Migration" verlassen: eine spaetere Aufgabe koennte
+    weitere Migrationen hinter 0006_coverage anhaengen, und ein einzelnes
+    rollback_last() wuerde dann die falsche Migration zurueckrollen - genau
+    der Fehler, der test_zeitmigration_... oben erst durch das Hinzufuegen
+    dieser Migration sichtbar wurde.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+    assert '0006_coverage' in migrations.applied_versions()
+
+    while '0006_coverage' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert '0006_coverage' not in migrations.applied_versions()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    erneut = migrations.apply_pending()
+    assert '0006_coverage' in erneut
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT weekday, open_time, close_time, closed FROM business_hours ORDER BY weekday')
+            zeilen = cursor.fetchall()
+    finally:
+        connection.close()
+
+    assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]
