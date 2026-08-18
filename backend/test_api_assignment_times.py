@@ -426,8 +426,12 @@ def test_freier_block_loest_keine_schichtart_warnung_aus(hr_client):
         'date': '2026-09-01', 'shift_type_id': None,
         'start_time': '10:00', 'end_time': '14:00',
     }).json
-    antwort_frei = hr_client.put(f'/assignments/{platz_frei["id"]}',
-                                  json={'employee_id': mitarbeiter['id']})
+    # Seit Task 5 schreibt jeder PUT die Zeiten mit - ein Block ohne Vorlage
+    # braucht sie deshalb bei jedem Aufruf erneut, sonst haette er nach dem
+    # PUT gar keine Zeit mehr, von der er erben koennte.
+    antwort_frei = hr_client.put(f'/assignments/{platz_frei["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '10:00', 'end_time': '14:00',
+    })
     assert antwort_frei.status_code == 200, antwort_frei.json
     assert antwort_frei.json['warnings'] == []
 
@@ -444,17 +448,15 @@ def test_freier_block_loest_keine_schichtart_warnung_aus(hr_client):
 def test_freier_block_zaehlt_in_die_wochenstunden(hr_client):
     """Er ist Arbeitszeit wie jede andere - der alte innere JOIN haette ihn verschluckt.
 
-    update_assignment() (PUT /assignments/<id>) reicht start_time/end_time noch
-    nicht an constraint_warnings() durch - das verdrahtet erst Task 5. Die
-    Wochenstunden-Pruefung liest die eigene Zeit der GERADE zugewiesenen
-    Zuweisung deshalb hier noch nicht; was sie aber liest, ist eine bereits
-    zugewiesene Nachbarzeile direkt aus der Datenbank (assignment_hours() ueber
-    die Spalten der Zeile). Der freie Block muss also zuerst einer anderen
-    Zuweisung zugeteilt sein, damit eine DRITTE Zuweisung ihn in der Summe sieht.
-    Gegentest eingebaut: die ersten beiden Zuweisungen bleiben absichtlich unter
-    dem Wochenziel, solange der freie Block nicht mitzaehlt - erst mit ihm kippt
-    die Summe. Ohne diesen Vorher/Nachher-Vergleich koennte die Warnung auch aus
-    einer der beiden Kurzschichten allein stammen.
+    Seit dieser Aufgabe reicht update_assignment() start_time/end_time an
+    constraint_warnings() durch (vorher fehlte genau diese Verdrahtung), die
+    Wochenstunden-Pruefung sieht die eigene Zeit des freien Blocks deshalb schon
+    bei SEINER EIGENEN Zuweisung - er braucht dafuer keine dritte Zuweisung mehr,
+    die ihn erst als bereits gespeicherte Nachbarzeile liest (das war der Weg vor
+    dieser Aufgabe). Gegentest eingebaut: die erste Zuweisung bleibt absichtlich
+    unter dem Wochenziel, solange der freie Block noch nicht zugewiesen ist -
+    erst mit ihm kippt die Summe. Ohne diesen Vorher/Nachher-Vergleich koennte
+    die Warnung auch aus der Kurzschicht allein stammen.
     """
     kurz = hr_client.post('/shift-types', json={
         'name': 'Kurz', 'start_time': '07:00', 'end_time': '08:00',
@@ -475,21 +477,21 @@ def test_freier_block_zaehlt_in_die_wochenstunden(hr_client):
     assert antwort_b.json['warnings'] == []
 
     # Freier Block (9 Std.) an einem anderen Tag derselben Woche - seine eigene
-    # Zuweisung zaehlt ihn (wie oben erklaert) noch nicht mit, deshalb auch
-    # hier noch keine Warnung.
+    # Zeit muss mitgeschickt werden (kein Schichtart-Fallback fuer ihn) und
+    # zaehlt sofort mit: 1 + 9 = 10 Std., schon ueber dem Ziel von 8.
     platz_a = hr_client.post('/schedules/2026/9/slots', json={
         'date': '2026-09-01', 'shift_type_id': None,
         'start_time': '08:00', 'end_time': '17:00',
     }).json
-    antwort_a = hr_client.put(f'/assignments/{platz_a["id"]}',
-                               json={'employee_id': mitarbeiter['id']})
+    antwort_a = hr_client.put(f'/assignments/{platz_a["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '08:00', 'end_time': '17:00',
+    })
     assert antwort_a.status_code == 200, antwort_a.json
-    assert antwort_a.json['warnings'] == []
+    assert antwort_a.json['warnings'] == [
+        'Mitarbeiter käme damit auf 10.0 Std. in dieser Woche - über dem Ziel von 8 Std./Woche']
 
-    # Zweite Kurzschicht (1 Std.), dritter Tag derselben Woche: jetzt sieht die
-    # Pruefung beide bereits zugewiesenen Vorgaenger - die Kurzschicht UND den
-    # freien Block. 1 + 9 + 1 = 11 Std., ueber dem Ziel von 8. Ohne den freien
-    # Block waeren es nur 2 Std., und die Warnung bliebe aus.
+    # Zweite Kurzschicht (1 Std.), dritter Tag derselben Woche: die Summe
+    # steigt weiter auf 1 + 9 + 1 = 11 Std.
     platz_c = hr_client.post('/schedules/2026/9/slots', json={
         'date': '2026-09-03', 'shift_type_id': kurz['id'],
     }).json
@@ -503,14 +505,15 @@ def test_freier_block_zaehlt_in_die_wochenstunden(hr_client):
 def test_freier_block_zaehlt_in_die_ruhezeit(hr_client):
     """Ein Block 22:00-06:00 am Vortag muss die Ruhezeitwarnung ausloesen.
 
-    update_assignment() reicht start_time/end_time noch nicht an
-    constraint_warnings() durch (das verdrahtet erst Task 5), deshalb braucht
-    die ZWEITE Zuweisung selbst eine Schichtart, damit ihre eigene Zeit ueberhaupt
-    aufgeloest wird. Der Nachtblock vom Vortag dagegen wird als bereits
-    zugewiesene Nachbarzeile direkt aus der Datenbank gelesen - assignment_hours()
-    liest dort seine Spalten unabhaengig von dieser Verdrahtungsluecke. Genau das
-    prueft dieser Test: faende die Nachbarsuche die freie Zeile nicht auf, wuerde
-    sie uebersprungen (kein n_start/n_end) und die Warnung bliebe aus.
+    Seit dieser Aufgabe reicht update_assignment() start_time/end_time an
+    constraint_warnings() durch, deshalb muss die ERSTE Zuweisung (der
+    Nachtblock ohne Vorlage) ihre eigene Zeit im PUT mitschicken - ohne
+    Schichtart gibt es sonst nichts, von dem sie erben koennte. Der Nachtblock
+    steht zu diesem Zeitpunkt noch allein, deshalb keine Warnung. Die ZWEITE
+    Zuweisung (Fruehschicht mit Schichtart) liest den Nachtblock anschliessend
+    als bereits gespeicherte Nachbarzeile direkt aus der Datenbank -
+    assignment_hours() liest dort seine Spalten unabhaengig davon, ob die
+    zweite Zuweisung selbst eigene Zeiten mitschickt.
     """
     fruehschicht = hr_client.post('/shift-types', json={
         'name': 'Fruehschicht', 'start_time': '07:00', 'end_time': '15:00',
@@ -524,8 +527,9 @@ def test_freier_block_zaehlt_in_die_ruhezeit(hr_client):
         'date': '2026-09-01', 'shift_type_id': None,
         'start_time': '22:00', 'end_time': '06:00',
     }).json
-    antwort_nacht = hr_client.put(f'/assignments/{platz_nacht["id"]}',
-                                   json={'employee_id': mitarbeiter['id']})
+    antwort_nacht = hr_client.put(f'/assignments/{platz_nacht["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '22:00', 'end_time': '06:00',
+    })
     assert antwort_nacht.status_code == 200, antwort_nacht.json
     assert antwort_nacht.json['warnings'] == []
 
@@ -571,3 +575,179 @@ def test_zweiter_freier_block_am_selben_tag_bekommt_den_naechsten_platz(hr_clien
 
     assert zuweisungen[erster.json['id']]['slot_index'] == 0
     assert zuweisungen[zweiter.json['id']]['slot_index'] == 1
+
+
+# ---------- Zeiten ueber die API setzen (Task 5) ----------
+#
+# Bis hierher konnte keine der drei Aufrufer-Stellen von constraint_warnings()
+# eigene Zeiten durchreichen - Task 2 hatte die Parameter nur angelegt, Task 4
+# musste sie deshalb noch per direktem SQL an der Pruefung vorbeischmuggeln.
+# Diese Tests gehen ausschliesslich ueber PUT /assignments/<id> bzw.
+# POST /schedules/<jahr>/<monat>/slots, weil genau das die Verdrahtung ist,
+# die diese Aufgabe herstellt.
+
+def test_zeiten_setzen_speichert_und_warnt_bei_bedarf(hr_client):
+    """Die Zuweisung wird gespeichert (200) und die Warnung bezieht sich auf die NEUE Zeit.
+
+    Aufbau: Anna hat ein Fenster 08:00-14:00 und steht auf der Frueh-schicht
+    06:00-14:00, also bereits ausserhalb. Wird die Zuweisung auf 09:00-13:00
+    gesetzt, muss die Warnung VERSCHWINDEN - das beweist, dass die Pruefung mit
+    der neuen Zeit rechnet und nicht mit der der Schichtart.
+    """
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '14:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # 2026-09-01 ist ein Dienstag (Wochentag 1).
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    # Zugewiesen mit der Schichtart-Zeit (06:00-14:00) - die liegt ausserhalb
+    # von Annas Fenster, also eine Warnung.
+    vorher = hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': anna['id']})
+    assert vorher.status_code == 200, vorher.json
+    assert vorher.json['warnings'] == ['Anna arbeitet dienstags normalerweise nur 08:00–14:00.']
+
+    # Dieselbe Zuweisung, jetzt mit eigener Zeit 09:00-13:00 - die passt
+    # vollstaendig ins Fenster.
+    nachher = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': anna['id'], 'start_time': '09:00', 'end_time': '13:00',
+    })
+    assert nachher.status_code == 200, nachher.json
+    assert nachher.json['warnings'] == []
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    zeile = {a['id']: a for a in antwort.json['assignments']}[platz['id']]
+    assert (zeile['start_time'], zeile['end_time']) == ('09:00', '13:00')
+    assert zeile['assignment_time_set'] is True
+
+
+def test_halb_gefuelltes_zeitpaar_ist_400(hr_client):
+    """start_time ohne end_time - kein stilles Halb-Interpretieren."""
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    mitarbeiter = hr_client.post('/employees', json={'name': 'Mitarbeiter'}).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    erwartete_meldung = 'Start- und Endzeit müssen zusammen gesetzt oder zusammen leer sein.'
+
+    nur_start = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '09:00',
+    })
+    assert nur_start.status_code == 400, nur_start.json
+    assert nur_start.json['message'] == erwartete_meldung
+
+    # Gegenrichtung: nur end_time, kein start_time - beide Haelften des Paars
+    # muessen einzeln geprueft werden, sonst koennte eine Richtung durchrutschen.
+    nur_ende = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'end_time': '13:00',
+    })
+    assert nur_ende.status_code == 400, nur_ende.json
+    assert nur_ende.json['message'] == erwartete_meldung
+
+
+def test_zeiten_zuruecksetzen_faellt_auf_die_schichtart_zurueck(hr_client):
+    """Beide Felder explizit null -> die Zuweisung erbt wieder."""
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    mitarbeiter = hr_client.post('/employees', json={'name': 'Mitarbeiter'}).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    gesetzt = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '10:00', 'end_time': '16:00',
+    })
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    # Zwischenstand pruefen, damit "zurueckgesetzt" unten wirklich einen Wechsel
+    # zeigt und nicht nur zwei Male dieselbe (nie individuell gesetzte) Zeit liest.
+    zwischenstand = hr_client.get('/schedules/2026/9')
+    zwischenzeile = {a['id']: a for a in zwischenstand.json['assignments']}[platz['id']]
+    assert (zwischenzeile['start_time'], zwischenzeile['end_time']) == ('10:00', '16:00')
+    assert zwischenzeile['assignment_time_set'] is True
+
+    zurueckgesetzt = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': None, 'end_time': None,
+    })
+    assert zurueckgesetzt.status_code == 200, zurueckgesetzt.json
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    zeile = {a['id']: a for a in antwort.json['assignments']}[platz['id']]
+    assert (zeile['start_time'], zeile['end_time']) == ('06:00', '14:00')
+    assert zeile['assignment_time_set'] is False
+
+
+def test_block_ohne_vorlage_ohne_zeiten_ist_400(hr_client):
+    """Er hat nichts, von dem er erben koennte."""
+    erwartete_meldung = (
+        'Ein Block ohne Schichtart braucht eigene Zeiten — er hat keine '
+        'Vorlage, von der er sie erben könnte.')
+
+    # /schedules/generate verlangt mindestens eine Schichtart, auch wenn der
+    # Test selbst keine benutzt.
+    hr_client.post('/shift-types', json={'name': 'Unbenutzt', 'start_time': '06:00', 'end_time': '14:00'})
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # add_slot() lehnt ihn schon beim Anlegen ab.
+    kein_platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': None,
+    })
+    assert kein_platz.status_code == 400, kein_platz.json
+    assert kein_platz.json['message'] == erwartete_meldung
+
+    # update_assignment() lehnt ihn genauso ab, wenn ein bereits bestehender
+    # vorlagenloser Block per PUT seine Zeiten verlieren wuerde.
+    mitarbeiter = hr_client.post('/employees', json={'name': 'Mitarbeiter'}).json
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': None, 'start_time': '10:00', 'end_time': '14:00',
+    }).json
+    kein_update = hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': mitarbeiter['id']})
+    assert kein_update.status_code == 400, kein_update.json
+    assert kein_update.json['message'] == erwartete_meldung
+
+
+def test_ungueltiges_zeitformat_ist_400(hr_client):
+    """'25:00' und 'abends' - beide mit der uebersetzten Meldung, nicht nur mit dem Status."""
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    mitarbeiter = hr_client.post('/employees', json={'name': 'Mitarbeiter'}).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    ungueltige_stunde = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '25:00', 'end_time': '14:00',
+    })
+    assert ungueltige_stunde.status_code == 400, ungueltige_stunde.json
+    assert ungueltige_stunde.json['message'] == 'Ungültige Uhrzeit "25:00". Erwartet wird HH:MM.'
+
+    kein_zeitformat = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': 'abends', 'end_time': '14:00',
+    })
+    assert kein_zeitformat.status_code == 400, kein_zeitformat.json
+    assert kein_zeitformat.json['message'] == 'Ungültige Uhrzeit "abends". Erwartet wird HH:MM.'

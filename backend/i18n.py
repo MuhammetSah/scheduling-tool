@@ -325,6 +325,14 @@ TRANSLATIONS = {
         'de': 'employee_id ist erforderlich (null, um die Schicht unbesetzt zu lassen)',
         'en': 'employee_id is required (null to leave the shift unfilled)',
     },
+    'assignment_times_need_both': {
+        'de': 'Start- und Endzeit müssen zusammen gesetzt oder zusammen leer sein.',
+        'en': 'Start and end time must be set together or left empty together.',
+    },
+    'assignment_without_shift_type_needs_times': {
+        'de': 'Ein Block ohne Schichtart braucht eigene Zeiten — er hat keine Vorlage, von der er sie erben könnte.',
+        'en': 'A block without a shift type needs its own hours — it has no template to inherit them from.',
+    },
     'assignment_updated': {
         'de': 'Zuweisung aktualisiert',
         'en': 'Assignment updated',

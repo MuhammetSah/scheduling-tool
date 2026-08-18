@@ -643,6 +643,27 @@ def parse_optional_hours(value, field_key):
     return value
 
 
+def parse_assignment_times(data):
+    """The optional start/end pair from a request body, validated as a pair.
+
+    Returns (start, end) with both set or both None. Raises ValueError with a
+    translated message otherwise - the caller turns that into a 400, the same
+    way replace_employee_constraints does.
+    """
+    start_time = data.get('start_time') or None
+    end_time = data.get('end_time') or None
+
+    if (start_time is None) != (end_time is None):
+        raise ValueError(t(g.lang, 'assignment_times_need_both'))
+    for value in (start_time, end_time):
+        if value is not None and not valid_time(value):
+            # Reuses availability_time_invalid rather than adding a second key
+            # with identical text - it already covers "value isn't HH:MM" for
+            # any time field, not just availability windows.
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=value))
+    return start_time, end_time
+
+
 def replace_employee_constraints(connection, employee_id, data):
     cursor = connection.cursor()
 
@@ -1580,14 +1601,22 @@ def add_slot(year, month):
     change to this date, not a change to what the shift normally needs.
 
     shift_type_id may be omitted/null for a block with no template of its own;
-    start_time/end_time are then taken straight from the request body. Whether
-    that pair is actually filled in is Task 5's validation, not this route's yet.
+    start_time/end_time are then taken straight from the request body, subject
+    to the same pair/format validation as update_assignment(), and a block
+    without a shift type is rejected unless it brings its own times - it has
+    no template to inherit them from.
     """
     data = request.get_json(silent=True) or {}
     iso_date = data.get('date')
     shift_type_id = data.get('shift_type_id')
-    start_time = data.get('start_time')
-    end_time = data.get('end_time')
+
+    try:
+        start_time, end_time = parse_assignment_times(data)
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
+    if shift_type_id is None and start_time is None:
+        return jsonify({'message': t(g.lang, 'assignment_without_shift_type_needs_times')}), 400
 
     try:
         parsed = date.fromisoformat(iso_date)
@@ -1901,12 +1930,28 @@ def update_assignment(assignment_id):
         if not cursor.fetchone():
             return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
 
+    try:
+        start_time, end_time = parse_assignment_times(data)
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
+    if assignment['shift_type_id'] is None and start_time is None:
+        return jsonify({'message': t(g.lang, 'assignment_without_shift_type_needs_times')}), 400
+
     warnings = constraint_warnings(
         cursor, employee_id, assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
-        exclude_assignment_id=assignment_id,
+        exclude_assignment_id=assignment_id, start_time=start_time, end_time=end_time,
     )
 
-    cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (employee_id, assignment_id))
+    # start_time/end_time are written on every PUT, same "absent means empty"
+    # semantics as employee_id above: leaving them out of the body clears them
+    # to NULL rather than keeping whatever was there before. Consequence: a
+    # caller that only wants to swap the employee must resend the current
+    # times, or they get wiped. The frontend does this (Task 6).
+    cursor.execute(
+        'UPDATE shift_assignments SET employee_id = ?, start_time = ?, end_time = ?, manually_edited = 1 '
+        'WHERE id = ?',
+        (employee_id, start_time, end_time, assignment_id))
     refresh_unfilled_count(cursor, assignment['schedule_id'])
 
     connection.commit()
@@ -1936,9 +1981,16 @@ def swap_assignments():
     cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (b['employee_id'], a['id']))
     cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (a['employee_id'], b['id']))
 
+    # The times stay with the slot, not the person - a and b still hold the
+    # rows as fetched before the swap above, so a['start_time']/a['end_time']
+    # are the place's own times, unaffected by which employee now sits there.
     warnings = []
-    warnings += constraint_warnings(cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'], exclude_assignment_id=a['id'])
-    warnings += constraint_warnings(cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'], exclude_assignment_id=b['id'])
+    warnings += constraint_warnings(cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'],
+                                    exclude_assignment_id=a['id'],
+                                    start_time=a['start_time'], end_time=a['end_time'])
+    warnings += constraint_warnings(cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'],
+                                    exclude_assignment_id=b['id'],
+                                    start_time=b['start_time'], end_time=b['end_time'])
 
     refresh_unfilled_count(cursor, a['schedule_id'])
 
@@ -1976,6 +2028,7 @@ def replacement_suggestions(assignment_id):
         warnings = constraint_warnings(
             cursor, row['id'], assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
             exclude_assignment_id=assignment_id,
+            start_time=assignment['start_time'], end_time=assignment['end_time'],
         )
         if warnings:
             continue
