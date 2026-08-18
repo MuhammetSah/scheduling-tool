@@ -46,6 +46,7 @@ BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.
 INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexes.sql'
 LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
 AVAILABILITY_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.py'
+ASSIGNMENT_TIMES_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0005_assignment_times.py'
 
 
 @pytest.fixture
@@ -667,3 +668,85 @@ def test_gleichzeitige_worker_wenden_dieselbe_migration_nicht_doppelt_an(pg_leer
         'auf schema_migrations.version, der beim Deploy den Gunicorn-Worker beim Boot toetet.'
     )
     assert migrations.applied_versions().count('0001_race') == 1
+
+
+def test_zuweisung_hat_eigene_zeitspalten(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py:
+    start_time/end_time muessen NULL-bar sein, nicht nur laut PRAGMA auf
+    SQLite.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT column_name, is_nullable FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = 'shift_assignments' "
+                "AND column_name IN ('start_time', 'end_time')",
+                (schema,),
+            )
+            nullability = {row[0]: row[1] for row in cursor.fetchall()}
+    finally:
+        connection.close()
+
+    assert nullability == {'start_time': 'YES', 'end_time': 'YES'}
+
+
+def test_schichtart_ist_jetzt_optional(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py: das
+    ALTER TABLE ... ALTER COLUMN shift_type_id DROP NOT NULL aus
+    0005_assignment_times.py laeuft hier gegen echtes Postgres, nicht nur den
+    SQLite-Tabellenneubau-Zweig - ein Block ohne Vorlage muss sich
+    tatsaechlich einfuegen lassen.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    connection = psycopg2.connect(schema_url)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT is_nullable FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = 'shift_assignments' "
+                "AND column_name = 'shift_type_id'",
+                (schema,),
+            )
+            assert cursor.fetchone()[0] == 'YES'
+
+            cursor.execute("INSERT INTO schedules (year, month) VALUES (2026, 3) RETURNING id")
+            schedule_id = cursor.fetchone()[0]
+            cursor.execute(
+                'INSERT INTO shift_assignments '
+                '(schedule_id, date, shift_type_id, slot_index, start_time, end_time) '
+                'VALUES (%s, %s, NULL, 0, %s, %s)',
+                (schedule_id, '2026-03-17', '10:00', '16:00'))
+        connection.commit()
+
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT shift_type_id, start_time FROM shift_assignments')
+            zeile = cursor.fetchone()
+    finally:
+        connection.close()
+
+    assert zeile[0] is None
+    assert zeile[1] == '10:00'
+
+
+def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_db):
+    """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py: der
+    Rundlauf up -> down -> up muss auch gegen echtes Postgres funktionieren -
+    hier ist es der ALTER-COLUMN-Zweig aus 0005_assignment_times.py statt des
+    SQLite-Tabellenneubaus, ein komplett anderer Codepfad in derselben
+    Migration.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+    assert '0005_assignment_times' in migrations.applied_versions()
+
+    migrations.rollback_last()
+    assert '0005_assignment_times' not in migrations.applied_versions()
+
+    migrations.apply_pending()
+    assert '0005_assignment_times' in migrations.applied_versions()

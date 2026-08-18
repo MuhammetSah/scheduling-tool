@@ -13,6 +13,7 @@ BASELINE_PATH = Path(__file__).resolve().parent / 'migrations' / '0001_baseline.
 INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexes.sql'
 LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
 AVAILABILITY_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.py'
+ASSIGNMENT_TIMES_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0005_assignment_times.py'
 
 # Die von 0001_baseline.py angelegten Tabellen, als Literal statt aus der
 # Datei abgeleitet. 0001_baseline aendert sich per Konvention nie wieder
@@ -233,11 +234,15 @@ def indizes(db_file):
 
 
 def test_indizes_werden_angelegt(fresh_db):
+    """ux_assignment_slot_v2 statt ux_assignment_slot: 0005_assignment_times
+    ersetzt den alten Index (siehe dort) - nach einem vollstaendigen Lauf
+    aller Migrationen existiert nur noch die neue Form.
+    """
     migrations, db_file = fresh_db
     migrations.apply_pending()
 
     assert {'ix_assignments_date_employee', 'ix_assignments_schedule',
-            'ix_absences_date', 'ux_assignment_slot'} <= indizes(db_file)
+            'ix_absences_date', 'ux_assignment_slot_v2'} <= indizes(db_file)
 
 
 def test_derselbe_platz_kann_nicht_doppelt_belegt_werden(fresh_db):
@@ -402,3 +407,146 @@ def test_fenster_werden_beim_loeschen_des_mitarbeiters_mitgeloescht(fresh_db):
         connection.close()
 
     assert rest == 0
+
+
+def test_zuweisung_hat_eigene_zeitspalten(fresh_db):
+    """Individuelle Zeiten pro Zuweisung, beide NULL-bar."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        spalten = {r[1]: r for r in connection.execute('PRAGMA table_info(shift_assignments)')}
+    finally:
+        connection.close()
+
+    assert 'start_time' in spalten
+    assert 'end_time' in spalten
+    # notnull ist Feld 3 der PRAGMA-Zeile: 0 heisst NULL erlaubt.
+    assert spalten['start_time'][3] == 0
+    assert spalten['end_time'][3] == 0
+
+
+def test_schichtart_ist_jetzt_optional(fresh_db):
+    """Ein Block ohne Vorlage muss speicherbar sein - die Voraussetzung fuer Etappe 4."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO schedules (year, month) VALUES (2026, 3)")
+        connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, start_time, end_time) '
+            "VALUES (1, '2026-03-17', NULL, 0, '10:00', '16:00')")
+        connection.commit()
+        zeile = connection.execute(
+            'SELECT shift_type_id, start_time FROM shift_assignments').fetchone()
+    finally:
+        connection.close()
+
+    assert zeile[0] is None
+    assert zeile[1] == '10:00'
+
+
+def test_bestandszuweisungen_ueberleben_den_tabellenneubau(leere_migrationen):
+    """Der SQLite-Pfad baut die Tabelle neu - die vorhandenen Zeilen muessen das ueberstehen.
+
+    migrations.apply_one(version) gibt es nicht - der Runner bietet nur
+    applied_versions()/apply_pending()/rollback_last() (siehe migrations.py).
+    Die Staffelung laeuft deshalb wie in
+    test_availability_mode_hat_anytime_als_standard oben ueber ein isoliertes
+    Migrationsverzeichnis, das erst bis 0004 befuellt wird: 0001-0004 werden
+    hineinkopiert und angewandt, DANN wird eingefuegt, und erst danach kommt
+    0005 dazu. Andersherum wuerde der Test nur belegen, dass ein frischer
+    Insert nach einer bereits vollstaendigen Migration funktioniert - genau
+    der Fehler, der in Etappe 1 gefunden wurde.
+    """
+    migrations, verzeichnis, db_file = leere_migrationen
+    (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0002_indexes.sql').write_text(INDEXES_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0003_login_attempts.sql').write_text(
+        LOGIN_ATTEMPTS_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0004_employee_availability.py').write_text(
+        AVAILABILITY_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO schedules (year, month) VALUES (2026, 3)")
+        connection.execute("INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '06:00', '14:00')")
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited) '
+            "VALUES (1, '2026-03-17', 1, 0, 1, 1)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    (verzeichnis / '0005_assignment_times.py').write_text(
+        ASSIGNMENT_TIMES_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        zeile = connection.execute(
+            'SELECT schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited, '
+            'start_time, end_time FROM shift_assignments').fetchone()
+    finally:
+        connection.close()
+
+    assert zeile == (1, '2026-03-17', 1, 0, 1, 1, None, None)
+
+
+def test_indizes_ueberleben_den_tabellenneubau(fresh_db):
+    """DROP TABLE nimmt die Indizes mit - sie muessen danach wieder da sein."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        namen = {r[0] for r in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'shift_assignments'")}
+    finally:
+        connection.close()
+
+    assert 'ix_assignments_date_employee' in namen
+    assert 'ix_assignments_schedule' in namen
+    assert 'ux_assignment_slot_v2' in namen
+
+
+def test_eindeutigkeit_greift_auch_ohne_schichtart(fresh_db):
+    """Ohne COALESCE waeren zwei freie Bloecke auf demselben Platz erlaubt."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO schedules (year, month) VALUES (2026, 3)")
+        connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, start_time, end_time) '
+            "VALUES (1, '2026-03-17', NULL, 0, '10:00', '16:00')")
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, start_time, end_time) '
+                "VALUES (1, '2026-03-17', NULL, 0, '11:00', '17:00')")
+            connection.commit()
+    finally:
+        connection.close()
+
+
+def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fresh_db):
+    """Rueckwaerts allein reicht nicht - die Migration muss danach wieder vorwaerts laufen.
+
+    Vorbild: test_fenstermigration_... aus Etappe 1, entstanden aus dem Critical
+    des dortigen Abschluss-Reviews.
+    """
+    migrations, _ = fresh_db
+    migrations.apply_pending()
+    assert '0005_assignment_times' in migrations.applied_versions()
+
+    migrations.rollback_last()
+    assert '0005_assignment_times' not in migrations.applied_versions()
+
+    migrations.apply_pending()
+    assert '0005_assignment_times' in migrations.applied_versions()
