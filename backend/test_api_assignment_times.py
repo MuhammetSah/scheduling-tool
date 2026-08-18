@@ -281,3 +281,111 @@ def test_freier_block_hat_keinen_schichtartnamen_aber_eine_zeit(hr_client):
     block = zuweisungen[freier_block_id]
     assert block['shift_type_name'] is None
     assert (block['start_time'], block['end_time']) == ('20:00', '23:00')
+
+
+def test_plan_zeigt_den_datums_override_ueber_http(hr_client):
+    """Stufe 2 im HTTP-Pfad von fetch_schedule(): ohne eigene Zeit gewinnt der
+    Datums-Override gegen die Schichtart-Vorlage - geprueft gegen die Antwort
+    von GET /schedules/..., nicht gegen assignment_hours() direkt. Kein Test
+    im Projekt ruft diese Route bisher nach einem gesetzten Override auf.
+
+    Vier Assertions zusammen sind der Punkt: sie unterscheiden Stufe 2 von
+    Stufe 3 UND halten fest, dass assignment_time_set/time_overridden nicht
+    vertauscht wurden. Eine Assertion allein auf start_time koennte auch dann
+    gruen sein, wenn die beiden Flags vertauscht waeren.
+    """
+    kollegin = hr_client.post('/employees', json={'name': 'Kollegin'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    assert hr_client.put(f'/assignments/{platz["id"]}',
+                          json={'employee_id': kollegin['id']}).status_code == 200
+
+    # Der Datums-Override kommt ueber dieselbe Route, die die Anwendung auch
+    # benutzt - nicht per direktem SQL.
+    override = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+        'start_time': '07:00', 'end_time': '15:00',
+    })
+    assert override.status_code == 200, override.json
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    zeile = {a['id']: a for a in antwort.json['assignments']}[platz['id']]
+
+    assert (zeile['start_time'], zeile['end_time']) == ('07:00', '15:00')
+    assert zeile['time_overridden'] is True
+    assert zeile['assignment_time_set'] is False
+    assert (zeile['default_start_time'], zeile['default_end_time']) == ('06:00', '14:00')
+
+
+def test_eigene_zeit_schlaegt_den_datums_override_im_plan(hr_client):
+    """Stufe 1 gegen Stufe 2 im selben HTTP-Pfad: Bens eigene Zeit gewinnt auch
+    dann, wenn fuer Datum und Schichtart zusaetzlich ein Override existiert.
+
+    Baut auf demselben Aufbau wie oben auf, mit einem zweiten Platz fuer Ben:
+    ohne diesen Test koennte fetch_schedule() faelschlich zuerst den Override
+    pruefen und nur zufaellig richtig aussehen, weil im Test oben keine eigene
+    Zeit gesetzt ist - dieser hier widerlegt genau diese Verwechslung, indem
+    beide Staerken gleichzeitig auf demselben Datum stehen.
+    """
+    from app import get_db
+
+    ben = hr_client.post('/employees', json={'name': 'Ben'}).json
+    kollegin = hr_client.post('/employees', json={'name': 'Kollegin'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    platz_kollegin = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    platz_ben = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    assert hr_client.put(f'/assignments/{platz_kollegin["id"]}',
+                          json={'employee_id': kollegin['id']}).status_code == 200
+    assert hr_client.put(f'/assignments/{platz_ben["id"]}',
+                          json={'employee_id': ben['id']}).status_code == 200
+
+    override = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+        'start_time': '07:00', 'end_time': '15:00',
+    })
+    assert override.status_code == 200, override.json
+
+    # Bens eigene Zeit weicht bewusst sowohl vom Override als auch von der
+    # Schichtart ab, damit keine der drei Stufen zufaellig gleich aussieht.
+    # Direktes SQL, weil die API einer Zuweisung noch keine eigenen Zeiten
+    # geben kann (kommt erst mit Task 4/5) - dieselbe Zwischenloesung wie in
+    # den Tests oben.
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            'UPDATE shift_assignments SET start_time = ?, end_time = ? WHERE id = ?',
+            ('10:00', '16:00', platz_ben['id']),
+        )
+        connection.commit()
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    zuweisungen = {a['id']: a for a in antwort.json['assignments']}
+
+    ben_zeile = zuweisungen[platz_ben['id']]
+    assert (ben_zeile['start_time'], ben_zeile['end_time']) == ('10:00', '16:00')
+    assert ben_zeile['assignment_time_set'] is True
+    assert ben_zeile['time_overridden'] is True
+
+    kollegin_zeile = zuweisungen[platz_kollegin['id']]
+    assert (kollegin_zeile['start_time'], kollegin_zeile['end_time']) == ('07:00', '15:00')
+    assert kollegin_zeile['assignment_time_set'] is False
+    assert kollegin_zeile['time_overridden'] is True
