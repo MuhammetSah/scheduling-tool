@@ -751,3 +751,146 @@ def test_ungueltiges_zeitformat_ist_400(hr_client):
     })
     assert kein_zeitformat.status_code == 400, kein_zeitformat.json
     assert kein_zeitformat.json['message'] == 'Ungültige Uhrzeit "abends". Erwartet wird HH:MM.'
+
+
+def test_gleiche_start_und_endzeit_ist_400(hr_client):
+    """start_time == end_time waere sonst eine stille 24-Stunden-Schicht.
+
+    shift_duration_minutes() behandelt end <= start als Schicht ueber
+    Mitternacht (1440 Minuten) statt als leere Spanne - vor dieser Aufgabe war
+    dieser Pfad ueber die API nicht erreichbar, weil Zuweisungen gar keine
+    eigenen Zeiten setzen konnten. Geprueft wird die Meldung, nicht nur der
+    Status.
+    """
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    mitarbeiter = hr_client.post('/employees', json={'name': 'Mitarbeiter'}).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    gleiche_zeit = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': mitarbeiter['id'], 'start_time': '09:00', 'end_time': '09:00',
+    })
+    assert gleiche_zeit.status_code == 400, gleiche_zeit.json
+    assert gleiche_zeit.json['message'] == 'Start- und Endzeit einer Zuweisung dürfen nicht gleich sein.'
+
+
+# ---------- Regressionsschutz: swap_assignments() und replacement_suggestions() ----------
+#
+# Beide reichen seit dieser Aufgabe die Zeiten IHRER jeweiligen Zuweisung an
+# constraint_warnings() durch (app.py). Ohne die beiden Tests unten koennte
+# jemand die start_time=/end_time=-Argumente an einer der beiden Stellen
+# wieder herausstreichen, ohne dass die Suite das bemerkt.
+
+def test_tausch_reicht_die_zeiten_des_platzes_durch(hr_client):
+    """Nach dem Tausch bezieht sich die Warnung auf die Zeiten des PLATZES, nicht der Person.
+
+    Aufbau: Anna hat ein Fenster 06:00-14:00, das sich mit der Schichtart-Zeit
+    deckt. Platz A traegt eine individuelle Zeit 10:00-16:00, die aus dem
+    Fenster faellt; Platz B hat keine eigene Zeit und laeuft auf der
+    Schichtart-Zeit 06:00-14:00, die ins Fenster passt. Vor dem Tausch steht
+    Ben auf A, Anna auf B - keine Warnung. Nach dem Tausch steht Anna auf A:
+    wanderten die Zeiten mit der Person statt mit dem Platz, saehe Anna
+    weiterhin die fensterkonforme Zeit und bliebe warnungsfrei. Bleiben sie
+    dagegen am Platz (wie spezifiziert), sieht sie 10:00-16:00 und die Warnung
+    erscheint. Der abschliessende GET bestaetigt zusaetzlich, dass die
+    gespeicherten Zeiten selbst am Platz haengen, nicht an der Person.
+    """
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    ben = hr_client.post('/employees', json={'name': 'Ben'}).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # 2026-09-01 ist ein Dienstag (Wochentag 1).
+    platz_a = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    platz_b = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    # Ben auf A, mit individueller Zeit ausserhalb von Annas Fenster.
+    zu_a = hr_client.put(f'/assignments/{platz_a["id"]}', json={
+        'employee_id': ben['id'], 'start_time': '10:00', 'end_time': '16:00',
+    })
+    assert zu_a.status_code == 200, zu_a.json
+    assert zu_a.json['warnings'] == []
+
+    # Anna auf B, ohne eigene Zeit - laeuft auf der Schichtart-Zeit, die genau
+    # in ihr Fenster passt.
+    zu_b = hr_client.put(f'/assignments/{platz_b["id"]}', json={'employee_id': anna['id']})
+    assert zu_b.status_code == 200, zu_b.json
+    assert zu_b.json['warnings'] == []
+
+    tausch = hr_client.post('/assignments/swap', json={
+        'assignment_id_a': platz_a['id'], 'assignment_id_b': platz_b['id'],
+    })
+    assert tausch.status_code == 200, tausch.json
+    assert tausch.json['warnings'] == [
+        'Anna arbeitet dienstags normalerweise nur 06:00–14:00.']
+
+    # Die Zeiten selbst bleiben am Platz, nicht an der Person.
+    antwort = hr_client.get('/schedules/2026/9')
+    zuweisungen = {a['id']: a for a in antwort.json['assignments']}
+    assert (zuweisungen[platz_a['id']]['start_time'], zuweisungen[platz_a['id']]['end_time']) == ('10:00', '16:00')
+    assert zuweisungen[platz_a['id']]['employee_id'] == anna['id']
+    assert (zuweisungen[platz_b['id']]['start_time'], zuweisungen[platz_b['id']]['end_time']) == ('06:00', '14:00')
+    assert zuweisungen[platz_b['id']]['employee_id'] == ben['id']
+
+
+def test_ersatzsuche_reicht_die_eigene_zeit_der_zuweisung_durch(hr_client):
+    """Ein Kandidat, der nur wegen der individuellen Zeit passt oder nicht passt.
+
+    Der freie Platz hat eine Schichtart (Fruehschicht 06:00-14:00), aber eine
+    individuelle Zeit 10:00-16:00. Ellas Fenster deckt genau die
+    Schichtart-Zeit ab (06:00-14:00), nicht aber die individuelle Zeit - sie
+    endet zwei Stunden zu frueh. Faraahs Fenster deckt dagegen genau die
+    individuelle Zeit ab. Wuerde replacement_suggestions() die Schichtart-Zeit
+    statt der individuellen Zeit an constraint_warnings() reichen, kaeme genau
+    das umgekehrte Ergebnis heraus: Ella eignungsfaehig, Faraah nicht.
+    """
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    ella = hr_client.post('/employees', json={
+        'name': 'Ella',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    faraah = hr_client.post('/employees', json={
+        'name': 'Faraah',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '10:00', 'end_time': '16:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # 2026-09-01 ist ein Dienstag (Wochentag 1). Individuelle Zeit weicht
+    # bewusst von der Schichtart ab.
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+        'start_time': '10:00', 'end_time': '16:00',
+    }).json
+
+    antwort = hr_client.get(f'/assignments/{platz["id"]}/replacement-suggestions')
+    assert antwort.status_code == 200, antwort.json
+    kandidaten_ids = {c['employee_id'] for c in antwort.json}
+    assert ella['id'] not in kandidaten_ids
+    assert faraah['id'] in kandidaten_ids

@@ -329,6 +329,10 @@ TRANSLATIONS = {
         'de': 'Start- und Endzeit müssen zusammen gesetzt oder zusammen leer sein.',
         'en': 'Start and end time must be set together or left empty together.',
     },
+    'assignment_times_must_differ': {
+        'de': 'Start- und Endzeit einer Zuweisung dürfen nicht gleich sein.',
+        'en': "An assignment's start and end time must differ.",
+    },
     'assignment_without_shift_type_needs_times': {
         'de': 'Ein Block ohne Schichtart braucht eigene Zeiten — er hat keine Vorlage, von der er sie erben könnte.',
         'en': 'A block without a shift type needs its own hours — it has no template to inherit them from.',

@@ -661,6 +661,11 @@ def parse_assignment_times(data):
             # with identical text - it already covers "value isn't HH:MM" for
             # any time field, not just availability windows.
             raise ValueError(t(g.lang, 'availability_time_invalid', value=value))
+    # Equal start/end isn't a zero-length shift - shift_duration_minutes()
+    # treats end <= start as running past midnight, so this would silently
+    # become a 1440-minute shift instead of the empty range it looks like.
+    if start_time is not None and start_time == end_time:
+        raise ValueError(t(g.lang, 'assignment_times_must_differ'))
     return start_time, end_time
 
 
