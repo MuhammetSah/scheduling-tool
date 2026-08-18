@@ -894,3 +894,70 @@ def test_ersatzsuche_reicht_die_eigene_zeit_der_zuweisung_durch(hr_client):
     kandidaten_ids = {c['employee_id'] for c in antwort.json}
     assert ella['id'] not in kandidaten_ids
     assert faraah['id'] in kandidaten_ids
+
+
+# ---------- Regressionsschutz: update_assignment() reicht eigene Zeiten an die
+# ---------- Fensterpruefung durch (Abschluss-Review, Befund 1) ----------
+#
+# Die beiden Tests oben unter "constraint_warnings() reicht start_time/end_time
+# tatsaechlich durch" rufen constraint_warnings() direkt auf, nicht ueber die
+# HTTP-Route (das war zum Zeitpunkt jener Tests noch nicht moeglich - siehe
+# Kommentar am Dateianfang). test_zeiten_setzen_speichert_und_warnt_bei_bedarf
+# geht zwar ueber PUT /assignments/<id>, zeigt dort aber nur, dass sich die
+# Warnung AENDERT, wenn die eigene Zeit wechselt - nicht gezielt, dass sie
+# erscheint, wenn die eigene Zeit das Fenster verletzt, waehrend die
+# Schichtart-Zeit es nicht taete. Genau diese Kombination - PUT mit eigener
+# Zeit UND einer dadurch verletzten Fenster-Verfuegbarkeit - war bislang an
+# keiner Stelle ueber die tatsaechlich benutzte Route geprueft, obwohl PUT
+# /assignments/<id> der meistbenutzte Schreibpfad ist (jede manuelle
+# Umbesetzung laeuft darueber). Tausch und Ersatzsuche sind mit den beiden
+# Tests direkt oberhalb bereits so abgesichert.
+
+def test_put_reicht_die_eigene_zeit_der_zuweisung_an_die_fensterpruefung_durch(hr_client):
+    """PUT /assignments/<id> mit eigener Zeit, die das Fenster verletzt - und
+    der Gegenfall, in dem sie hineinpasst.
+
+    Aufbau: Anna arbeitet dienstags laut Fenster nur 06:00-14:00 - genau die
+    Zeit der Schichtart. Die individuelle Zeit 10:00-16:00 verletzt dieses
+    Fenster, die Schichtart-Zeit selbst wuerde es nicht. Wuerde
+    update_assignment() beim Aufruf von constraint_warnings() faelschlich die
+    Schichtart-Zeit statt der individuellen durchreichen, saehe die
+    Fensterpruefung 06:00-14:00 (passt) statt 10:00-16:00 (passt nicht), und
+    die Warnung bliebe aus - der Test wuerde umfallen. Der Gegenfall (dieselbe
+    Zuweisung, individuelle Zeit diesmal innerhalb des Fensters) zeigt, dass
+    keine Warnung entsteht, wenn keine entstehen soll; ein Aufbau, in dem
+    beide Zeiten das Fenster verletzen wuerden, koennte die beiden Faelle
+    nicht unterscheiden.
+    """
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    anna = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # 2026-09-01 ist ein Dienstag (Wochentag 1).
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+
+    verletzt_das_fenster = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': anna['id'], 'start_time': '10:00', 'end_time': '16:00',
+    })
+    assert verletzt_das_fenster.status_code == 200, verletzt_das_fenster.json
+    assert verletzt_das_fenster.json['warnings'] == [
+        'Anna arbeitet dienstags normalerweise nur 06:00–14:00.']
+
+    # Gegenfall: dieselbe Zuweisung, dieselbe Person, individuelle Zeit
+    # diesmal innerhalb des Fensters - keine Warnung.
+    passt_ins_fenster = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': anna['id'], 'start_time': '06:00', 'end_time': '14:00',
+    })
+    assert passt_ins_fenster.status_code == 200, passt_ins_fenster.json
+    assert passt_ins_fenster.json['warnings'] == []
