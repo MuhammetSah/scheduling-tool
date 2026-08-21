@@ -116,6 +116,82 @@ def test_zweite_ausnahme_fuer_dasselbe_datum_ist_400(hr_client):
     assert gelesen[0]['closed'] is True
 
 
+def test_falsche_anzahl_eintraege_ist_400(hr_client):
+    sechs_eintraege = [
+        {'weekday': tag, 'open_time': '08:00', 'close_time': '18:00', 'closed': False}
+        for tag in range(6)
+    ]
+
+    antwort = hr_client.put('/business-hours', json=sechs_eintraege)
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == (
+        'Es müssen genau 7 Einträge übergeben werden, einer je Wochentag (Montag bis Sonntag)'
+    )
+
+
+def test_doppelter_wochentag_ist_400(hr_client):
+    eintraege = [
+        {'weekday': 0, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+        {'weekday': 0, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+        {'weekday': 1, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+        {'weekday': 2, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+        {'weekday': 3, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+        {'weekday': 4, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+        {'weekday': 5, 'open_time': '08:00', 'close_time': '18:00', 'closed': False},
+    ]
+
+    antwort = hr_client.put('/business-hours', json=eintraege)
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == 'Jeder Wochentag darf nur einmal vorkommen'
+
+
+def test_eintrag_ohne_objekt_ist_400(hr_client):
+    eintraege = [
+        {'weekday': tag, 'open_time': '08:00', 'close_time': '18:00', 'closed': False}
+        for tag in range(6)
+    ]
+    eintraege.append('Montag')
+
+    antwort = hr_client.put('/business-hours', json=eintraege)
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == 'Jeder Eintrag muss ein Objekt mit Wochentag, Öffnungs- und Schließzeit sein'
+
+
+def test_offene_ausnahme_mit_eigenen_zeiten_schlaegt_den_wochentag(hr_client):
+    """Eine offene Ausnahme mit eigenen Zeiten - der eigentliche Zweck von Sonderoeffnungszeiten.
+
+    Anders als test_ausnahme_schlaegt_den_wochentag (geschlossene Ausnahme) hier
+    eine Ausnahme, die selbst offen ist, aber mit eigenen, vom Wochentag
+    abweichenden Zeiten - der Zweig in parse_business_hours_exception() fuer
+    closed=False mit gueltigen Zeiten wird sonst von keinem Test durchlaufen.
+    """
+    from app import business_hours_for, get_db
+
+    # 2026-09-02 ist ein Mittwoch (weekday 2). Die Standardzeile ist nach der
+    # Migration 00:00-00:00 (ganztags offen) - die Ausnahme unten setzt fuer
+    # genau dieses Datum andere Zeiten, damit Wochentagsregel und Ausnahme
+    # nachweislich verschiedene Ergebnisse liefern.
+    mittwoch = next(z for z in hr_client.get('/business-hours').json if z['weekday'] == 2)
+    assert (mittwoch['open_time'], mittwoch['close_time']) == ('00:00', '00:00')
+
+    antwort = hr_client.post('/business-hours/exceptions', json={
+        'date': '2026-09-02', 'open_time': '10:00', 'close_time': '14:00', 'closed': False,
+        'label': 'Verkuerzt',
+    })
+
+    assert antwort.status_code == 201, antwort.json
+    assert antwort.json['open_time'] == '10:00'
+    assert antwort.json['close_time'] == '14:00'
+    assert antwort.json['closed'] is False
+
+    with hr_client.application.app_context():
+        cursor = get_db().cursor()
+        assert business_hours_for(cursor, '2026-09-02') == ('10:00', '14:00', False)
+
+
 def test_nicht_hr_konto_bekommt_403(hr_client):
     employee = hr_client.post('/employees', json={'name': 'Anna', 'email': 'anna@example.com'}).json
     konto = hr_client.post('/register', json={
