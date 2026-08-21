@@ -2047,6 +2047,214 @@ def replacement_suggestions(assignment_id):
     return jsonify(candidates)
 
 
+# ---------- opening hours (business hours) and exceptions ----------
+#
+# business_hours always has exactly seven rows (one per weekday, see
+# 0006_coverage.py) - PUT below only ever overwrites those seven, it never
+# deletes or inserts, so that invariant can't be broken from here.
+# business_hours_exceptions holds one-off overrides for a single date (a
+# holiday, a special opening) and is otherwise empty; UNIQUE(date) is
+# enforced explicitly below with a 400 rather than silently upserting,
+# unlike employee_absences' ON CONFLICT DO UPDATE - a second exception for
+# the same date is a mistake to flag, not a correction to accept quietly.
+#
+# business_hours_for() is the shared read path Task 5 and Task 6 build on:
+# a coverage/gap calculation for a given date must not care whether that
+# date's hours come from the weekday rule or an exception, so the precedence
+# lives here once instead of being re-decided at every call site.
+
+def serialize_business_hours(row):
+    return {
+        'weekday': row['weekday'],
+        'open_time': row['open_time'],
+        'close_time': row['close_time'],
+        'closed': bool(row['closed']),
+    }
+
+
+def replace_business_hours(connection, entries):
+    """Overwrites all seven weekday rows from a list of exactly seven entries.
+
+    Validates the whole list first and only writes once every entry has
+    passed - a bad entry must not overwrite some of the seven rows and leave
+    the rest as they were. Requiring exactly seven entries, each with a
+    distinct weekday in 0..6, is what guarantees every weekday gets updated
+    and none twice: seven distinct values in that range can only be
+    {0, 1, ..., 6}.
+    """
+    if not isinstance(entries, list) or len(entries) != 7:
+        raise ValueError(t(g.lang, 'business_hours_length'))
+
+    by_weekday = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(t(g.lang, 'business_hours_entry_invalid'))
+        try:
+            weekday = int(entry.get('weekday'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if not 0 <= weekday <= 6:
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if weekday in by_weekday:
+            raise ValueError(t(g.lang, 'business_hours_weekday_duplicate'))
+
+        open_time = entry.get('open_time')
+        close_time = entry.get('close_time')
+        if not valid_time(open_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=open_time))
+        if not valid_time(close_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=close_time))
+
+        by_weekday[weekday] = (open_time, close_time, 1 if entry.get('closed') else 0)
+
+    cursor = connection.cursor()
+    for weekday, (open_time, close_time, closed) in by_weekday.items():
+        cursor.execute(
+            'UPDATE business_hours SET open_time = ?, close_time = ?, closed = ? WHERE weekday = ?',
+            (open_time, close_time, closed, weekday),
+        )
+
+
+@app.route('/business-hours', methods=['GET'])
+@hr_required
+def list_business_hours():
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM business_hours ORDER BY weekday')
+    return jsonify([serialize_business_hours(row) for row in cursor.fetchall()])
+
+
+@app.route('/business-hours', methods=['PUT'])
+@hr_required
+def update_business_hours():
+    entries = request.get_json(silent=True)
+    connection = get_db()
+    try:
+        replace_business_hours(connection, entries)
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+    connection.commit()
+
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM business_hours ORDER BY weekday')
+    return jsonify([serialize_business_hours(row) for row in cursor.fetchall()])
+
+
+def serialize_business_hours_exception(row):
+    return {
+        'date': row['date'],
+        'open_time': row['open_time'],
+        'close_time': row['close_time'],
+        'closed': bool(row['closed']),
+        'label': row['label'],
+    }
+
+
+def parse_business_hours_exception(data):
+    """Validates one exception's fields, returning (date, open_time, close_time, closed, label).
+
+    open_time/close_time are nullable in the schema - a closed exception
+    (a holiday) needs no times. Only when the exception is NOT closed are
+    both required, since an open exception with unknown hours would leave
+    business_hours_for() with nothing usable to hand back to its callers.
+    """
+    iso_date = data.get('date')
+    try:
+        date.fromisoformat(iso_date)
+    except (TypeError, ValueError):
+        raise ValueError(t(g.lang, 'invalid_date_value', date=iso_date))
+
+    closed = 1 if data.get('closed') else 0
+    open_time = data.get('open_time')
+    close_time = data.get('close_time')
+
+    if closed:
+        for value in (open_time, close_time):
+            if value is not None and not valid_time(value):
+                raise ValueError(t(g.lang, 'availability_time_invalid', value=value))
+    else:
+        if not valid_time(open_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=open_time))
+        if not valid_time(close_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=close_time))
+
+    return iso_date, open_time, close_time, closed, data.get('label')
+
+
+@app.route('/business-hours/exceptions', methods=['GET'])
+@hr_required
+def list_business_hours_exceptions():
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM business_hours_exceptions ORDER BY date')
+    return jsonify([serialize_business_hours_exception(row) for row in cursor.fetchall()])
+
+
+@app.route('/business-hours/exceptions', methods=['POST'])
+@hr_required
+def create_business_hours_exception():
+    data = request.get_json(silent=True) or {}
+    connection = get_db()
+    cursor = connection.cursor()
+
+    try:
+        iso_date, open_time, close_time, closed, label = parse_business_hours_exception(data)
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+
+    cursor.execute('SELECT id FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    if cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'business_hours_exception_date_taken')}), 400
+
+    cursor.execute(
+        'INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (iso_date, open_time, close_time, closed, label),
+    )
+    connection.commit()
+
+    cursor.execute('SELECT * FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    return jsonify(serialize_business_hours_exception(cursor.fetchone())), 201
+
+
+@app.route('/business-hours/exceptions/<iso_date>', methods=['DELETE'])
+@hr_required
+def delete_business_hours_exception(iso_date):
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'business_hours_exception_not_found')}), 404
+
+    cursor.execute('DELETE FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    connection.commit()
+    return jsonify({'message': t(g.lang, 'business_hours_exception_deleted')}), 200
+
+
+def business_hours_for(cursor, iso_date):
+    """(open_time, close_time, closed) for one date - an exception fully overrides the weekday rule.
+
+    Used by Task 5 (coverage bands) and Task 6 (coverage gaps): both need "is
+    the business open at this date/time" without re-deciding, on every call,
+    whether a one-off exception beats the weekday's usual hours.
+    """
+    cursor.execute(
+        'SELECT open_time, close_time, closed FROM business_hours_exceptions WHERE date = ?',
+        (iso_date,),
+    )
+    exception = cursor.fetchone()
+    if exception:
+        return exception['open_time'], exception['close_time'], bool(exception['closed'])
+
+    weekday = date.fromisoformat(iso_date).weekday()
+    cursor.execute(
+        'SELECT open_time, close_time, closed FROM business_hours WHERE weekday = ?',
+        (weekday,),
+    )
+    row = cursor.fetchone()
+    return row['open_time'], row['close_time'], bool(row['closed'])
+
+
 # ---------- error handling ----------
 # (logging.basicConfig() lives near the top of this file now, above init_db()
 # - see the comment there.)

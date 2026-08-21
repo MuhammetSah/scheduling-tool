@@ -392,6 +392,32 @@ TRANSLATIONS = {
         'en': '{name} normally does not work {weekday} at all.',
     },
 
+    # ---- business hours / exceptions ----
+    'business_hours_length': {
+        'de': 'Es müssen genau 7 Einträge übergeben werden, einer je Wochentag (Montag bis Sonntag)',
+        'en': 'Exactly 7 entries must be provided, one per weekday (Monday through Sunday)',
+    },
+    'business_hours_entry_invalid': {
+        'de': 'Jeder Eintrag muss ein Objekt mit Wochentag, Öffnungs- und Schließzeit sein',
+        'en': 'Each entry must be an object with a weekday, opening time and closing time',
+    },
+    'business_hours_weekday_duplicate': {
+        'de': 'Jeder Wochentag darf nur einmal vorkommen',
+        'en': 'Each weekday may only appear once',
+    },
+    'business_hours_exception_date_taken': {
+        'de': 'Für dieses Datum besteht bereits eine Ausnahme',
+        'en': 'An exception already exists for this date',
+    },
+    'business_hours_exception_not_found': {
+        'de': 'Keine Ausnahme für dieses Datum gefunden',
+        'en': 'No exception found for this date',
+    },
+    'business_hours_exception_deleted': {
+        'de': 'Ausnahme gelöscht',
+        'en': 'Exception deleted',
+    },
+
     # ---- misc ----
     'api_root': {
         'de': 'Schichtplan-Tool API',
