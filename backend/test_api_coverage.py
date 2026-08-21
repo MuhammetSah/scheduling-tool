@@ -351,3 +351,138 @@ def test_nicht_hr_konto_bekommt_403_coverage_requirements(hr_client):
 
     schreiben = hr_client.put('/coverage-requirements', json=[])
     assert schreiben.status_code == 403
+
+
+# ---------- Task 6: Deckungsluecken im Plan (GET /schedules/<jahr>/<monat>) ----------
+#
+# 2026-09-01 ist ein Dienstag (Wochentag 1) - derselbe Tag, den
+# test_api_assignment_times.py schon fuer aehnliche Zwecke benutzt.
+
+def test_plan_meldet_deckungsluecken(hr_client):
+    """Bedarf 2 am Dienstag 06:00-14:00, nur eine Person eingeplant -> eine Luecke."""
+    gesetzt = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'required_count': 2},
+    ])
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    assert hr_client.put(f'/assignments/{platz["id"]}',
+                          json={'employee_id': anna['id']}).status_code == 200
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    # September 2026 hat fuenf Dienstage; der Bedarf gilt fuer den Wochentag und
+    # damit fuer alle fuenf, ohne Zuweisung ueberall eine Luecke. Gefiltert auf
+    # den einen Tag, um den nicht mit den uebrigen vier zu vermischen.
+    luecken_am_ersten = [g for g in antwort.json['coverage_gaps'] if g['date'] == '2026-09-01']
+    assert luecken_am_ersten == [
+        {'date': '2026-09-01', 'start_time': '06:00', 'end_time': '14:00', 'missing': 1},
+    ]
+
+
+def test_individuelle_zeit_deckt_genau_ihre_zeit_ab(hr_client):
+    """Der Anschluss an Etappe 2: eine Person mit eigener Zeit 10:00-16:00 deckt
+    10:00-16:00 ab, nicht die 06:00-14:00 ihrer Schichtart.
+
+    Diskriminierung: der Bedarf ist so gelegt, dass beide Lesarten zu
+    VERSCHIEDENEN Luecken fuehren. Zwei Baender, 06:00-10:00 und 14:00-16:00,
+    je required_count 1: liest die Rechnung die Schichtart-Zeit (06:00-14:00),
+    ist 06:00-10:00 gedeckt und 14:00-16:00 die Luecke - genau umgekehrt zur
+    tatsaechlichen Zeit, die 06:00-10:00 offen laesst und 14:00-16:00 deckt.
+    Ein Aufbau, bei dem beides dieselbe Luecke ergibt, wuerde das nicht zeigen.
+    """
+    gesetzt = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 1, 'start_time': '06:00', 'end_time': '10:00', 'required_count': 1},
+        {'weekday': 1, 'start_time': '14:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    ben = hr_client.post('/employees', json={'name': 'Ben'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    # Eigene Zeit weicht bewusst von der Schichtart ab - ueber dieselbe Route,
+    # die die Anwendung auch benutzt (PUT /assignments/<id> mit start_time/end_time).
+    zugewiesen = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': ben['id'], 'start_time': '10:00', 'end_time': '16:00',
+    })
+    assert zugewiesen.status_code == 200, zugewiesen.json
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    luecken_am_ersten = [g for g in antwort.json['coverage_gaps'] if g['date'] == '2026-09-01']
+    assert luecken_am_ersten == [
+        {'date': '2026-09-01', 'start_time': '06:00', 'end_time': '10:00', 'missing': 1},
+    ]
+
+
+def test_unbesetzter_platz_deckt_nichts_ab(hr_client):
+    """Ein Platz ohne Mitarbeiter deckt nichts ab, auch wenn er existiert."""
+    gesetzt = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'required_count': 1},
+    ])
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # Platz existiert, bleibt aber unbesetzt - "initially unassigned" (add_slot).
+    hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    })
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    luecken_am_ersten = [g for g in antwort.json['coverage_gaps'] if g['date'] == '2026-09-01']
+    assert luecken_am_ersten == [
+        {'date': '2026-09-01', 'start_time': '06:00', 'end_time': '14:00', 'missing': 1},
+    ]
+
+
+def test_geschlossener_ausnahmetag_hat_keine_luecke(hr_client):
+    """Auch wenn fuer den Wochentag Baender hinterlegt sind."""
+    gesetzt = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'required_count': 1},
+    ])
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    assert 'id' in plan, plan
+
+    # Unbesetzter Platz - ohne die Ausnahme unten waere das die Luecke aus
+    # test_unbesetzter_platz_deckt_nichts_ab.
+    hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    })
+
+    ausnahme = hr_client.post('/business-hours/exceptions', json={
+        'date': '2026-09-01', 'closed': True, 'label': 'Betriebsausflug',
+    })
+    assert ausnahme.status_code == 201, ausnahme.json
+
+    antwort = hr_client.get('/schedules/2026/9')
+    assert antwort.status_code == 200, antwort.json
+    # Andere Dienstage im Monat bleiben unberuehrt (sie haben ihre eigene Luecke,
+    # da dort niemand eingeplant ist) - hier zaehlt nur, dass der 01.09. keine hat.
+    assert not any(g['date'] == '2026-09-01' for g in antwort.json['coverage_gaps'])

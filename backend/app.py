@@ -17,7 +17,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import mailer
 import security
 import timeutil
-from coverage_model import band_within, first_overlapping_pair
+from coverage_model import band_within, coverage_gaps, first_overlapping_pair
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
@@ -1361,6 +1361,7 @@ def fetch_schedule(year, month):
         'assignments': assignments,
         'absences': absences,
         'distribution': build_distribution(assignments, active_employees),
+        'coverage_gaps': coverage_gaps_for_month(cursor, year, month, assignments),
     }
 
 
@@ -1509,6 +1510,7 @@ def get_schedule(year, month):
     ]
     schedule['absences'] = [a for a in schedule['absences'] if a['employee_id'] == linked_employee_id]
     schedule.pop('distribution', None)
+    schedule.pop('coverage_gaps', None)
     schedule['scope'] = 'own'
     schedule['unfilled_count'] = 0
     schedule['linked_employee_id'] = linked_employee_id
@@ -2425,6 +2427,109 @@ def update_coverage_requirements():
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM coverage_requirements ORDER BY weekday, start_time')
     return jsonify([serialize_coverage_requirement(row) for row in cursor.fetchall()])
+
+
+# ---------- coverage gaps ----------
+#
+# GET /schedules/<year>/<month> reports where a month's actual staffing falls
+# short of what /coverage-requirements demands. fetch_schedule() runs over
+# every day of the month, and business_hours_for() answers "is it open on
+# this date" with up to two SELECTs per call - looping either that or
+# coverage_requirements over a month would be exactly the N+1 the Task 4 and
+# Task 5 reviews flagged. The three functions below each run exactly once per
+# call to fetch_schedule(), regardless of how many days the month has; the
+# precedence rule (exception beats weekday) is then replayed in memory
+# against their results by _closed_on(), not re-queried per date.
+#
+# The actual gap arithmetic lives in coverage_model.coverage_gaps() - a pure
+# function, no database - and runs once per date, fed the bands and covered
+# intervals assembled here.
+
+def coverage_requirements_by_weekday(cursor):
+    """All coverage_requirements rows as {weekday: [bands...]}, one query for the whole month."""
+    cursor.execute(
+        'SELECT weekday, start_time, end_time, required_count FROM coverage_requirements '
+        'ORDER BY weekday, start_time'
+    )
+    by_weekday = {}
+    for row in cursor.fetchall():
+        by_weekday.setdefault(row['weekday'], []).append({
+            'start_time': row['start_time'], 'end_time': row['end_time'],
+            'required_count': row['required_count'],
+        })
+    return by_weekday
+
+
+def business_hours_exceptions_by_date(cursor, start_date, end_date):
+    """All business_hours_exceptions rows in [start_date, end_date] as {date: row}, one query."""
+    cursor.execute(
+        'SELECT date, open_time, close_time, closed FROM business_hours_exceptions '
+        'WHERE date BETWEEN ? AND ?',
+        (start_date, end_date),
+    )
+    return {row['date']: row for row in cursor.fetchall()}
+
+
+def _closed_on(iso_date, weekday, hours_by_weekday, exceptions_by_date):
+    """Same precedence as business_hours_for() (an exception fully overrides the weekday
+    rule), replayed against dicts already held in memory instead of querying per date.
+
+    A weekday can in principle carry bands from an earlier /coverage-requirements
+    save and later be marked closed by a fresh /business-hours PUT - the two
+    routes do not cross-validate each other - so the weekday's own closed flag
+    is still checked here, not assumed False just because bands exist.
+    """
+    exception = exceptions_by_date.get(iso_date)
+    if exception is not None:
+        return bool(exception['closed'])
+    hours = hours_by_weekday.get(weekday)
+    return bool(hours[2]) if hours else False
+
+
+def coverage_gaps_for_month(cursor, year, month, assignments):
+    """Coverage gaps for every date of the month, from data loaded once - not per day.
+
+    `assignments` is fetch_schedule()'s own list: its start_time/end_time are
+    already resolved to the actual hours (own time > date override > shift
+    type default - see the loop that builds it), so no second call to
+    assignment_hours() is needed here. An assignment covers nothing unless it
+    is held by someone: employee_id IS NULL both for a still-unfilled slot and
+    for one an absence just freed, and both must contribute no coverage.
+    """
+    bands_by_weekday = coverage_requirements_by_weekday(cursor)
+    if not bands_by_weekday:
+        return []
+
+    hours_by_weekday = load_business_hours_by_weekday(cursor)
+    days_in_month = calendar.monthrange(year, month)[1]
+    exceptions_by_date = business_hours_exceptions_by_date(
+        cursor, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat(),
+    )
+
+    intervals_by_date = {}
+    for a in assignments:
+        if a['employee_id'] is None or not a['start_time'] or not a['end_time']:
+            continue
+        intervals_by_date.setdefault(a['date'], []).append(
+            {'start_time': a['start_time'], 'end_time': a['end_time']}
+        )
+
+    gaps = []
+    for day in range(1, days_in_month + 1):
+        day_date = date(year, month, day)
+        iso_date = day_date.isoformat()
+        weekday = day_date.weekday()
+
+        bands = bands_by_weekday.get(weekday)
+        if not bands:
+            continue
+        if _closed_on(iso_date, weekday, hours_by_weekday, exceptions_by_date):
+            continue
+
+        for gap in coverage_gaps(bands, intervals_by_date.get(iso_date, [])):
+            gaps.append({'date': iso_date, **gap})
+
+    return gaps
 
 
 # ---------- error handling ----------

@@ -5,7 +5,7 @@ sind reine Funktionen ohne Datenbank und ohne Flask - reine Aufrufe, keine
 Fixtures noetig.
 """
 
-from coverage_model import band_within, bands_overlap, coverage_curve, first_overlapping_pair
+from coverage_model import band_within, bands_overlap, coverage_curve, coverage_gaps, first_overlapping_pair
 
 
 def test_zwei_anschliessende_schichten_ergeben_zwei_baender():
@@ -127,3 +127,75 @@ def test_band_within_prueft_vollstaendige_enthaltung():
 
     band_ausserhalb = {'start_time': '07:00', 'end_time': '12:00'}
     assert band_within(band_ausserhalb, '08:00', '18:00') is False
+
+
+# ---------- coverage_gaps(): Deckungsluecken als reine Funktion (Task 6) ----------
+
+def test_volle_deckung_erzeugt_keine_luecke():
+    """Bedarf 3 von 08:00-16:00, drei Intervalle decken genau das ab -> keine Luecke."""
+    baender = [{'start_time': '08:00', 'end_time': '16:00', 'required_count': 3}]
+    intervalle = [
+        {'start_time': '08:00', 'end_time': '16:00'},
+        {'start_time': '08:00', 'end_time': '16:00'},
+        {'start_time': '08:00', 'end_time': '16:00'},
+    ]
+
+    assert coverage_gaps(baender, intervalle) == []
+
+
+def test_fehlende_person_erzeugt_eine_luecke_mit_der_richtigen_zahl():
+    """Bedarf 3 von 12:00-17:00, zwei Personen da -> eine Luecke, missing = 1."""
+    baender = [{'start_time': '12:00', 'end_time': '17:00', 'required_count': 3}]
+    intervalle = [
+        {'start_time': '12:00', 'end_time': '17:00'},
+        {'start_time': '12:00', 'end_time': '17:00'},
+    ]
+
+    assert coverage_gaps(baender, intervalle) == [
+        {'start_time': '12:00', 'end_time': '17:00', 'missing': 1},
+    ]
+
+
+def test_teilweise_deckung_erzeugt_nur_den_ungedeckten_abschnitt():
+    """Bedarf 08:00-16:00 fuer 2, eine Person 08:00-12:00, eine 08:00-16:00
+    -> Luecke nur 12:00-16:00 mit missing = 1."""
+    baender = [{'start_time': '08:00', 'end_time': '16:00', 'required_count': 2}]
+    intervalle = [
+        {'start_time': '08:00', 'end_time': '12:00'},
+        {'start_time': '08:00', 'end_time': '16:00'},
+    ]
+
+    assert coverage_gaps(baender, intervalle) == [
+        {'start_time': '12:00', 'end_time': '16:00', 'missing': 1},
+    ]
+
+
+def test_benachbarte_luecken_mit_gleicher_zahl_werden_zusammengefasst():
+    """Zwei anschliessende Baender mit je missing = 1 ergeben EINE Luecke, nicht zwei.
+
+    Bedarf 08:00-12:00 und 12:00-16:00, je required_count 2, aber durchgehend
+    nur eine Person da - ohne Zusammenfassung kaemen zwei benachbarte
+    Eintraege mit derselben Zahl statt eines.
+    """
+    baender = [
+        {'start_time': '08:00', 'end_time': '12:00', 'required_count': 2},
+        {'start_time': '12:00', 'end_time': '16:00', 'required_count': 2},
+    ]
+    intervalle = [{'start_time': '08:00', 'end_time': '16:00'}]
+
+    assert coverage_gaps(baender, intervalle) == [
+        {'start_time': '08:00', 'end_time': '16:00', 'missing': 1},
+    ]
+
+
+def test_uebererfuellung_erzeugt_keine_luecke():
+    """Vier Personen bei Bedarf 3 - kein Eintrag, und schon gar kein negativer."""
+    baender = [{'start_time': '08:00', 'end_time': '16:00', 'required_count': 3}]
+    intervalle = [
+        {'start_time': '08:00', 'end_time': '16:00'},
+        {'start_time': '08:00', 'end_time': '16:00'},
+        {'start_time': '08:00', 'end_time': '16:00'},
+        {'start_time': '08:00', 'end_time': '16:00'},
+    ]
+
+    assert coverage_gaps(baender, intervalle) == []

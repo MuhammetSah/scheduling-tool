@@ -124,3 +124,71 @@ def band_within(band, open_time, close_time):
     """
     window = {'start_time': open_time, 'end_time': close_time}
     return window_contains_shift(window, band['start_time'], band['end_time'])
+
+
+def coverage_gaps(bands, covered_intervals):
+    """Deckungsluecken eines einzelnen Datums: wo der Bedarf die tatsaechliche Deckung uebersteigt.
+
+    Reine Rechenlogik, kein Datenbankzugriff - `bands` (Bedarfsbaender des
+    Wochentags, je mit start_time/end_time/required_count) und
+    `covered_intervals` (die Zeiten, die tatsaechlich von jemandem abgedeckt
+    sind, je nur start_time/end_time) werden fertig uebergeben. Der Aufrufer
+    entscheidet, was ueberhaupt ein Intervall ist - eine Zuweisung ohne
+    Mitarbeiter oder eine durch Abwesenheit freigewordene gehoert dort schon
+    nicht mehr in die Liste.
+
+    Ereignispunkt-Verfahren wie coverage_curve(): alle Grenzen von Baendern
+    und Intervallen zusammen sortiert, jedes Teilstueck bekommt seinen Bedarf
+    (Summe der required_count der Baender, die es vollstaendig ueberdecken -
+    Baender desselben Wochentags ueberlappen sich nicht, siehe
+    replace_coverage_requirements(), es kann also hoechstens eines sein) und
+    seine Deckung (Anzahl Intervalle, die es vollstaendig ueberdecken).
+    missing = Bedarf minus Deckung; Teilstuecke ohne Bedarf oder mit
+    Deckung >= Bedarf liefern keinen Eintrag - insbesondere nie einen
+    negativen. Benachbarte Teilstuecke mit gleichem missing werden
+    anschliessend zu einer Luecke zusammengefasst, genau wie coverage_curve()
+    gleiche Nachbarn verschmilzt.
+    """
+    if not bands:
+        return []
+
+    band_ranges = [
+        (*_band_range(band['start_time'], band['end_time']), band['required_count'])
+        for band in bands
+    ]
+    interval_ranges = [
+        _band_range(interval['start_time'], interval['end_time'])
+        for interval in covered_intervals
+    ]
+
+    boundaries = sorted(
+        {start for start, _, _ in band_ranges} | {end for _, end, _ in band_ranges}
+        | {start for start, _ in interval_ranges} | {end for _, end in interval_ranges}
+    )
+
+    raw_gaps = []
+    for lo, hi in zip(boundaries, boundaries[1:]):
+        required = sum(count for start, end, count in band_ranges if start <= lo and hi <= end)
+        if required == 0:
+            continue
+        covered = sum(1 for start, end in interval_ranges if start <= lo and hi <= end)
+        missing = required - covered
+        if missing > 0:
+            raw_gaps.append((lo, hi, missing))
+
+    merged = []
+    for lo, hi, missing in raw_gaps:
+        if merged and merged[-1][1] == lo and merged[-1][2] == missing:
+            prev_lo, _, prev_missing = merged[-1]
+            merged[-1] = (prev_lo, hi, prev_missing)
+        else:
+            merged.append((lo, hi, missing))
+
+    return [
+        {
+            'start_time': _minutes_to_time(lo),
+            'end_time': _minutes_to_time(hi),
+            'missing': missing,
+        }
+        for lo, hi, missing in merged
+    ]
