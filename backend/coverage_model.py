@@ -81,14 +81,14 @@ def coverage_curve(shift_types):
     ]
 
 
-def bands_overlap(bands):
-    """True, wenn sich zwei Baender derselben Liste auf der Minutenachse ueberschneiden.
+def first_overlapping_pair(bands):
+    """Erstes ueberlappende Bandpaar der Liste, oder None wenn keines ueberlappt.
 
-    Halboffene Grenze [start, end): zwei Baender, die sich nur beruehren
-    (Ende des einen = Start des anderen), ueberlappen NICHT. Jedes Band wird
-    zusaetzlich einen Zyklus frueher und spaeter verglichen (+-1440 Minuten),
-    damit eine Nachtschicht ueber Mitternacht auch mit einem Band am naechsten
-    Morgen als ueberlappend erkannt wird.
+    Dieselbe Minutenachsen-Logik wie bands_overlap() (siehe dort), aber mit dem
+    Paar selbst als Ergebnis statt nur True/False: eine brauchbare Fehlermeldung
+    fuer HR muss sagen KOENNEN, welche zwei Baender kollidieren, nicht nur DASS
+    irgendwo eine Kollision vorliegt. bands_overlap() ist unten auf diese
+    Funktion zurueckgefuehrt, damit die Vergleichslogik nur einmal existiert.
     """
     ranges = [_band_range(band['start_time'], band['end_time']) for band in bands]
 
@@ -98,9 +98,21 @@ def bands_overlap(bands):
             start_j, end_j = ranges[j]
             for shift in (-24 * 60, 0, 24 * 60):
                 if start_i < end_j + shift and start_j + shift < end_i:
-                    return True
+                    return bands[i], bands[j]
 
-    return False
+    return None
+
+
+def bands_overlap(bands):
+    """True, wenn sich zwei Baender derselben Liste auf der Minutenachse ueberschneiden.
+
+    Halboffene Grenze [start, end): zwei Baender, die sich nur beruehren
+    (Ende des einen = Start des anderen), ueberlappen NICHT. Jedes Band wird
+    zusaetzlich einen Zyklus frueher und spaeter verglichen (+-1440 Minuten),
+    damit eine Nachtschicht ueber Mitternacht auch mit einem Band am naechsten
+    Morgen als ueberlappend erkannt wird.
+    """
+    return first_overlapping_pair(bands) is not None
 
 
 def band_within(band, open_time, close_time):

@@ -17,6 +17,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import mailer
 import security
 import timeutil
+from coverage_model import band_within, first_overlapping_pair
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
@@ -2253,6 +2254,177 @@ def business_hours_for(cursor, iso_date):
     )
     row = cursor.fetchone()
     return row['open_time'], row['close_time'], bool(row['closed'])
+
+
+# ---------- coverage requirement bands ----------
+#
+# coverage_requirements holds bands of required headcount across a weekday's
+# opening hours ("Monday 08:00-12:00 needs 3 people"). PUT replaces the whole
+# list across all seven weekdays at once - same full-replace semantics as
+# /business-hours and the employee constraint lists above - so the overlap
+# check below validates the *final* state in one pass instead of reasoning
+# about a sequence of incremental edits.
+#
+# Two things this validation deliberately does NOT do:
+#
+# - It never calls business_hours_for() in a loop. That helper answers "is the
+#   business open on this DATE" with up to two SELECTs per call; here we need
+#   all seven WEEKDAYS' hours at once, so load_business_hours_by_weekday()
+#   below reads business_hours in a single query and the loop below matches
+#   against that dict. Exceptions (business_hours_exceptions) play no role
+#   here - bands hang off the weekday, not a calendar date.
+# - It never checks overlap across a weekday boundary. A Monday 22:00-06:00
+#   band and a Tuesday 00:00-08:00 band describe different points in the week
+#   under the start-anchored reading this project uses everywhere else (see
+#   coverage_model._band_range): the night shift ends early the next day, the
+#   Tuesday band sits on Tuesday morning. A real conflict would only appear
+#   once the week is treated as a 10080-minute ring across its own weekly
+#   repetition - documented known limitation, not built here.
+
+def serialize_coverage_requirement(row):
+    return {
+        'weekday': row['weekday'],
+        'start_time': row['start_time'],
+        'end_time': row['end_time'],
+        'required_count': row['required_count'],
+    }
+
+
+def parse_coverage_requirements(entries):
+    """Validates every band's shape, weekday range, time format and count.
+
+    Overlap and opening-hours checks are not done here - they need the whole
+    list grouped by weekday, which replace_coverage_requirements() does after
+    this parse pass succeeds.
+    """
+    if not isinstance(entries, list):
+        raise ValueError(t(g.lang, 'coverage_requirement_entry_invalid'))
+
+    parsed = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(t(g.lang, 'coverage_requirement_entry_invalid'))
+
+        try:
+            weekday = int(entry.get('weekday'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if not 0 <= weekday <= 6:
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+
+        start_time = entry.get('start_time')
+        end_time = entry.get('end_time')
+        if not valid_time(start_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=start_time))
+        if not valid_time(end_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=end_time))
+
+        try:
+            required_count = int(entry.get('required_count'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'field_must_be_number', field=t(g.lang, 'required_count_label')))
+        if required_count < 0:
+            raise ValueError(t(g.lang, 'field_must_not_be_negative', field=t(g.lang, 'required_count_label')))
+
+        parsed.append({
+            'weekday': weekday, 'start_time': start_time, 'end_time': end_time,
+            'required_count': required_count,
+        })
+
+    return parsed
+
+
+def load_business_hours_by_weekday(cursor):
+    """All seven business_hours rows as {weekday: (open_time, close_time, closed)}.
+
+    One query for all seven weekdays, not business_hours_for() called per
+    band - see the comment above this section for why.
+    """
+    cursor.execute('SELECT weekday, open_time, close_time, closed FROM business_hours')
+    return {
+        row['weekday']: (row['open_time'], row['close_time'], bool(row['closed']))
+        for row in cursor.fetchall()
+    }
+
+
+def replace_coverage_requirements(connection, entries):
+    """Validates and fully replaces all coverage_requirements rows.
+
+    Same "validate everything, write once" shape as replace_business_hours():
+    a bad band anywhere in the list must not partially overwrite the table.
+    The overlap check is grouped by weekday - bands_overlap()/
+    first_overlapping_pair() only ever see one weekday's bands at a time, so a
+    Monday band can never collide with a Tuesday band here (see the section
+    comment on the known cross-weekday limitation).
+    """
+    parsed = parse_coverage_requirements(entries)
+
+    cursor = connection.cursor()
+    hours_by_weekday = load_business_hours_by_weekday(cursor)
+
+    by_weekday = {}
+    for band in parsed:
+        by_weekday.setdefault(band['weekday'], []).append(band)
+
+    for weekday, bands in by_weekday.items():
+        pair = first_overlapping_pair(bands)
+        if pair is not None:
+            first, second = pair
+            raise ValueError(t(
+                g.lang, 'coverage_requirement_overlap',
+                weekday=WEEKDAYS[g.lang][weekday],
+                start1=first['start_time'], end1=first['end_time'],
+                start2=second['start_time'], end2=second['end_time'],
+            ))
+
+        open_time, close_time, closed = hours_by_weekday[weekday]
+        for band in bands:
+            if closed:
+                raise ValueError(t(
+                    g.lang, 'coverage_requirement_closed_day',
+                    weekday=WEEKDAYS[g.lang][weekday],
+                    start=band['start_time'], end=band['end_time'],
+                ))
+            if not band_within(band, open_time, close_time):
+                raise ValueError(t(
+                    g.lang, 'coverage_requirement_outside_hours',
+                    weekday=WEEKDAYS[g.lang][weekday],
+                    start=band['start_time'], end=band['end_time'],
+                    open=open_time, close=close_time,
+                ))
+
+    cursor.execute('DELETE FROM coverage_requirements')
+    for band in parsed:
+        cursor.execute(
+            'INSERT INTO coverage_requirements (weekday, start_time, end_time, required_count) '
+            'VALUES (?, ?, ?, ?)',
+            (band['weekday'], band['start_time'], band['end_time'], band['required_count']),
+        )
+
+
+@app.route('/coverage-requirements', methods=['GET'])
+@hr_required
+def list_coverage_requirements():
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM coverage_requirements ORDER BY weekday, start_time')
+    return jsonify([serialize_coverage_requirement(row) for row in cursor.fetchall()])
+
+
+@app.route('/coverage-requirements', methods=['PUT'])
+@hr_required
+def update_coverage_requirements():
+    entries = request.get_json(silent=True)
+    connection = get_db()
+    try:
+        replace_coverage_requirements(connection, entries)
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+    connection.commit()
+
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM coverage_requirements ORDER BY weekday, start_time')
+    return jsonify([serialize_coverage_requirement(row) for row in cursor.fetchall()])
 
 
 # ---------- error handling ----------

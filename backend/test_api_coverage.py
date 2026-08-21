@@ -1,12 +1,24 @@
-"""API fuer Oeffnungszeiten und Ausnahmen: GET/PUT /business-hours sowie
-GET/POST/DELETE /business-hours/exceptions.
+"""API fuer Oeffnungszeiten, Ausnahmen und Bedarfsbaender: GET/PUT
+/business-hours, GET/POST/DELETE /business-hours/exceptions sowie GET/PUT
+/coverage-requirements.
 
-Deckt Task 4 aus dem Etappenplan ab (siehe Task-Brief). business_hours_for()
-liefert (open_time, close_time, closed) fuer ein Datum - eine Ausnahme
-schlaegt die Wochentagsregel vollstaendig. Diese Vorrangregel wird deshalb an
-zwei Stellen geprueft: direkt an business_hours_for() und ueber die Routen,
-die die zugrundeliegenden Zeilen offenlegen - siehe
+Deckt Task 4 und Task 5 aus dem Etappenplan ab (siehe Task-Briefs). Task 4:
+business_hours_for() liefert (open_time, close_time, closed) fuer ein Datum -
+eine Ausnahme schlaegt die Wochentagsregel vollstaendig. Diese Vorrangregel
+wird deshalb an zwei Stellen geprueft: direkt an business_hours_for() und
+ueber die Routen, die die zugrundeliegenden Zeilen offenlegen - siehe
 test_ausnahme_schlaegt_den_wochentag.
+
+Task 5: /coverage-requirements ersetzt beim PUT die Baender aller Wochentage
+vollstaendig (dieselbe Semantik wie /business-hours). Drei Regeln werden
+serverseitig geprueft: Baender desselben Wochentags duerfen sich nicht
+ueberlappen (halboffene Grenze [start, end)), ein Band muss innerhalb der
+Oeffnungszeit seines Wochentags liegen, und required_count darf nicht negativ
+sein. Ausdruecklich NICHT geprueft: Ueberlappung ueber die Wochentagsgrenze
+hinweg (siehe Task-5-Brief) - Baender verschiedener Wochentage koennen sich
+unter der Wochenwiederholung theoretisch ueberschneiden, das zu erkennen
+haette die Woche als 10080-Minuten-Ring zu behandeln, was bewusst nicht
+gebaut wurde.
 """
 
 
@@ -192,7 +204,12 @@ def test_offene_ausnahme_mit_eigenen_zeiten_schlaegt_den_wochentag(hr_client):
         assert business_hours_for(cursor, '2026-09-02') == ('10:00', '14:00', False)
 
 
-def test_nicht_hr_konto_bekommt_403(hr_client):
+def test_nicht_hr_konto_bekommt_403_business_hours(hr_client):
+    """Rollenschutz fuer /business-hours. Siehe
+    test_nicht_hr_konto_bekommt_403_coverage_requirements fuer /coverage-requirements -
+    zwei Namen, damit sich die beiden Tests im selben Modul nicht gegenseitig
+    ueberschreiben.
+    """
     employee = hr_client.post('/employees', json={'name': 'Anna', 'email': 'anna@example.com'}).json
     konto = hr_client.post('/register', json={
         'username': 'anna', 'role': 'employee', 'employee_id': employee['id'],
@@ -203,3 +220,134 @@ def test_nicht_hr_konto_bekommt_403(hr_client):
     antwort = hr_client.get('/business-hours')
 
     assert antwort.status_code == 403
+
+
+# ---------- Task 5: GET/PUT /coverage-requirements ----------
+
+def test_baender_setzen_und_lesen(hr_client):
+    """PUT ersetzt vollstaendig, GET liest den neuen Bestand zurueck."""
+    baender = [
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 3},
+        {'weekday': 0, 'start_time': '16:00', 'end_time': '22:00', 'required_count': 2},
+        {'weekday': 2, 'start_time': '09:00', 'end_time': '17:00', 'required_count': 1},
+    ]
+
+    antwort = hr_client.put('/coverage-requirements', json=baender)
+    assert antwort.status_code == 200, antwort.json
+
+    gelesen = hr_client.get('/coverage-requirements').json
+    assert len(gelesen) == 3
+    montag = [b for b in gelesen if b['weekday'] == 0]
+    assert len(montag) == 2
+    assert {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 3} in gelesen
+    assert {'weekday': 2, 'start_time': '09:00', 'end_time': '17:00', 'required_count': 1} in gelesen
+
+    # Vollstaendiger Ersatz: ein zweites PUT mit weniger Baendern loescht den Rest,
+    # dieselbe Semantik wie test_oeffnungszeiten_setzen_ersetzt_vollstaendig oben.
+    zweites_put = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 1, 'start_time': '10:00', 'end_time': '12:00', 'required_count': 1},
+    ])
+    assert zweites_put.status_code == 200, zweites_put.json
+    gelesen_danach = hr_client.get('/coverage-requirements').json
+    assert gelesen_danach == [
+        {'weekday': 1, 'start_time': '10:00', 'end_time': '12:00', 'required_count': 1},
+    ]
+
+
+def test_ueberlappende_baender_sind_400(hr_client):
+    """08:00-12:00 und 11:00-15:00 am selben Wochentag. Meldung woertlich pruefen.
+
+    Gegenprobe im selben Test: 08:00-12:00 und 12:00-16:00 gehen durch - die
+    Grenze ist halboffen. Ohne diese Haelfte wuerde der Test auch dann gruen
+    sein, wenn die Pruefung jede zweite Angabe ablehnt.
+    """
+    ueberlappend = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '12:00', 'required_count': 2},
+        {'weekday': 0, 'start_time': '11:00', 'end_time': '15:00', 'required_count': 1},
+    ])
+    assert ueberlappend.status_code == 400
+    assert ueberlappend.json['message'] == (
+        'Bänder überschneiden sich am Montag: 08:00–12:00 und 11:00–15:00'
+    )
+
+    beruehrend = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '12:00', 'required_count': 2},
+        {'weekday': 0, 'start_time': '12:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+    assert beruehrend.status_code == 200, beruehrend.json
+
+
+def test_band_ausserhalb_der_oeffnungszeit_ist_400(hr_client):
+    """Oeffnung 08:00-18:00, Band 07:00-12:00. Meldung woertlich pruefen."""
+    oeffnungszeiten = [
+        {'weekday': tag, 'open_time': '00:00', 'close_time': '00:00', 'closed': False}
+        for tag in range(7)
+    ]
+    oeffnungszeiten[0] = {'weekday': 0, 'open_time': '08:00', 'close_time': '18:00', 'closed': False}
+    gesetzt = hr_client.put('/business-hours', json=oeffnungszeiten)
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    antwort = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '07:00', 'end_time': '12:00', 'required_count': 2},
+    ])
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == (
+        'Band 07:00–12:00 am Montag liegt außerhalb der Öffnungszeit (08:00–18:00)'
+    )
+
+
+def test_band_an_einem_geschlossenen_tag_ist_400(hr_client):
+    oeffnungszeiten = [
+        {'weekday': tag, 'open_time': '00:00', 'close_time': '00:00', 'closed': False}
+        for tag in range(7)
+    ]
+    oeffnungszeiten[0] = {'weekday': 0, 'open_time': '00:00', 'close_time': '00:00', 'closed': True}
+    gesetzt = hr_client.put('/business-hours', json=oeffnungszeiten)
+    assert gesetzt.status_code == 200, gesetzt.json
+
+    antwort = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '09:00', 'end_time': '10:00', 'required_count': 1},
+    ])
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == (
+        'Am Montag ist geschlossen, dort ist kein Bedarfsband erlaubt (09:00–10:00)'
+    )
+
+
+def test_negativer_bedarf_ist_400(hr_client):
+    antwort = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '12:00', 'required_count': -1},
+    ])
+
+    assert antwort.status_code == 400
+    assert antwort.json['message'] == 'Der Bedarf darf nicht negativ sein'
+
+
+def test_baender_verschiedener_wochentage_stoeren_sich_nicht(hr_client):
+    """Montag 08:00-12:00 und Dienstag 08:00-12:00 sind beide erlaubt."""
+    antwort = hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '12:00', 'required_count': 2},
+        {'weekday': 1, 'start_time': '08:00', 'end_time': '12:00', 'required_count': 2},
+    ])
+
+    assert antwort.status_code == 200, antwort.json
+    gelesen = hr_client.get('/coverage-requirements').json
+    assert len(gelesen) == 2
+    assert {b['weekday'] for b in gelesen} == {0, 1}
+
+
+def test_nicht_hr_konto_bekommt_403_coverage_requirements(hr_client):
+    employee = hr_client.post('/employees', json={'name': 'Bert', 'email': 'bert@example.com'}).json
+    konto = hr_client.post('/register', json={
+        'username': 'bert', 'role': 'employee', 'employee_id': employee['id'],
+    }).json
+    with hr_client.session_transaction() as sitzung:
+        sitzung['user_id'] = konto['id']
+
+    lesen = hr_client.get('/coverage-requirements')
+    assert lesen.status_code == 403
+
+    schreiben = hr_client.put('/coverage-requirements', json=[])
+    assert schreiben.status_code == 403

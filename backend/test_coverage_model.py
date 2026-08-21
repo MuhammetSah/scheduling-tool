@@ -1,10 +1,11 @@
 """Bedarfskurve als reine Funktion.
 
-coverage_curve(), bands_overlap() und band_within() sind reine Funktionen
-ohne Datenbank und ohne Flask - reine Aufrufe, keine Fixtures noetig.
+coverage_curve(), bands_overlap(), first_overlapping_pair() und band_within()
+sind reine Funktionen ohne Datenbank und ohne Flask - reine Aufrufe, keine
+Fixtures noetig.
 """
 
-from coverage_model import band_within, bands_overlap, coverage_curve
+from coverage_model import band_within, bands_overlap, coverage_curve, first_overlapping_pair
 
 
 def test_zwei_anschliessende_schichten_ergeben_zwei_baender():
@@ -93,6 +94,29 @@ def test_bands_overlap_erkennt_ueberschneidung_ueber_mitternacht():
         {'start_time': '22:00', 'end_time': '06:00'},
         {'start_time': '05:00', 'end_time': '08:00'},
     ]) is True
+
+
+def test_first_overlapping_pair_liefert_das_kollidierende_paar():
+    """Drei Baender, von denen sich zwei ueberschneiden - genau dieses Paar kommt zurueck.
+
+    Das erste Band (08-12) ueberlappt keines der beiden anderen und darf nicht
+    Teil des gemeldeten Paares sein - sonst waere der Test auch gruen, wenn
+    einfach die ersten zwei Eintraege der Liste zurueckgegeben wuerden.
+    """
+    frueh = {'start_time': '08:00', 'end_time': '10:00'}
+    mittag = {'start_time': '11:00', 'end_time': '15:00'}
+    spaet = {'start_time': '13:00', 'end_time': '17:00'}
+
+    paar = first_overlapping_pair([frueh, mittag, spaet])
+
+    assert paar == (mittag, spaet)
+
+
+def test_first_overlapping_pair_ist_none_ohne_ueberschneidung():
+    assert first_overlapping_pair([
+        {'start_time': '08:00', 'end_time': '12:00'},
+        {'start_time': '12:00', 'end_time': '16:00'},
+    ]) is None
 
 
 def test_band_within_prueft_vollstaendige_enthaltung():

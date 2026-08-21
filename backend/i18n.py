@@ -418,6 +418,28 @@ TRANSLATIONS = {
         'en': 'Exception deleted',
     },
 
+    # ---- coverage requirement bands ----
+    'coverage_requirement_entry_invalid': {
+        'de': 'Jeder Eintrag muss ein Objekt mit Wochentag, Start-, Endzeit und Bedarf sein',
+        'en': 'Each entry must be an object with a weekday, start time, end time and required headcount',
+    },
+    'required_count_label': {
+        'de': 'Der Bedarf',
+        'en': 'The required headcount',
+    },
+    'coverage_requirement_overlap': {
+        'de': 'Bänder überschneiden sich am {weekday}: {start1}–{end1} und {start2}–{end2}',
+        'en': 'Bands overlap on {weekday}: {start1}–{end1} and {start2}–{end2}',
+    },
+    'coverage_requirement_closed_day': {
+        'de': 'Am {weekday} ist geschlossen, dort ist kein Bedarfsband erlaubt ({start}–{end})',
+        'en': 'The business is closed on {weekday}; no coverage band is allowed there ({start}–{end})',
+    },
+    'coverage_requirement_outside_hours': {
+        'de': 'Band {start}–{end} am {weekday} liegt außerhalb der Öffnungszeit ({open}–{close})',
+        'en': 'Band {start}–{end} on {weekday} lies outside the opening hours ({open}–{close})',
+    },
+
     # ---- misc ----
     'api_root': {
         'de': 'Schichtplan-Tool API',
