@@ -122,9 +122,52 @@ async function request(path, options = {}) {
   return data
 }
 
+/** Fetches a file and hands it to the browser as a download.
+ *
+ * Not a plain <a href> link: the frontend and this API live on two different
+ * domains, so a click would carry neither the bearer token nor - under
+ * Safari's ITP - the session cookie, and the download would come back a 401
+ * or, worse, an HTML error page saved under a .ics name. Going through fetch()
+ * keeps the same auth path every other call uses; the Blob and the synthetic
+ * click are only there because fetch cannot save a file by itself.
+ */
+async function download(path, filename) {
+  if (!API_URL) throw new Error(apiMessage('missingApiUrl'))
+
+  const token = getAuthToken()
+  const response = await fetch(`${API_URL}${path}`, {
+    headers: {
+      'X-Lang': getStoredLang(),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    // Der Server antwortet im Fehlerfall mit JSON, nicht mit der Datei.
+    let message = apiMessage('unexpectedResponse')
+    try {
+      message = (await response.json()).message || message
+    } catch { /* keine JSON-Antwort - dann bleibt die Ersatzmeldung */ }
+    throw new Error(message)
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+
 export const api = {
   get: (path) => request(path),
   post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }),
   put: (path, body) => request(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (path) => request(path, { method: 'DELETE' }),
+  download,
 }

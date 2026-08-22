@@ -387,6 +387,10 @@ TRANSLATIONS = {
         'de': 'Unbekannter Zustand. Erlaubt sind: {allowed}',
         'en': 'Unknown status. Allowed values are: {allowed}',
     },
+    'free_block_label': {
+        'de': 'Dienst',
+        'en': 'Shift',
+    },
     'limit_must_be_int': {
         'de': 'limit muss eine positive ganze Zahl sein',
         'en': 'limit must be a positive whole number',

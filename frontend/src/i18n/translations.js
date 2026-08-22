@@ -252,6 +252,9 @@ const de = {
   },
 
   schedule: {
+    exportCsvButton: 'CSV herunterladen',
+    exportIcalButton: 'In meinen Kalender',
+    icalNeedsEmployee: 'Dieses Konto hängt an keinem Mitarbeiter — ohne das gibt es keinen persönlichen Kalender.',
     draftBadge: 'Entwurf',
     publishedBadge: 'Veröffentlicht',
     publishButton: 'Veröffentlichen',
@@ -592,6 +595,9 @@ const en = {
   },
 
   schedule: {
+    exportCsvButton: 'Download CSV',
+    exportIcalButton: 'Add to my calendar',
+    icalNeedsEmployee: 'This account is not linked to an employee — without that there is no personal calendar.',
     draftBadge: 'Draft',
     publishedBadge: 'Published',
     publishButton: 'Publish',
