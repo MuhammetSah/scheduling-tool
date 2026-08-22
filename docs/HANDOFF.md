@@ -24,20 +24,19 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Etappen 0 bis 4 sind gemergt, deployt und dokumentiert, es gibt
-keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün, ein geprüftes
-Backup liegt.
+Etappe 5a ist **fertig umgesetzt, aber weder gepusht noch gemergt.** Sie liegt vollständig auf
+dem Branch `etappe-5a-ruhepausen`, acht Commits ab `69fd9e8`. Die Suite ist grün (291 passed,
+31 übersprungen — Postgres-only), Frontend 18 Tests, Lint und Build sauber.
 
-Der nächste inhaltliche Schritt ist **Etappe 5 — restliche Produktionsreife** (siehe Roadmap
-am Ende). Anders als die Etappen davor ist sie kein zusammenhängendes Vorhaben, sondern ein
-Bündel weitgehend unabhängiger Teile: `shift_requirements` entfernen, Veröffentlichen-Workflow,
-Audit-Log, Exporte, DSGVO und die drei ArbZG-Regeln, die Etappe 4 bewusst offengelassen hat.
-**Sie gehört vor dem Planen zerlegt**, nicht als ein Umsetzungsplan angefasst — jedes Teil
-bekommt seine eigene Spec und seinen eigenen Plan.
+**Der nächste Schritt ist ein Abschluss-Review dieser Etappe**, danach Push und Pull Request.
+Besonderes Augenmerk verdient die Umstellung von brutto auf netto: sie lockert die Grenzen aus
+Etappe 1 und 4, ohne dass jemand etwas angefasst hat, und die Trennung von Anwesenheit und
+Arbeitszeit ist die Stelle, an der die Etappe schiefgehen kann.
 
-**Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde. Dort
-steht, was vier Etappen an Reviews gekostet hat und was bewusst liegen geblieben ist. Die
-Liste ist nach Etappe 4 um sechs Punkte gewachsen.
+Danach steht Etappe 5b oder 5c an — siehe den Abschnitt „Etappe 5" weiter unten. Sie sind
+unabhängig voneinander; 5c hängt an 5a und ist damit jetzt möglich.
+
+**Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
 **Was beim Nutzer liegt und nicht bei dir:** der Umgang mit der ablaufenden Datenbank
 (07.09.2026), das Datenbankpasswort und die IP-Freigabe. Details unter „Offen — liegt beim
@@ -47,12 +46,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `088fd7d` — Etappen 0 bis 4 gemergt und deployt. Etappe 4 über PR #16 am 22.08. 17:28, Render-Deploy `dep-da4toioae00c73aslg5g` ist `live` |
-| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Der Etappe-4-Branch ist nach dem Merge lokal und remote gelöscht |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 256 passed / 30 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 15 Frontend-Tests (Vitest + Testing Library) |
+| `main` | `69fd9e8` — Etappen 0 bis 4 gemergt und deployt. Etappe 4 über PR #16 am 22.08. 17:28, Render-Deploy `dep-da4toioae00c73aslg5g` ist `live` |
+| Branch-Situation | **Ein offener Branch: `etappe-5a-ruhepausen`**, acht Commits ab `69fd9e8`, lokal, nicht gepusht. Keine offenen Pull Requests |
+| Aktueller Branch | `etappe-5a-ruhepausen` |
+| Testsuite | 291 passed / 31 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0008`, **alle in Produktion angewandt**. `0008_max_daily_hours` mit dem Deploy von #16; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
+| Migrationen | `0001`–`0008` **in Produktion angewandt**, `0009_break_minutes` liegt auf dem Branch und ist noch nicht deployt. `0008_max_daily_hours` mit dem Deploy von #16; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -343,6 +342,94 @@ behoben in `6a2a38f`.
 
 **Kein Browser-Durchlauf gefahren.** Die Oberfläche ist nur über die Vitest-Tests belegt.
 
+## Etappe 5 — kein Vorhaben, sondern ein Bündel
+
+Die Roadmap führt „Etappe 5 — restliche Produktionsreife" als einen Punkt. Das sind sechs
+unabhängige Dinge: `shift_requirements` entfernen, Veröffentlichen-Workflow, Audit-Log,
+Exporte, DSGVO und das Arbeitszeitrecht. **Jedes gehört einzeln durch Spec → Plan → Umsetzung**,
+nicht als ein Umsetzungsplan.
+
+Auch das Arbeitszeitrecht allein zerfällt in drei:
+
+| Teil | Inhalt | Stand |
+|---|---|---|
+| **5a** | Ruhepausen nach § 4, Arbeitszeit netto statt brutto | ✅ umgesetzt, siehe unten |
+| **5b** | Sonn- und Feiertagsruhe: **eingebauter Feiertagskalender mit Bundeslandauswahl**, 15 freie Sonntage, Ersatzruhetag (2 bzw. 8 Wochen), höchstens sechs Tage in Folge | offen |
+| **5c** | Achtstundenschnitt nach § 3 Satz 2, rollierend über 24 Wochen, **gemeldet statt erzwungen** | offen, hängt an 5a |
+
+Zwei Entscheidungen dazu sind mit dem Nutzer bereits gefallen und gelten für 5b und 5c:
+
+- **Durchsetzung gemischt.** Die Sonntagsregeln gehören hart in den Generator — sie hängen an
+  Vergangenheit und Gegenwart und sind beim Planen entscheidbar. Der Achtstundenschnitt wird
+  nur gemeldet: ob zehn Stunden heute zulässig sind, entscheidet sich erst in den nächsten fünf
+  Monaten, und ihn beim Erzeugen zu erzwingen hieße entweder falsch zu rechnen oder unnötig zu
+  beschränken.
+- **Kein Schalter „Sonntagsarbeit zulässig".** § 9 verbietet Sonn- und Feiertagsarbeit,
+  § 10 nimmt ganze Branchen aus — ob dieser Betrieb darunterfällt, ist eine Tatsache über den
+  Betrieb. Ein Schalter täte aber nichts, was die Öffnungszeiten nicht schon tun: ein sonntags
+  geschlossener Betrieb hat keinen Sonntagsbedarf und bekommt keine Blöcke.
+
+**Alle drei Regeln von 5b und 5c sind monatsübergreifend**, der Generator sieht aber nur seinen
+einen Monat. `constraint_warnings()` fragt dagegen bewusst ohne `schedule_id`-Filter ab und
+sieht über Monatsgrenzen. Für 5b muss die Vorgeschichte je Mitarbeiter in `app.py` geladen und
+dem Planer mitgegeben werden — das ist der strukturelle Kern dieser Teilaufgabe.
+
+## Etappe 5a — abgeschlossen, noch nicht gemergt
+
+Spec: [`docs/superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md`](superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md)
+Plan: [`docs/superpowers/plans/2026-08-22-etappe-5a-ruhepausen.md`](superpowers/plans/2026-08-22-etappe-5a-ruhepausen.md)
+Branch: `etappe-5a-ruhepausen`, **nicht gepusht und nicht gemergt**
+
+| Task | Stand | Commit |
+|---|---|---|
+| 1 Die zwei Rechenfunktionen | ✅ | `b2b27a7` |
+| 2 Spalte `break_minutes` und der Weg durch die API | ✅ | `70d9981` |
+| 3 Netto-Arbeitszeit im Suchkern | ✅ | `bdc66f3` |
+| 4 Netto und Pausenwarnung auf dem Handkorrektur-Pfad | ✅ | `8a9f7e8` |
+| 5 Frontend | ✅ | `3963d3b` |
+| 6 Dokumentation | ✅ | dieser Commit |
+
+### Die zwei Dinge, die man wissen muss
+
+**Die Mindestpause wird auf die Spanne aufgelöst, und die Kante liegt bei 9:30 h, nicht 9:00.**
+§ 4 bemisst die Pause an der Arbeitszeit, die Arbeitszeit ist aber die Spanne minus Pause —
+wörtlich gelesen dreht sich die Regel im Kreis. Aufgelöst über die kleinste Pause, die für die
+Arbeitszeit ausreicht, die sie selbst erzeugt. Bei 9:30 h Spanne bleiben nach 30 Minuten genau
+neun Stunden, und neun Stunden sind nicht „mehr als neun"; erst ab 9:31 h reichen 30 Minuten
+nicht mehr.
+
+**Anwesenheit und Arbeitszeit sind seither zwei Größen.** Netto rechnen die Tages- und
+Wochengrenze auf beiden Pfaden. Brutto bleiben Deckung, Überschneidung, Ruhezeit und die
+Fensterprüfung. Die Gegenprobe dazu steht in `test_api_coverage.py` und ist der wichtigste Test
+der Etappe: eine Zuweisung mit Pause deckt weiterhin ihre volle Anwesenheit ab. Wäre die
+Deckung mit umgestellt worden, entstünde je Block eine halbe Stunde Lücke, die niemand je
+schließen könnte — jede Ersatzperson brächte ihre eigene Pause mit.
+
+### Abweichung vom Plan
+
+Der Plan sah ein Feld `working_minutes` am Slot vor. Beim Umsetzen brachen drei Gegenproben,
+weil die Testhelfer ihre Slots von Hand bauen und das Feld nicht kannten — `slot.get()` lieferte
+`None`, und die Prüfung **übersprang still**. Eine Grenze, die einfach aufhört zu greifen, ist
+die schlechteste Art kaputtzugehen. Die Nettozeit wird deshalb über `slot_working_minutes()`
+abgeleitet statt gespeichert; ein Slot mit Zeiten hat damit immer eine Arbeitszeit, und niemand
+kann ein Feld vergessen.
+
+### Was das an Bestehendem geändert hat
+
+Die Umstellung auf netto **lockert** die Grenzen aus Etappe 1 und 4, ohne dass jemand etwas
+angefasst hat: fünf Achtstundentage sind 40 Stunden Anwesenheit, aber 37,5 Stunden Arbeitszeit.
+Zwei Bestandstests mussten ihre Erwartungen nachziehen (10,0 → 9,5 und 11,0 → 10,5 Std.).
+
+Dazu ein wiederkehrender Fehler, der jetzt allgemein gelöst ist: der Rundlauftest von `0008`
+nahm an, `0008` sei die letzte Migration — derselbe Fehler, den `0007` in Etappe 4 hatte. Statt
+ihn ein drittes Mal zu machen, rollen alle drei über den gemeinsamen Helfer `zurueck_bis()`
+zurück, bis ihre eigene Version an der Reihe war.
+
+### Was vor dem Merge noch fehlt
+
+- Push, Pull Request, CI — insbesondere `backend-postgres` für den Rundlauf von `0009`
+- Kein Browser-Durchlauf gefahren
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -616,8 +703,7 @@ Design: [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](su
   `coverage_requirements`, schneidet auf die Arbeitszeitfenster zu und kann den geteilten
   Dienst. `shift_requirements` wird nicht mehr gelesen und in Etappe 5 entfernt. Damit geht das
   Tool über Papershift und Deputy hinaus — dort wird nicht automatisch zugeschnitten.
-- **Etappe 5** — restliche Produktionsreife: `shift_requirements` entfernen,
-  Veröffentlichen-Workflow (`schedules.status` wird bis heute nicht genutzt), Audit-Log,
-  Exporte, DSGVO (Krankmeldungen sind Art.-9-Daten) und die ArbZG-Regeln, die Etappe 4 bewusst
-  offengelassen hat: der Achtstundendurchschnitt aus § 3 Satz 2, die Ruhepausen aus § 4 und die
-  Sonntagsregeln aus § 11 samt der Folge „höchstens sechs Tage in Folge"
+- **Etappe 5** — kein Vorhaben, sondern ein Bündel aus sechs unabhängigen Teilen. Siehe den
+  eigenen Abschnitt oben: `shift_requirements` entfernen, Veröffentlichen-Workflow, Audit-Log,
+  Exporte, DSGVO und das Arbeitszeitrecht. Letzteres zerfällt seinerseits in 5a (erledigt),
+  5b (Sonn- und Feiertage) und 5c (Achtstundenschnitt)
