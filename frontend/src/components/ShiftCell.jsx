@@ -198,8 +198,16 @@ function AssignmentSlot({
   const [suggestions, setSuggestions] = useState(null)
   const [loadingSuggestions, setLoadingSuggestions] = useState(false)
   const [editingTime, setEditingTime] = useState(false)
+  const [editingBreak, setEditingBreak] = useState(false)
+  const [breakDraft, setBreakDraft] = useState('')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
+
+  // Shown only when it deviates - same restraint as the times above, or the
+  // same number would sit on every row and the one that matters would drown.
+  // `!= null` rather than a truthiness test on purpose: a stored 0 is the
+  // statement "this block runs without a break", and that has to be visible.
+  const breakDeviates = slot.break_minutes != null
 
   const isAbsence = Boolean(slot.absence_type)
   const absenceLabel = absenceLabels[slot.absence_type] || slot.absence_type
@@ -207,16 +215,20 @@ function AssignmentSlot({
     ? `${absenceLabel}${slot.absent_employee_name ? ` (${t('shiftCell.absentWasPrefix')}: ${slot.absent_employee_name})` : ''}`
     : (slot.employee_name || t('common.unassigned'))
 
-  // Reassigning must carry this assignment's own times along, or the PUT
-  // below would silently clear them (see SchedulePage.reassign): preserve
-  // them when they're individually set, otherwise there's nothing to keep -
-  // the assignment already just follows the cell above.
+  // Reassigning must carry this assignment's own times and break along, or
+  // the PUT below would silently clear them (see SchedulePage.reassign):
+  // preserve the times when they're individually set, otherwise there's
+  // nothing to keep - the assignment already just follows the cell above.
+  // The break is passed as stored, never as resolved: sending the effective
+  // value would turn "not separately agreed" into an explicit one, and the
+  // block would stop following the legal minimum if its hours ever changed.
   function reassignKeepingTime(employeeIdRaw) {
     onReassign(
       slot.id,
       employeeIdRaw,
       slot.assignment_time_set ? slot.start_time : null,
       slot.assignment_time_set ? slot.end_time : null,
+      slot.break_minutes ?? null,
     )
   }
 
@@ -243,13 +255,26 @@ function AssignmentSlot({
   }
 
   function saveTime() {
-    onReassign(slot.id, slot.employee_id ?? '', start, end)
+    onReassign(slot.id, slot.employee_id ?? '', start, end, slot.break_minutes ?? null)
     setEditingTime(false)
   }
 
   function resetTime() {
-    onReassign(slot.id, slot.employee_id ?? '', null, null)
+    onReassign(slot.id, slot.employee_id ?? '', null, null, slot.break_minutes ?? null)
     setEditingTime(false)
+  }
+
+  function saveBreak(rohwert) {
+    // Leer heisst zurueck auf die gesetzliche Mindestpause, nicht null Minuten.
+    const minuten = rohwert === '' ? null : Math.max(0, Number(rohwert) || 0)
+    onReassign(
+      slot.id,
+      slot.employee_id ?? '',
+      slot.assignment_time_set ? slot.start_time : null,
+      slot.assignment_time_set ? slot.end_time : null,
+      minuten,
+    )
+    setEditingBreak(false)
   }
 
   if (readOnly) {
@@ -261,6 +286,11 @@ function AssignmentSlot({
         {slot.assignment_time_set && (
           <span className="slot-time" title={t('shiftCell.personalTimeTitle')}>
             {slot.start_time}–{slot.end_time}
+          </span>
+        )}
+        {breakDeviates && (
+          <span className="slot-break" title={t('shiftCell.breakTitle')}>
+            {t('shiftCell.breakShort', { minutes: slot.break_minutes })}
           </span>
         )}
       </div>
@@ -311,7 +341,52 @@ function AssignmentSlot({
           <button type="button" className="cell-icon" title={t('shiftCell.editPersonTimeTitle')} onClick={startEditingTime}>
             ✎
           </button>
+          {breakDeviates && (
+            <span className="slot-break" title={t('shiftCell.breakTitle')}>
+              {t('shiftCell.breakShort', { minutes: slot.break_minutes })}
+            </span>
+          )}
         </>
+      )}
+
+      {editingBreak ? (
+        <div className="cell-time-edit">
+          <input
+            type="number"
+            min="0"
+            step="5"
+            value={breakDraft}
+            onChange={e => setBreakDraft(e.target.value)}
+            aria-label={t('shiftCell.breakAria')}
+            placeholder={String(slot.effective_break_minutes ?? 0)}
+          />
+          <button type="button" className="btn-small" onClick={() => saveBreak(breakDraft)}>
+            {t('shiftCell.confirmButton')}
+          </button>
+          {/* Empty means back to the legal minimum, which is a different
+              thing from zero minutes - hence its own button rather than
+              clearing the field and pressing OK. */}
+          <button
+            type="button"
+            className="btn-secondary btn-small"
+            title={t('shiftCell.resetBreakTitle')}
+            onClick={() => saveBreak('')}
+          >
+            {t('shiftCell.defaultButton')}
+          </button>
+          <button type="button" className="btn-secondary btn-small" onClick={() => setEditingBreak(false)}>
+            ✕
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="cell-icon"
+          title={t('shiftCell.editBreakTitle')}
+          onClick={() => { setBreakDraft(String(slot.break_minutes ?? '')); setEditingBreak(true) }}
+        >
+          ☕
+        </button>
       )}
 
       {isAbsence && (

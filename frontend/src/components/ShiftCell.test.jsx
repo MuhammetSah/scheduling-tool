@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { LanguageProvider } from '../i18n/LanguageContext'
 import ShiftCell from './ShiftCell'
 
@@ -105,5 +105,37 @@ describe('ShiftCell mit mehreren Zeitpaaren', () => {
     expect(gruppen).toHaveLength(2)
     expect(gruppen[0].textContent).toContain('06:00–14:00')
     expect(gruppen[1].textContent).toContain('08:00–14:00')
+  })
+})
+
+describe('ShiftCell mit Ruhepausen', () => {
+  // Seit Etappe 5a traegt eine Zuweisung eine Ruhepause. break_minutes ist der
+  // gesetzte Wert (oder null), effective_break_minutes der wirksame - bei null
+  // die gesetzliche Mindestpause nach Paragraph 4 ArbZG.
+  function mitPause(gesetzt, wirksam) {
+    return [{ ...slot(1, 0, 'Anna', '08:00', '16:00'),
+              break_minutes: gesetzt, effective_break_minutes: wirksam }]
+  }
+
+  it('zeigt eine abweichende Pause an', () => {
+    renderCell(mitPause(60, 60))
+
+    expect(screen.getByText(/60/)).toBeInTheDocument()
+  })
+
+  it('zeigt eine Pause, die der gesetzlichen entspricht, nicht an', () => {
+    // Dieselbe Zurueckhaltung wie bei den Zeiten: sonst staende auf jeder
+    // Zeile dieselbe Zahl, und die Abweichung ginge darin unter.
+    const { container } = renderCell(mitPause(null, 30))
+
+    expect(container.querySelector('.slot-break')).toBeNull()
+  })
+
+  it('zeigt eine ausdrueckliche Null als Abweichung', () => {
+    // Die Gegenprobe zur Zurueckhaltung: 0 ist eine Aussage ("dieser Block
+    // laeuft ohne Pause") und muss sichtbar sein, obwohl sie falsy ist.
+    const { container } = renderCell(mitPause(0, 0))
+
+    expect(container.querySelector('.slot-break')).not.toBeNull()
   })
 })

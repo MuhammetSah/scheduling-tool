@@ -231,3 +231,59 @@ def test_zwei_personen_teilen_sich_den_tag_wenn_es_fairer_ist():
 
     assert ergebnis['unfilled_count'] == 0
     assert {z['employee_id'] for z in ergebnis['assignments']} == {1, 2}
+
+
+# ---------- Netto-Arbeitszeit (Etappe 5a) ----------
+
+
+def test_die_tagesgrenze_rechnet_netto():
+    """Paragraph 2 Abs. 1 ArbZG: Arbeitszeit ist die Spanne ohne die Ruhepause.
+
+    Zwei Bloecke von je sieben Stunden sind vierzehn Stunden Anwesenheit, aber
+    nur dreizehn Stunden Arbeitszeit - je 30 Minuten gesetzliche Pause gehen ab.
+    Bei einer Grenze von dreizehn Stunden entscheidet genau das: brutto
+    gerechnet bliebe ein Block offen, netto gehen beide.
+    """
+    ergebnis = plan(
+        [block('2026-09-01', '06:00', '13:00', 0),
+         block('2026-09-01', '14:00', '21:00', 1)],
+        [person(1, max_daily_hours=13)],
+    )
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_die_tagesgrenze_bindet_trotzdem():
+    """Gegenprobe zum Test darueber.
+
+    Dieselben Bloecke, Grenze zwoelf Stunden. Auch netto sind es dreizehn -
+    einer bleibt offen. Ohne diesen Test waere eine Umsetzung gruen, die die
+    Grenze gar nicht mehr prueft.
+    """
+    ergebnis = plan(
+        [block('2026-09-01', '06:00', '13:00', 0),
+         block('2026-09-01', '14:00', '21:00', 1)],
+        [person(1, max_daily_hours=12)],
+    )
+
+    assert ergebnis['unfilled_count'] == 1
+
+
+def test_die_wochengrenze_rechnet_netto():
+    """Fuenf Achtstundentage sind 40 Stunden Anwesenheit, aber 37,5 Stunden
+    Arbeitszeit. Bei einem Wochenziel von 38 Stunden entscheidet genau das."""
+    bloecke = [block(f'2026-09-0{tag}', '08:00', '16:00', 0) for tag in range(1, 6)]
+
+    ergebnis = plan(bloecke, [person(1, weekly_hours=38, max_daily_hours=None)])
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_die_wochengrenze_bindet_trotzdem():
+    """Gegenprobe: bei einem Wochenziel von 37 Stunden reichen auch 37,5
+    netto nicht - ein Tag bleibt offen."""
+    bloecke = [block(f'2026-09-0{tag}', '08:00', '16:00', 0) for tag in range(1, 6)]
+
+    ergebnis = plan(bloecke, [person(1, weekly_hours=37, max_daily_hours=None)])
+
+    assert ergebnis['unfilled_count'] == 1

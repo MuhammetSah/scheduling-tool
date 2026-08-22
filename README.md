@@ -146,7 +146,7 @@ Until this stage nobody could work twice in a day, which made the split shift �
 | | |
 |---|---|
 | **Blocks may not overlap** | Nobody can be in two places at once. Half-open boundaries as everywhere else in this project: `12:00` as one block's end and another's start is not an overlap. |
-| **Maximum daily working time** (`employees.max_daily_hours`, default 10) | § 2 Abs. 1 ArbZG defines working time as the time from start to end of work *without the breaks*, so the day's total is the **sum of the blocks**, not the span from the first start to the last end. `08:00–12:00` plus `16:00–20:00` is eight hours of working time, not twelve. |
+| **Maximum daily working time** (`employees.max_daily_hours`, default 10) | § 2 Abs. 1 ArbZG defines working time as the time from start to end of work *without the breaks*, so the day's total is the **sum of the blocks, each net of its break**, not the span from the first start to the last end. `08:00–12:00` plus `16:00–20:00` is eight hours of working time, not twelve — and two seven-hour blocks are thirteen, not fourteen (see [Breaks and net working time](#breaks-and-net-working-time)). |
 | **Rest period across days** (`employees.min_rest_hours`, default 11) | § 5 Abs. 1 ArbZG grants the rest period *after the end of the daily working time*, so it is measured from the **last** block of one day to the **first** of the next. The interruption in the middle of a split shift is not a rest period — it sits inside the working day. |
 
 Both the generator and the manual-correction path apply these, and as everywhere else the manual path **warns rather than blocks**: HR stays in charge.
@@ -154,10 +154,36 @@ Both the generator and the manual-correction path apply these, and as everywhere
 **What this tool deliberately does not check**, so that it is written down rather than silently assumed:
 
 - **The eight-hour average of § 3 Satz 2.** Ten hours a day are only lawful if six calendar months (or 24 weeks) average out at eight. The planner works one month at a time and structurally cannot see that window — the same boundary at which `max_shifts_per_month` and the rest-period check at the month's edge already stop. A `max_daily_hours` above 8 is therefore **not self-supporting in law**; the employee form says so at the field, and the compensation remains HR's responsibility.
-- **Breaks (§ 4 ArbZG).** The tool has no concept of a break, so a continuous eight-hour block breaches § 4 Satz 3 (no more than six hours' work without a break). That was already true before this stage and is not made worse by it. Worth noting in the other direction: an interruption of at least 30 minutes between two blocks *satisfies* § 4 in form, which makes a split shift the cleaner arrangement of the two.
+- **The position of a break within a block, and with it § 4 Satz 3** (no more than six hours' work at a stretch). Breaks themselves are modelled since the following stage — see [Breaks and net working time](#breaks-and-net-working-time) — but as a duration, not a position. Worth noting in the other direction: an interruption of at least 30 minutes between two blocks *satisfies* § 4 in form, which makes a split shift the cleaner arrangement of the two.
 - **Sunday rules (§ 11 ArbZG)** and the "no more than six consecutive days" rule that follows from them.
 
 `employees.max_daily_hours` is `NOT NULL DEFAULT 10` rather than nullable, following the same reasoning `0001_baseline.py` gives for `min_rest_hours`: a safety-relevant setting should never be unset. "No daily limit" must not be what a forgotten field quietly means.
+
+### Breaks and net working time
+
+Since this stage the tool distinguishes **presence** from **working time**. Someone rostered `08:00–16:00` is present for eight hours and works seven and a half: § 2 Abs. 1 ArbZG defines working time as the span *without* the breaks.
+
+**The model is a duration, not a position.** `shift_assignments.break_minutes` is nullable, and `NULL` means *the legal minimum for this block's span* rather than "no break" — the law requires the break, so a plan that failed to subtract it would be claiming someone works eight hours straight through. A stored value wins, including an explicit `0`: that is HR stating this block runs without one, which is a different thing from not having decided. The column is nullable for exactly that reason, and deliberately unlike `max_daily_hours`, which is `NOT NULL DEFAULT 10` because a safety limit should never be unset.
+
+This follows the same three-layer restraint the hours already use: the normal case is written nowhere and derives itself, only the deviation is stored. Every pre-existing row therefore stays valid and picks up the right break retroactively.
+
+**The minimum is resolved onto the span, and that is subtler than it looks.** § 4 measures the break against the *working* time, and working time is the span minus the break — read literally the rule chases its own tail. A 6:30 span is 6:30 of work without a break, which is "more than six hours" and demands 30 minutes, which brings the work down to exactly 6:00, which demands nothing. `legal_break_minutes()` resolves it by asking which break is sufficient for the working time it itself produces, and taking the smallest such break:
+
+| Span | Break |
+|---|---|
+| up to and including 6:00 h | 0 |
+| over 6:00 h up to and including 9:30 h | 30 min |
+| over 9:30 h | 45 min |
+
+Note **9:30, not 9:00**. At a 9:30 span a 30-minute break still leaves exactly nine hours, and nine hours is not "more than nine"; only from 9:31 does 30 minutes stop being enough. Applying the law's own numbers straight to the span is the obvious mistake, and `backend/test_working_time.py` pins the four edges — checking the *property* the thresholds derive from, so a hard-coded table or a constant 45 would not pass.
+
+**What counts net and what counts gross.** The daily cap (§ 3), the weekly target hours and both of their counterparts on the manual-correction path all count net. Everything about presence stays gross: coverage gaps, the overlap check between two blocks of a day, the rest period under § 5 (which measures end to start, not working time), and the availability-window check — someone available `08:00–16:00` is available during their break too. `backend/test_api_coverage.py` carries the counter-test for this: an assignment with a break still covers its full presence. Had coverage moved to net as well, every block would leave half an hour of gap that nobody could ever close, because every replacement would bring a break of their own.
+
+**This loosened existing limits.** Five eight-hour days are 40 hours of presence but 37.5 hours of working time, so a 38-hour weekly target now fits where it previously did not. That is the correct reading of § 2 Abs. 1, but it changes plans nobody touched.
+
+**Still not checked: § 4 Satz 3** — "no more than six hours of work at a stretch without a break". That needs the break's *position*, not just its length, and the position is deliberately not modelled. Nor is the law's allowance to split a break into segments of at least 15 minutes each; what is stored is one total.
+
+The one place § 4 can be broken at all is the manual-correction path: left alone the break is the legal minimum and every plan is compliant by construction, so only someone entering a shorter break by hand gets a warning — and it stays a warning.
 
 ### Fairness (v1.3)
 
@@ -225,7 +251,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
 - Retiring `shift_requirements`: the table and its route are still written and stored, but nothing reads them for planning any more (see [Block planning and automatic trimming](#block-planning-and-automatic-trimming))
-- Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the eight-hour average behind a ten-hour day, breaks under § 4, and the Sunday rules under § 11 (see [Split shifts and working-time law](#split-shifts-and-working-time-law))
+- Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the eight-hour average behind a ten-hour day, the position of a break within a block (§ 4 Satz 3), and the Sunday and public-holiday rules under § 9 and § 11
 
 ## Tech Stack
 
@@ -259,6 +285,7 @@ schichtplan-tool/
 │   ├── test_scheduler.py       # Unit tests for the algorithm (the compatibility guarantee)
 │   ├── test_block_planner.py   # Unit tests for stage 1, including the trimming
 │   ├── test_scheduler_split_shifts.py  # Split shifts, daily cap, rest across days
+│   ├── test_working_time.py    # § 4 break thresholds and net working time
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
 └── frontend/
@@ -377,7 +404,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)). To manage by hand:
 
 ```bash
 cd backend
@@ -460,7 +487,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (255 tests at the time of writing — `cd backend && pytest` prints the current number; 30 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (291 tests at the time of writing — `cd backend && pytest` prints the current number; 31 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

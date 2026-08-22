@@ -126,6 +126,69 @@ def shift_duration_minutes(start_time, end_time):
     return int((end - start).total_seconds() // 60)
 
 
+# § 4 ArbZG, resolved onto the span rather than onto working time.
+#
+# The law measures the break against the *working* time, and working time is
+# the span minus the break - so read literally the rule chases its own tail: a
+# 6:30 span is 6:30 of work without a break, which is "more than six hours" and
+# demands 30 minutes, which brings the work down to exactly 6:00, which demands
+# nothing at all. Resolved by asking which break is sufficient for the working
+# time it itself produces, and taking the smallest such break.
+#
+# On the span that lands on 6:00 and 9:30 - note 9:30, not 9:00. At a 9:30 span
+# a 30-minute break still leaves exactly nine hours, and nine hours is not
+# "more than nine"; only from 9:31 does 30 minutes stop being enough. Applying
+# the law's own numbers directly to the span is the obvious mistake here.
+BREAK_THRESHOLDS = ((6 * 60, 0), (9 * 60 + 30, 30))
+LONG_SHIFT_BREAK_MINUTES = 45
+
+
+def legal_break_minutes(duration_minutes):
+    """The shortest break § 4 ArbZG allows for a block of this span."""
+    if duration_minutes is None:
+        return 0
+    for limit, minutes in BREAK_THRESHOLDS:
+        if duration_minutes <= limit:
+            return minutes
+    return LONG_SHIFT_BREAK_MINUTES
+
+
+def net_working_minutes(duration_minutes, break_minutes):
+    """Working time in the sense of § 2 Abs. 1 ArbZG: the span without the break.
+
+    `break_minutes` None means "not separately agreed", which reads as the
+    legal minimum for this span - the law requires that break, so a plan that
+    did not subtract it would be claiming someone works eight hours straight
+    through. A stored value wins, including a zero: that is HR saying
+    something, and constraint_warnings() is where it gets questioned, not here.
+
+    None duration in, None out - same backward compatibility as
+    duration_minutes in build_slots(): a caller that only ever dealt in shift
+    counts has no hours to subtract from, and gets nothing to enforce.
+    """
+    if duration_minutes is None:
+        return None
+    taken = legal_break_minutes(duration_minutes) if break_minutes is None else break_minutes
+    return max(0, duration_minutes - taken)
+
+
+def slot_working_minutes(slot):
+    """The working time a slot contributes to the daily and weekly caps.
+
+    Derived rather than stored on the slot. A field would have to be set by
+    everything that builds one - build_slots(), block_planner, and every test
+    that hand-rolls a slot dict - and a caller that forgot it would not fail:
+    the cap would simply stop being enforced, which is the worst way for a
+    limit to break. Derived, a slot with hours always has a working time.
+
+    The break is always the legal minimum here, never a stored one: the
+    generator plans from scratch and its blocks carry no agreed break yet. A
+    break someone entered by hand only exists on saved rows, and those are
+    constraint_warnings()' business, not the search's.
+    """
+    return net_working_minutes(slot.get('duration_minutes'), None)
+
+
 def shift_datetimes(iso_date, start_time, end_time):
     """The (start, end) datetimes of a shift on a given calendar date.
 
@@ -443,17 +506,18 @@ def _search(
             if not structurally_eligible(emp, slot):
                 continue
             daily_cap = emp.get('max_daily_hours')
-            if daily_cap is not None and slot['duration_minutes'] is not None:
+            working = slot_working_minutes(slot)
+            if daily_cap is not None and working is not None:
                 current = day_minutes.get((eid, slot['date']), 0)
-                if current + slot['duration_minutes'] > daily_cap * 60:
+                if current + working > daily_cap * 60:
                     continue
             cap = emp['max_shifts_per_month']
             if cap is not None and load[eid] >= cap:
                 continue
             weekly_cap = emp.get('weekly_hours')
-            if weekly_cap is not None and slot['duration_minutes'] is not None:
+            if weekly_cap is not None and working is not None:
                 current = week_minutes.get((eid, slot['week_start']), 0)
-                if current + slot['duration_minutes'] > weekly_cap * 60:
+                if current + working > weekly_cap * 60:
                     continue
             if not rest_period_ok(emp, slot):
                 continue
@@ -509,9 +573,10 @@ def _search(
                     (slot['start_time'], slot['end_time']))
             else:
                 day_untimed[day_key] = day_untimed.get(day_key, 0) + 1
-            if slot['duration_minutes'] is not None:
-                week_minutes[week_key] = week_minutes.get(week_key, 0) + slot['duration_minutes']
-                day_minutes[day_key] = day_minutes.get(day_key, 0) + slot['duration_minutes']
+            working = slot_working_minutes(slot)
+            if working is not None:
+                week_minutes[week_key] = week_minutes.get(week_key, 0) + working
+                day_minutes[day_key] = day_minutes.get(day_key, 0) + working
             load[eid] += 1
             if slot['is_weekend']:
                 weekend_load[eid] += 1
@@ -528,9 +593,9 @@ def _search(
                 day_untimed[day_key] -= 1
                 if not day_untimed[day_key]:
                     del day_untimed[day_key]
-            if slot['duration_minutes'] is not None:
-                week_minutes[week_key] -= slot['duration_minutes']
-                day_minutes[day_key] -= slot['duration_minutes']
+            if working is not None:
+                week_minutes[week_key] -= working
+                day_minutes[day_key] -= working
             load[eid] -= 1
             if slot['is_weekend']:
                 weekend_load[eid] -= 1
