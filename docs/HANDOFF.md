@@ -24,10 +24,10 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5g ist **fertig umgesetzt, aber noch nicht gemergt** — Branch `etappe-5g-audit-log`.
-5f ist gemergt und deployt.
+Es ist nichts halb fertig. Alles bis einschließlich 5g ist gemergt, deployt und dokumentiert;
+es gibt keine offenen Branches und keine offenen Pull Requests.
 
-Offen bleiben zwei Teile, und bei beiden ist mit einer Entscheidung des Nutzers zu rechnen:
+Offen bleiben zwei Teile von Etappe 5:
 
 | Teil | Was zu klären ist |
 |---|---|
@@ -44,9 +44,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Alles bis 5e gemergt und deployt (PR #16–#21); die API antwortet mit 200 |
-| Branch-Situation | **Ein offener Branch: `etappe-5g-audit-log`** |
-| Aktueller Branch | `etappe-5g-audit-log` |
+| `main` | Alles bis 5g gemergt und deployt (PR #16–#23); die API antwortet mit 200 |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
+| Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 397 passed / 35 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0013`. `0013_audit_log` legt das Änderungsprotokoll an |
@@ -609,7 +609,7 @@ veröffentlicht" für einen Plan, den es nicht mehr gibt.
 Komponente hängt an einem guten Dutzend API-Aufrufen, und der Aufwand für einen sinnvollen Test
 gehört in eine eigene Aufgabe. Die Logik ist backendseitig durch zehn Tests gedeckt.
 
-## Etappe 5g — Audit-Log
+## Etappe 5g — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-23-etappe-5g-audit-log-design.md`](superpowers/specs/2026-08-23-etappe-5g-audit-log-design.md)
 
