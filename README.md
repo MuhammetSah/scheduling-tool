@@ -86,6 +86,24 @@ The log records **requests, not narrative**: time, user, method, path, response 
 
 There is **no route to clear it**. Something that empties at the press of a button is not a log. Retention is real and still open — the log is itself personal data and needs a period — but that is a decision for the operator and belongs with the GDPR work.
 
+## Exports
+
+Two, and both without a new dependency.
+
+**iCal** (`GET /employees/<id>/schedule.ics?year=&month=`) — one employee's shifts for a month, for their phone's calendar. Self-or-HR, the same rule the absences and availability windows follow. **Published plans only, HR included**: a draft does not exist for employees, and an export that handed one out anyway would be the back door beside that wall. The point is not who fetches the file — it is that the file leaves the building.
+
+**CSV** (`GET /schedules/<year>/<month>/export.csv`, HR) — the whole month, for payroll or a spreadsheet, unfilled slots included with an empty name because leaving them out would make a gap disappear. Drafts *are* exported here, and the difference is the recipient: HR pulls this for itself, and exporting a draft to check it over is a sensible thing to do.
+
+**Why no PDF or Excel.** The roadmap named them. Each needs a library, and this project keeps five runtime dependencies and wrote its own i18n, migration runner and holiday calendar rather than adding more. iCal is a text format ([RFC 5545](https://datatracker.ietf.org/doc/html/rfc5545)) and about forty lines for what is needed here; `csv` is in the standard library. PDF and Excel can wait until someone actually asks — then it is a decision with an occasion rather than one taken on spec, and anyone who wants a table can open the CSV in one.
+
+Three details that decide whether an export works at all:
+
+- **iCal uses CRLF line endings**, as the RFC requires. Some calendars reject the file silently otherwise — no error, just no events.
+- **The CSV uses semicolons and a BOM.** Both for Excel in German-speaking locales: without the semicolon everything lands in one column, without the BOM umlauts turn to mojibake. Inelegant and correct — an export that will not open in its target program is not an export.
+- **The download goes through an authenticated `fetch`, not a plain link.** The frontend and this API are on different domains, so a click on an `<a href>` would carry neither the bearer token nor, under Safari's ITP, the session cookie — and the file would come back as a `401`, or worse as an HTML error page saved under a `.ics` name.
+
+**No time zone in the iCal file.** The tool works in local time throughout and stores no zone; inventing one would be a claim the data does not support. A calendar in a different zone will therefore shift the events, which is stated here rather than left to be discovered.
+
 ## Self-service sick / vacation
 
 The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
@@ -335,7 +353,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
-- Remaining production-readiness work: data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
+- Remaining production-readiness work: GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
@@ -362,6 +380,7 @@ schichtplan-tool/
 │   ├── block_planner.py        # Stage 1: demand bands + templates + windows -> blocks (no DB)
 │   ├── coverage_model.py       # Pure coverage-curve/gap math (weekday demand bands, no DB)
 │   ├── holidays.py             # Public holidays per federal state (no DB)
+│   ├── exports.py              # iCal and CSV formatting (no DB)
 │   ├── security.py             # Login throttling, backed by the login_attempts table
 │   ├── timeutil.py             # "Current month" in the operating timezone
 │   ├── migrations/              # Versioned schema migrations, 0001-0008 (see Operations below)
@@ -374,6 +393,8 @@ schichtplan-tool/
 │   ├── test_holidays.py        # The holiday table, Easter, and Buß- und Bettag
 │   ├── test_api_publishing.py  # Who sees which plan, and when
 │   ├── test_api_audit.py       # The change log, including that it never breaks a request
+│   ├── test_exports.py         # iCal escaping, CRLF, CSV for Excel
+│   ├── test_api_exports.py     # Who may download what
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
@@ -567,6 +588,8 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | DELETE | `/business-hours/exceptions/<date>` | Remove a date's exception, reverting it to the weekday rule (HR)   |
 | PUT    | `/schedules/<year>/<month>/status` | Publish a schedule or pull it back to a draft (HR)                  |
 | GET    | `/audit-log`                      | The most recent change-log entries, newest first; `?limit=` up to 500 (HR) |
+| GET    | `/employees/<id>/schedule.ics`    | One employee's shifts as iCal, `?year=&month=`; published plans only (self or HR) |
+| GET    | `/schedules/<year>/<month>/export.csv` | The month as CSV, drafts included (HR)                          |
 | GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
 | PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
 | GET    | `/holiday-regions`                | The federal states to choose from                                    |
@@ -584,7 +607,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (397 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (421 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

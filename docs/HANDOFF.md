@@ -24,15 +24,14 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Alles bis einschließlich 5g ist gemergt, deployt und dokumentiert;
-es gibt keine offenen Branches und keine offenen Pull Requests.
+Etappe 5h ist **fertig umgesetzt, aber noch nicht gemergt** — Branch `etappe-5h-exporte`.
 
-Offen bleiben zwei Teile von Etappe 5:
+Damit bleibt **ein** Teil von Etappe 5 offen, und der braucht eine Entscheidung, die keine
+Sitzung treffen kann:
 
 | Teil | Was zu klären ist |
 |---|---|
-| **Exporte** | Neue Laufzeitabhängigkeiten. iCal und CSV gehen ohne, PDF und Excel nicht. Das Projekt hat bewusst fünf |
-| **DSGVO** | **Aufbewahrungsfristen** — für Krankmeldungen (Art.-9-Daten) und für das Audit-Log aus 5g. Eine betriebliche Festlegung, keine technische |
+| **DSGVO** | **Aufbewahrungsfristen** — für Krankmeldungen (Art.-9-Daten) und für das Audit-Log aus 5g. Eine betriebliche Festlegung. Das Mechanische (konfigurierbare Frist, Auskunft, Löschung) lässt sich bauen; die Zahl gehört dem Nutzer |
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -45,12 +44,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | | |
 |---|---|
 | `main` | Alles bis 5g gemergt und deployt (PR #16–#23); die API antwortet mit 200 |
-| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 397 passed / 35 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
+| Branch-Situation | **Ein offener Branch: `etappe-5h-exporte`** |
+| Aktueller Branch | `etappe-5h-exporte` |
+| Testsuite | 421 passed / 35 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0013`. `0013_audit_log` legt das Änderungsprotokoll an |
-| Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
+| Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach den Exporten |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
 ## Etappe 0 — abgeschlossen, gemergt, deployt
@@ -636,6 +635,34 @@ Protokoll, dessen Einträge mit dem Konto verschwinden, ist keines.
 
 **Die Aufbewahrungsfrist fehlt und ist bewusst offen** — das Log ist selbst personenbezogen. Sie
 gehört zum DSGVO-Teil und ist eine Entscheidung des Nutzers.
+
+## Etappe 5h — Exporte
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-5h-exporte-design.md`](superpowers/specs/2026-08-23-etappe-5h-exporte-design.md)
+
+**Die Abhängigkeitsfrage aus dem Handoff hat sich aufgelöst, nicht gestellt.** iCal ist ein
+Textformat und braucht rund vierzig Zeilen, CSV steht in der Standardbibliothek. PDF und Excel
+warten, bis jemand sie tatsächlich verlangt — dann ist es eine Entscheidung mit Anlass statt
+einer auf Vorrat. Die Laufzeitabhängigkeiten bleiben bei fünf.
+
+iCal je Mitarbeiter und Monat, `require_self_or_hr`, **nur veröffentlichte Pläne, auch für HR**
+— der Zweck der Datei ist, das Haus zu verlassen. Die CSV ist HR-only und liefert auch
+Entwürfe; der Unterschied ist der Empfänger.
+
+**Drei Details, an denen solche Exporte scheitern, und alle drei haben Tests:**
+
+1. **iCal verlangt CRLF.** Manche Kalender lehnen die Datei sonst wortlos ab — ohne Fehler,
+   einfach ohne Termine.
+2. **Die CSV braucht Semikolon und BOM**, sonst geht sie in Excel im deutschsprachigen Raum
+   nicht auf.
+3. **Der Download geht über ein authentifiziertes `fetch`, nicht über einen `<a href>`.**
+   Frontend und Backend liegen auf verschiedenen Domains; ein Klick trüge weder Token noch (unter
+   Safaris ITP) Cookie, und die Datei käme als 401 zurück — oder schlimmer als HTML-Fehlerseite
+   unter einem `.ics`-Namen.
+
+**Keine Zeitzone im iCal.** Das Tool rechnet in Ortszeit und speichert keine Zone; eine
+erfundene wäre eine Behauptung, die die Daten nicht tragen. Ein Kalender in anderer Zone
+verschiebt die Termine — steht im README.
 
 ## Arbeitsweise
 

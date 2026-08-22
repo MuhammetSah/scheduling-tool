@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from functools import wraps
 
-from flask import Flask, g, jsonify, request, session
+from flask import Flask, Response, g, jsonify, request, session
 from flask_cors import CORS
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.exceptions import HTTPException
@@ -19,6 +19,7 @@ import security
 import timeutil
 from block_planner import build_month_blocks
 from coverage_model import band_within, coverage_gaps, first_overlapping_pair, trim_band_to_hours
+from exports import schedule_to_csv, schedule_to_ical
 from holidays import REGIONS, holidays_in_range
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
@@ -1897,6 +1898,87 @@ def set_schedule_status(year, month):
     connection.commit()
 
     return jsonify(fetch_schedule(year, month))
+
+
+def _export_rows(year, month, employee_id=None):
+    """The month's assignments in the shape both exporters expect.
+
+    Goes through fetch_schedule() rather than its own query: the hours there
+    are already resolved through the three layers, and a second query would be
+    a second chance to resolve them differently.
+    """
+    schedule = fetch_schedule(year, month)
+    if not schedule:
+        return None, None
+
+    rows = []
+    for a in schedule['assignments']:
+        if employee_id is not None and a['employee_id'] != employee_id:
+            continue
+        working = None
+        if a['start_time'] and a['end_time']:
+            working = round(net_working_minutes(
+                shift_duration_minutes(a['start_time'], a['end_time']),
+                a['break_minutes']) / 60, 2)
+        rows.append({**a, 'working_hours': '' if working is None else working})
+    return schedule, rows
+
+
+@app.route('/employees/<int:employee_id>/schedule.ics', methods=['GET'])
+def export_employee_ical(employee_id):
+    """One employee's shifts for a month, as an iCal file.
+
+    Self-or-HR, the same rule the absences and availability windows follow.
+
+    **Published plans only, for HR too.** A draft does not exist for employees
+    since the publishing stage, and an export that handed one out anyway would
+    be the back door beside that wall. HR is included because the file's
+    purpose is to leave the building - the point is not who fetches it.
+    """
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    try:
+        year, month = int(request.args['year']), int(request.args['month'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'message': t(g.lang, 'year_month_required')}), 400
+
+    schedule, rows = _export_rows(year, month, employee_id)
+    if not schedule:
+        return jsonify({'message': t(g.lang, 'no_schedule_generated_yet')}), 404
+    if schedule['status'] != SCHEDULE_PUBLISHED:
+        return jsonify({'message': t(g.lang, 'schedule_not_published_yet')}), 404
+
+    text = schedule_to_ical(
+        rows, t(g.lang, 'free_block_label'),
+        datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
+
+    return Response(
+        text, mimetype='text/calendar; charset=utf-8',
+        headers={'Content-Disposition':
+                 f'attachment; filename="schichtplan-{year}-{month:02d}.ics"'})
+
+
+@app.route('/schedules/<int:year>/<int:month>/export.csv', methods=['GET'])
+@hr_required
+def export_schedule_csv(year, month):
+    """The whole month as CSV, for payroll or a spreadsheet.
+
+    Drafts are included here, unlike the iCal export, and the difference is the
+    recipient: HR pulls this for itself, and exporting a draft to check it over
+    is a sensible thing to do. The iCal file lands in someone's phone.
+    """
+    schedule, rows = _export_rows(year, month)
+    if not schedule:
+        return jsonify({'message': t(g.lang, 'no_schedule_generated_yet')}), 404
+
+    text = schedule_to_csv(rows, WEEKDAYS[g.lang])
+
+    return Response(
+        text, mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition':
+                 f'attachment; filename="schichtplan-{year}-{month:02d}.csv"'})
 
 
 @app.route('/schedules/<int:year>/<int:month>', methods=['DELETE'])

@@ -178,6 +178,33 @@ function SchedulePage({ setFlash, user }) {
     }
   }
 
+  async function exportCsv() {
+    try {
+      await api.download(`/schedules/${year}/${month}/export.csv`,
+                         `schichtplan-${year}-${String(month).padStart(2, '0')}.csv`)
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
+  async function exportIcal() {
+    // Die eigenen Schichten. HR sieht den ganzen Plan, laedt sich aber
+    // sinnvollerweise seinen eigenen Kalender - fuer fremde gibt es die Route
+    // ebenfalls, nur keinen Knopf dafuer.
+    const employeeId = schedule?.linked_employee_id ?? user?.employee_id
+    if (!employeeId) {
+      setFlash({ type: 'error', text: t('schedule.icalNeedsEmployee') })
+      return
+    }
+    try {
+      await api.download(
+        `/employees/${employeeId}/schedule.ics?year=${year}&month=${month}`,
+        `schichtplan-${year}-${String(month).padStart(2, '0')}.ics`)
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   async function deleteSchedule() {
     if (!window.confirm(t('schedule.confirmDelete'))) return
     try {
@@ -324,6 +351,7 @@ function SchedulePage({ setFlash, user }) {
                     reicht das Klick-Event durch, das als erstes Argument sonst
                     `bestaetigt` waer und faelschlich als "confirm: true" zaehlt. */}
                 <button onClick={() => generate()} disabled={loading}>{schedule ? t('schedule.regenerateButton') : t('schedule.generateButton')}</button>
+                {schedule && <button type="button" className="btn-secondary" onClick={exportCsv}>{t('schedule.exportCsvButton')}</button>}
                 {schedule && <button type="button" className="btn-danger" onClick={deleteSchedule}>{t('schedule.deleteButton')}</button>}
               </>
             )}
@@ -391,6 +419,14 @@ function SchedulePage({ setFlash, user }) {
             )}
 
             <div className="schedule-summary">
+              {/* Nur bei veroeffentlichtem Plan: der Export liefert einen
+                  Entwurf ohnehin nicht aus, und ein Knopf, der verlaesslich
+                  einen Fehler erzeugt, ist schlechter als keiner. */}
+              {user?.employee_id && schedule.status === 'published' && (
+                <button type="button" className="btn-secondary btn-small" onClick={exportIcal}>
+                  {t('schedule.exportIcalButton')}
+                </button>
+              )}
               <span className="badge">
                 {schedule.scope === 'own'
                   ? t('schedule.ownShiftsBadge', { n: schedule.assignments.length })
