@@ -8,6 +8,10 @@ import { useTranslation } from '../i18n/context'
  * design; editing lives in the table view, which has room for the controls.
  */
 function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
+  // Marking only, never a rule: § 9 forbids work on public holidays and § 10
+  // exempts whole industries, and only the operator knows which side this
+  // business is on. Empty while no federal state is selected.
+  const holidayNames = new Map((schedule.holidays || []).map(h => [h.date, h.name]))
   const { t, weekdayLabels, absenceLabels } = useTranslation()
 
   function personLabel(slot) {
@@ -100,9 +104,14 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
             const hasGap = dayAssignments.some(a => a.employee_id === null)
 
             return (
-              <div key={iso} className={`calendar-day ${isWeekend ? 'calendar-day-weekend' : ''}`}>
+              <div key={iso} className={`calendar-day ${isWeekend ? 'calendar-day-weekend' : ''} ${holidayNames.has(iso) ? 'calendar-day-holiday' : ''}`}>
                 <div className="calendar-day-header">
                   <span className="calendar-day-number">{dayNumber(iso)}</span>
+                  {holidayNames.has(iso) && (
+                    <span className="calendar-holiday" title={holidayNames.get(iso)}>
+                      {holidayNames.get(iso)}
+                    </span>
+                  )}
                   {hasGap && <span className="calendar-gap-dot" title={t('calendar.gapTitle')} />}
                 </div>
 

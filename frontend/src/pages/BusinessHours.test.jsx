@@ -39,9 +39,13 @@ async function renderPage(setFlash) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.get.mockImplementation(path =>
-    Promise.resolve(path === '/business-hours' ? makeHours() : []),
-  )
+  api.get.mockImplementation(path => {
+    if (path === '/business-hours') return Promise.resolve(makeHours())
+    // /settings liefert ein Objekt, nicht eine Liste - der Unterschied faellt
+    // sonst erst auf, wenn jemand einen Schluessel daraus liest.
+    if (path === '/settings') return Promise.resolve({})
+    return Promise.resolve([])
+  })
 })
 
 describe('BusinessHours closed-day toggle', () => {

@@ -206,18 +206,22 @@ def average_window(year, month):
     return last - timedelta(days=AVERAGE_REFERENCE_DAYS - 1), last
 
 
-def working_days_in(first, last):
+def working_days_in(first, last, holidays=()):
     """Working days in an inclusive date range: Monday through Saturday.
 
-    Public holidays are working days here, and they should not be - they would
-    shrink the denominator. Without a holiday calendar the count runs about
-    three percent high over 24 weeks, which makes any check built on it too
-    *lenient*: it can miss an excess, never invent one. Worth stating plainly,
-    because that is the more uncomfortable direction of the two.
+    Public holidays are not working days and are taken out when `holidays` is
+    given - a set of dates, as holidays.holidays_in_range() returns. A holiday
+    falling on a Sunday changes nothing, since the Sunday was already out.
+
+    Left empty - which is what happens while no federal state has been picked -
+    the count runs about three percent high over 24 weeks, and any check built
+    on it is too *lenient*: it can miss an excess, never invent one. That was
+    the documented gap in the average check until the holiday calendar landed,
+    and it is still the behaviour without a state selected.
     """
     return sum(
         1 for offset in range((last - first).days + 1)
-        if (first + timedelta(days=offset)).weekday() != 6
+        if (tag := first + timedelta(days=offset)).weekday() != 6 and tag not in holidays
     )
 
 

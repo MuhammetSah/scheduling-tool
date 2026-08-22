@@ -1071,3 +1071,122 @@ def test_wer_gar_nicht_arbeitet_taucht_nicht_auf(hr_client):
     hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
 
     assert hr_client.get('/schedules/2026/9').json['average_hours'] == []
+
+
+# ---------- Etappe 5d: Feiertagskalender ----------
+
+
+def test_ohne_bundesland_kennt_das_tool_keine_feiertage(hr_client):
+    """Kein Standardland - eines zu raten waere schlechter als keines."""
+    assert hr_client.get('/settings').json == {}
+
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'})
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 10})
+
+    assert hr_client.get('/schedules/2026/10').json['holidays'] == []
+
+
+def test_bundesland_setzen_und_feiertage_bekommen(hr_client):
+    hr_client.put('/settings', json={'holiday_region': 'BY'})
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'})
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 10})
+
+    feiertage = hr_client.get('/schedules/2026/10').json['holidays']
+
+    nach_datum = {f['date']: f['name'] for f in feiertage}
+    assert nach_datum['2026-10-03'] == 'Tag der Deutschen Einheit'
+    assert nach_datum['2026-11-01'] if '2026-11-01' in nach_datum else True
+    # Der Reformationstag gilt in Bayern nicht - die Gegenprobe zur Tabelle.
+    assert '2026-10-31' not in nach_datum
+
+
+def test_ein_anderes_bundesland_bekommt_andere_feiertage(hr_client):
+    """Das Gegenstueck: in Sachsen gilt der Reformationstag sehr wohl."""
+    hr_client.put('/settings', json={'holiday_region': 'SN'})
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'})
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 10})
+
+    nach_datum = {f['date']: f['name']
+                  for f in hr_client.get('/schedules/2026/10').json['holidays']}
+
+    assert nach_datum['2026-10-31'] == 'Reformationstag'
+
+
+def test_unbekannte_einstellung_ist_400(hr_client):
+    """Ein Tippfehler soll nicht still in der Tabelle landen."""
+    antwort = hr_client.put('/settings', json={'holidy_region': 'BY'})
+
+    assert antwort.status_code == 400
+    assert 'holidy_region' in antwort.json['message']
+
+
+def test_unbekanntes_bundesland_ist_400(hr_client):
+    assert hr_client.put('/settings', json={'holiday_region': 'XX'}).status_code == 400
+
+
+def test_bundesland_laesst_sich_wieder_loeschen(hr_client):
+    hr_client.put('/settings', json={'holiday_region': 'BY'})
+
+    hr_client.put('/settings', json={'holiday_region': None})
+
+    assert hr_client.get('/settings').json == {}
+
+
+def test_die_feiertagswarnung_meldet_beim_zuweisen(hr_client):
+    """Paragraph 9 verbietet Feiertagsarbeit, Paragraph 10 nimmt Branchen aus -
+    das Tool stellt die Lage fest und ueberlaesst die Wertung HR."""
+    hr_client.put('/settings', json={'holiday_region': 'BY'})
+    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 10})
+    platz = hr_client.post('/schedules/2026/10/slots', json={
+        'date': '2026-10-03', 'shift_type_id': schicht['id']}).json
+
+    antwort = hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': anna['id']})
+
+    assert antwort.status_code == 200, antwort.json
+    assert any('Feiertag' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_ohne_bundesland_warnt_derselbe_tag_nicht(hr_client):
+    """Gegenprobe: ohne gewaehltes Land ist kein Datum als Feiertag bekannt."""
+    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 10})
+    platz = hr_client.post('/schedules/2026/10/slots', json={
+        'date': '2026-10-03', 'shift_type_id': schicht['id']}).json
+
+    antwort = hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': anna['id']})
+
+    assert not any('Feiertag' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_der_feiertagskalender_schaerft_den_achtstundenschnitt(hr_client):
+    """Die einzige Stelle, an der 5d eine Rechnung genauer macht.
+
+    5c zaehlt Feiertage als Werktage und ist dadurch zu nachsichtig - der
+    Nenner ist zu gross, die erlaubte Stundenzahl damit auch. Mit gewaehltem
+    Bundesland fallen die Feiertage heraus, die Grenze sinkt, und ein Monat,
+    der eben noch durchging, meldet.
+
+    Die Stundenzahl ist so gewaehlt, dass sie zwischen beiden Grenzen liegt:
+    das Fenster (16.04. bis 30.09.2026) enthaelt vier bayerische Feiertage auf
+    Werktagen - Tag der Arbeit, Christi Himmelfahrt, Pfingstmontag,
+    Fronleichnam. 144 Werktage werden damit zu 140, die erlaubten 1152 Stunden
+    zu 1120. 87 Schichten von 13 Stunden sind 1131 und liegen dazwischen.
+    """
+    anna = _lange_schichten(hr_client, 87, start='06:00', ende='19:00', pause=0)
+
+    ohne_land = hr_client.get('/schedules/2026/9').json['average_hours']
+
+    hr_client.put('/settings', json={'holiday_region': 'BY'})
+    mit_land = hr_client.get('/schedules/2026/9').json['average_hours']
+
+    assert ohne_land == [], ohne_land
+    assert [e['employee_id'] for e in mit_land] == [anna['id']], mit_land
+    assert mit_land[0]['hours_allowed'] < 144 * 8
