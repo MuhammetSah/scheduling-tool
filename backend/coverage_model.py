@@ -7,23 +7,27 @@ das PyPI-Paket coverage (Abhaengigkeit von pytest-cov) wuerde sonst von
 einer gleichnamigen lokalen Datei verdeckt.
 
 Die Minutenachse und ihre Mitternachtsregel kommen aus scheduler.py und
-werden hier nur wiederverwendet, nicht zweites Mal implementiert.
+werden hier nur wiederverwendet, nicht zweites Mal implementiert. Das gilt
+seit dem Fix von window_contains_shift() auch fuer die beiden Ring-Primitiven
+_closed_range() und _ranges_overlap(): sie leben jetzt in scheduler.py, weil
+dort die Mitternachtskonvention ohnehin zu Hause ist (time_to_minutes(),
+_time_range_minutes()), und werden hier nur importiert - genau eine Fassung,
+nicht zwei.
 """
 
-from scheduler import time_to_minutes
+from scheduler import _closed_range, _ranges_overlap, _time_range_minutes
 
 
 def _band_range(start_time, end_time):
-    """Start- und Endminute einer Schicht, mit Mitternachtsregel.
+    """Start- und Endminute eines Bandes, mit Mitternachtsregel.
 
-    end_time <= start_time bedeutet Ueberschreitung nach Mitternacht - dieselbe
-    Konvention wie in scheduler.window_contains_shift().
+    Duenner Namens-Wrapper um scheduler._time_range_minutes() - "Band" ist die
+    Domaenensprache dieser Datei (Bedarfsbaender), die Rechenlogik selbst
+    bleibt eine einzige Fassung in scheduler.py. end_time <= start_time
+    bedeutet Ueberschreitung nach Mitternacht - dieselbe Konvention wie in
+    scheduler.window_contains_shift().
     """
-    start = time_to_minutes(start_time)
-    end = time_to_minutes(end_time)
-    if end <= start:
-        end += 24 * 60
-    return start, end
+    return _time_range_minutes(start_time, end_time)
 
 
 def _minutes_to_time(minutes):
@@ -90,27 +94,6 @@ def coverage_curve(shift_types):
     ]
 
 
-def _ranges_overlap(range_a, range_b):
-    """Ueberschneiden sich zwei Minutenbereiche - auch ueber Mitternacht hinweg?
-
-    Halboffene Grenzen [start, end): zwei Bereiche, die sich nur beruehren
-    (Ende des einen = Start des anderen), ueberlappen NICHT. Der zweite Bereich
-    wird zusaetzlich einen Zyklus frueher und spaeter geprueft (+-1440 Minuten),
-    weil die Minutenachse in Wahrheit ein Ring ist: die Minute 1800 einer
-    Nachtschicht ist derselbe Zeitpunkt wie die Minute 360 des Folgetags.
-
-    Die eine Stelle, an der diese Verschiebung ausgerechnet wird -
-    first_overlapping_pair() und band_within() benutzen beide sie, damit es
-    nicht zwei aehnliche Fassungen derselben Ringlogik gibt.
-    """
-    start_a, end_a = range_a
-    start_b, end_b = range_b
-    return any(
-        start_a < end_b + shift and start_b + shift < end_a
-        for shift in (-24 * 60, 0, 24 * 60)
-    )
-
-
 def first_overlapping_pair(bands):
     """Erstes ueberlappende Bandpaar der Liste, oder None wenn keines ueberlappt.
 
@@ -142,26 +125,15 @@ def bands_overlap(bands):
     return first_overlapping_pair(bands) is not None
 
 
-def _closed_range(open_time, close_time):
-    """Die Schliesszeit als Minutenbereich: von close_time bis zum naechsten open_time.
-
-    Leer (Ende <= Start), wenn der Betrieb rund um die Uhr offen ist - genau der
-    Fall der Standard-Oeffnungszeit 00:00-00:00 aus Migration 0006, die
-    _band_range() zu [0, 1440) macht und deren Schliesszeit damit auf
-    [1440, 1440) zusammenfaellt.
-    """
-    open_min, close_min = _band_range(open_time, close_time)
-    return close_min, open_min + 24 * 60
-
-
 def band_within(band, open_time, close_time):
     """Liegt das Band vollstaendig innerhalb von open_time bis close_time?
 
     Geprueft ueber die Gegenmenge: das Band liegt genau dann innerhalb der
     Oeffnungszeit, wenn es die SCHLIESSZEIT nicht beruehrt. Der direkte
     Vergleich "Fensterstart <= Bandstart und Bandende <= Fensterende" (so
-    macht es scheduler.window_contains_shift(), auf das diese Funktion frueher
-    zurueckgriff) kann das nicht leisten, sobald das Band ueber Mitternacht
+    machte es diese Funktion frueher, und so machte es scheduler.
+    window_contains_shift() bis zu dessen Fix in derselben Etappe wie dieser
+    Kommentar) kann das nicht leisten, sobald das Band ueber Mitternacht
     geht: eine Nachtschicht 22:00-06:00 ist [1320, 1800), eine ganztaegige
     Oeffnungszeit 00:00-00:00 ist [0, 1440), und 1800 <= 1440 ist falsch -
     obwohl der Betrieb rund um die Uhr offen ist und das Band offensichtlich
