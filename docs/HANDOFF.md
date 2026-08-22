@@ -28,9 +28,9 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 |---|---|
 | `main` | `8116e63` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11, #12) gemergt. Etappe 2 und Etappe 3 sind **noch nicht** gemergt |
 | Branch-Situation | Zwei offene, gestapelte Branches. `etappe-2-individuelle-zeiten` (ab `main`, PR #13, **offen**) — Etappe 2 lokal abgeschlossen, Abschluss-Review und Merge stehen aus. Darauf aufbauend `etappe-3-oeffnungszeiten-bedarf` (Draft-PR #14, **offen**): das Schema von Etappe 3 baut auf Migration `0005` aus Etappe 2 auf, deshalb stapelt der Branch statt direkt ab `main` zu verzweigen. Löst sich mit dem Merge von #13 von selbst auf |
-| Aktueller Branch | `etappe-3-oeffnungszeiten-bedarf`, HEAD `29d6da9` — Etappe 3 lokal abgeschlossen (dieser Commit) |
+| Aktueller Branch | `etappe-3-oeffnungszeiten-bedarf`, HEAD `d392583` — Etappe 3 lokal abgeschlossen, inklusive Dokumentation |
 | Testsuite | 188 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu erstmals eine Frontend-Testsuite (Vitest + Testing Library), 5 Tests |
-| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (der `frontend`-Job führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `29d6da9` |
+| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (der `frontend`-Job führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `d392583`. Ein kleiner Nachtrag-Commit (Korrektur eines veralteten Commit-Hashs in dieser Tabelle) läuft zum Zeitpunkt dieses Standes noch durch die eigene CI |
 | Migrationen | `0001`–`0007` lokal angewandt und rundlauffest (up → down → up geprüft). In `main` stecken bislang nur `0001`–`0004` (Etappe 0 und 1); `0004` war laut Etappe-1-Handoff beim nächsten Deploy fällig, der tatsächliche Produktionsstand wurde in dieser Sitzung nicht neu geprüft. `0005` (Etappe 2) und `0006`/`0007` (Etappe 3) liegen noch auf den offenen PRs #13/#14 und erreichen Produktion erst mit deren Merge |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
