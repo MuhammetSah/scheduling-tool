@@ -24,21 +24,20 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 4 ist **fertig umgesetzt, aber weder gepusht noch gemergt.** Sie liegt vollständig auf
-dem Branch `etappe-4-zuschnitt-im-planer`, zwölf Commits ab `fadf336`. Die Suite ist grün
-(255 passed, 30 übersprungen — Postgres-only), Frontend 15 Tests, Lint und Build sauber.
+Es ist nichts halb fertig. Etappen 0 bis 4 sind gemergt, deployt und dokumentiert, es gibt
+keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün, ein geprüftes
+Backup liegt.
 
-**Der nächste Schritt ist deshalb kein neuer Code, sondern ein Abschluss-Review dieser Etappe**
-und danach Push und Pull Request. Nach dem Muster der drei vorherigen Etappen: ein unabhängiger
-Reviewer, der dem Bericht des Umsetzers ausdrücklich nicht glauben darf, dann Fix-Runden mit
-eng gefasstem Re-Review. Besonderes Augenmerk verdienen zwei Stellen — die probeweise
-Tagesbesetzung in `block_planner.plan_day()` (das komplexeste Stück der Etappe) und der
-Eingriff in den Suchkern, der vier Etappen lang unangetastet blieb.
-
-Was danach kommt, ist **Etappe 5 — restliche Produktionsreife** (siehe Roadmap am Ende).
+Der nächste inhaltliche Schritt ist **Etappe 5 — restliche Produktionsreife** (siehe Roadmap
+am Ende). Anders als die Etappen davor ist sie kein zusammenhängendes Vorhaben, sondern ein
+Bündel weitgehend unabhängiger Teile: `shift_requirements` entfernen, Veröffentlichen-Workflow,
+Audit-Log, Exporte, DSGVO und die drei ArbZG-Regeln, die Etappe 4 bewusst offengelassen hat.
+**Sie gehört vor dem Planen zerlegt**, nicht als ein Umsetzungsplan angefasst — jedes Teil
+bekommt seine eigene Spec und seinen eigenen Plan.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde. Dort
-steht, was vier Etappen an Reviews gekostet hat und was bewusst liegen geblieben ist.
+steht, was vier Etappen an Reviews gekostet hat und was bewusst liegen geblieben ist. Die
+Liste ist nach Etappe 4 um sechs Punkte gewachsen.
 
 **Was beim Nutzer liegt und nicht bei dir:** der Umgang mit der ablaufenden Datenbank
 (07.09.2026), das Datenbankpasswort und die IP-Freigabe. Details unter „Offen — liegt beim
@@ -48,12 +47,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `fadf336` — Etappen 0 bis 3 gemergt und deployt, dazu der Nachtschicht-Fix in `window_contains_shift()` (PR #15) |
-| Branch-Situation | **Ein offener Branch: `etappe-4-zuschnitt-im-planer`**, zwölf Commits ab `fadf336`, lokal, nicht gepusht. Keine offenen Pull Requests. Beide gestapelten PRs der Vorgänger sind gemergt: #13 am 22.08. 12:15, #14 am 22.08. 12:16 |
-| Aktueller Branch | `etappe-4-zuschnitt-im-planer` |
-| Testsuite | 255 passed / 30 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 15 Frontend-Tests (Vitest + Testing Library) |
+| `main` | `088fd7d` — Etappen 0 bis 4 gemergt und deployt. Etappe 4 über PR #16 am 22.08. 17:28, Render-Deploy `dep-da4toioae00c73aslg5g` ist `live` |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Der Etappe-4-Branch ist nach dem Merge lokal und remote gelöscht |
+| Aktueller Branch | keiner — `main` ist der Stand |
+| Testsuite | 256 passed / 30 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 15 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0007` **in Produktion angewandt**, `0008_max_daily_hours` liegt auf dem Branch und ist noch nicht deployt. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
+| Migrationen | `0001`–`0008`, **alle in Produktion angewandt**. `0008_max_daily_hours` mit dem Deploy von #16; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -243,11 +242,11 @@ die acht Einzel-Task-Reviews gelaufen, keine Gesamtdurchsicht), dann beide PRs (
 danach #14) nach `main` mergen — in dieser Reihenfolge, weil #14 auf #13 aufbaut. Danach
 Etappe 4 (Zuschnitt im Planer) auf einem neuen Branch ab `main` beginnen.
 
-## Etappe 4 — abgeschlossen, noch nicht gemergt
+## Etappe 4 — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md`](superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md)
 Plan: [`docs/superpowers/plans/2026-08-22-etappe-4-zuschnitt.md`](superpowers/plans/2026-08-22-etappe-4-zuschnitt.md)
-Branch: `etappe-4-zuschnitt-im-planer`, zwölf Commits, **nicht gepusht und nicht gemergt**
+PR #16, vierzehn Commits, gemergt am 22.08. 17:28 als `088fd7d`, Deploy live
 
 Ziel erreicht: der Planer baut aus `coverage_requirements` statt aus `shift_requirements`,
 schneidet Blöcke auf die Arbeitszeitfenster zu, und der geteilte Dienst ist innerhalb der
@@ -265,7 +264,9 @@ Grenzen des Arbeitszeitgesetzes plan bar.
 | 8 Warnungen auf dem Handkorrektur-Pfad | ✅ | `135cb0b` |
 | 9 Bedarfszahlen aus dem Schichtart-Editor | ✅ | `171e4e1` |
 | 10 Benchmark-Gegenprobe | ✅ | `a330c27` |
-| 11 Dokumentation | ✅ | dieser Commit |
+| 11 Dokumentation | ✅ | `0bead66` |
+| Fund aus der Durchsicht vor dem Merge | ✅ | `6a2a38f` |
+| Merge nach `main` | ✅ PR #16 | `088fd7d` |
 
 ### Was der Benchmark sagt
 
@@ -329,11 +330,18 @@ Planer arbeitet monatsweise und kann ein 24-Wochen-Fenster strukturell nicht seh
 `max_daily_hours` über 8 ist damit rechtlich nicht selbsttragend, der Hinweis steht am Feld),
 die Ruhepausen aus § 4, und die Sonntagsregeln aus § 11. Alles drei ist Etappe 5.
 
-### Was vor dem Merge noch fehlt
+### Zum Merge
 
-- Push und Pull Request; die Postgres-Tests (`0008`, zwei Stück) sind lokal übersprungen und
-  laufen erst im CI-Job `backend-postgres`
-- Kein Browser-Durchlauf gefahren
+Alle vier CI-Jobs grün, **einschließlich `backend-postgres`** — der ist der einzige Ort, an dem
+die beiden Postgres-Tests für `0008` laufen, lokal werden sie übersprungen.
+
+Bei der Durchsicht vor dem Merge fiel noch ein Punkt auf, der nicht von einem Test kam:
+`generate_schedule()` sagt in seiner eigenen Beschreibung `"HH:MM" or None` für die Zeiten
+einer Schichtart zu, und `cover_demand()` wäre daran abgestürzt. Über die Anwendung
+unerreichbar (die Spalten sind `NOT NULL`), aber Vertrag und Code sagten Verschiedenes —
+behoben in `6a2a38f`.
+
+**Kein Browser-Durchlauf gefahren.** Die Oberfläche ist nur über die Vitest-Tests belegt.
 
 ## Arbeitsweise
 
