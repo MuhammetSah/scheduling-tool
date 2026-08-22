@@ -618,6 +618,7 @@ def serialize_employee(cursor, row):
         'max_shifts_per_month': row['max_shifts_per_month'],
         'weekly_hours': row['weekly_hours'],
         'min_rest_hours': row['min_rest_hours'],
+        'max_daily_hours': row['max_daily_hours'],
         'unavailable_weekdays': unavailable_weekdays,
         'unavailable_dates': unavailable_dates,
         'allowed_shift_types': allowed_shift_types,
@@ -818,14 +819,16 @@ def create_employee():
         cursor = connection.cursor()
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
+        max_daily_hours = parse_optional_hours(data.get('max_daily_hours'), 'max_daily_hours_label')
         availability_mode = data.get('availability_mode') or 'anytime'
         if availability_mode not in ('anytime', 'windows'):
             raise ValueError(t(g.lang, 'availability_mode_invalid'))
         cursor.execute(
-            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours, availability_mode) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours, max_daily_hours, availability_mode) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
-             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, availability_mode),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11,
+             max_daily_hours if max_daily_hours is not None else 10, availability_mode),
         )
         employee_id = cursor.lastrowid
         replace_employee_constraints(connection, employee_id, data)
@@ -867,14 +870,16 @@ def update_employee(employee_id):
     try:
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
+        max_daily_hours = parse_optional_hours(data.get('max_daily_hours'), 'max_daily_hours_label')
         availability_mode = data.get('availability_mode') or 'anytime'
         if availability_mode not in ('anytime', 'windows'):
             raise ValueError(t(g.lang, 'availability_mode_invalid'))
         cursor.execute(
             'UPDATE employees SET name = ?, email = ?, active = ?, max_shifts_per_month = ?, '
-            'weekly_hours = ?, min_rest_hours = ?, availability_mode = ? WHERE id = ?',
+            'weekly_hours = ?, min_rest_hours = ?, max_daily_hours = ?, availability_mode = ? WHERE id = ?',
             (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
-             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, availability_mode, employee_id),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11,
+             max_daily_hours if max_daily_hours is not None else 10, availability_mode, employee_id),
         )
         replace_employee_constraints(connection, employee_id, data)
         connection.commit()
@@ -1342,6 +1347,7 @@ def load_employees_for_scheduling(cursor):
             'max_shifts_per_month': row['max_shifts_per_month'],
             'weekly_hours': row['weekly_hours'],
             'min_rest_hours': row['min_rest_hours'],
+            'max_daily_hours': row['max_daily_hours'],
             'unavailable_weekdays': unavailable_weekdays,
             'unavailable_dates': unavailable_dates,
             'allowed_shift_types': allowed if allowed else None,

@@ -642,3 +642,41 @@ def test_fensterroute_meldet_unbekannten_mitarbeiter(hr_client):
     ):
         assert antwort.status_code == 404
         assert antwort.json['message'] == 'Mitarbeiter nicht gefunden'
+
+
+# ---------- taegliche Hoechstarbeitszeit (Etappe 4) ----------
+
+
+def test_max_daily_hours_steht_ohne_angabe_auf_zehn(hr_client):
+    """Paragraph 3 ArbZG: zehn Stunden sind die Obergrenze des Zulaessigen."""
+    antwort = hr_client.post('/employees', json={'name': 'Anna'})
+
+    assert antwort.status_code == 201, antwort.json
+    assert antwort.json['max_daily_hours'] == 10
+
+
+def test_max_daily_hours_wird_gespeichert_und_zurueckgeliefert(hr_client):
+    angelegt = hr_client.post('/employees', json={'name': 'Anna', 'max_daily_hours': 8}).json
+
+    gelesen = hr_client.get(f'/employees/{angelegt["id"]}')
+
+    assert gelesen.json['max_daily_hours'] == 8
+
+
+def test_max_daily_hours_laesst_sich_aendern(hr_client):
+    angelegt = hr_client.post('/employees', json={'name': 'Anna', 'max_daily_hours': 8}).json
+
+    geaendert = hr_client.put(f'/employees/{angelegt["id"]}',
+                              json={'name': 'Anna', 'max_daily_hours': 6})
+
+    assert geaendert.status_code == 200, geaendert.json
+    assert geaendert.json['max_daily_hours'] == 6
+
+
+def test_max_daily_hours_weist_unsinn_mit_400_ab(hr_client):
+    antwort = hr_client.post('/employees', json={'name': 'Anna', 'max_daily_hours': -1})
+
+    assert antwort.status_code == 400
+    # Die Meldung nennt das Feld, nicht irgendein anderes - parse_optional_hours
+    # bekommt den i18n-Schluessel genau dafuer.
+    assert 'tägliche Höchstarbeitszeit' in antwort.json['message']

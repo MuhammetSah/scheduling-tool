@@ -1008,3 +1008,65 @@ def test_bedarfsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(p
         connection.close()
 
     assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]
+
+
+def test_tagesgrenze_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0008_max_daily_hours.
+
+    Derselbe Grund wie beim Fenster-Rundlauf oben: der table_columns()-Waechter
+    laeuft hier gegen information_schema statt gegen PRAGMA table_info, ist
+    also eine andere Implementierung derselben Pruefung. Dazu kommt, dass
+    ALTER TABLE ADD COLUMN mit NOT NULL DEFAULT auf beiden Dialekten
+    unterschiedlich umgesetzt ist - Postgres schreibt den Standard seit
+    Version 11 nur noch in den Katalog statt jede Zeile anzufassen. Dass eine
+    Bestandszeile danach wirklich 10 traegt, laesst sich aus SQLite nicht
+    schliessen (Fallstrick 10).
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    while '0008_max_daily_hours' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    # Die Spalte ueberlebt die Ruecknahme absichtlich - siehe down() in
+    # 0008_max_daily_hours.py. Das ist die Entscheidung, nicht der Fehler.
+    assert 'max_daily_hours' in spalten(schema_url, schema, 'employees')
+
+    erneut = migrations.apply_pending()
+
+    assert '0008_max_daily_hours' in erneut
+    assert 'max_daily_hours' in spalten(schema_url, schema, 'employees')
+
+
+def test_bestandsmitarbeiter_bekommt_die_tagesgrenze_zehn(pg_db):
+    """Der Standard aus Paragraph 3 ArbZG greift auch auf Postgres.
+
+    Der Mitarbeiter wird angelegt, WAEHREND 0008 zurueckgerollt ist - nur so
+    prueft der Test den Standard der Spaltenergaenzung und nicht den einer
+    spaeteren Einfuegung.
+    """
+    migrations, schema_url, _schema = pg_db
+    migrations.apply_pending()
+
+    while '0008_max_daily_hours' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    verbindung = psycopg2.connect(schema_url)
+    try:
+        with verbindung.cursor() as zeiger:
+            zeiger.execute("INSERT INTO employees (name, active) VALUES ('Anna', 1)")
+        verbindung.commit()
+    finally:
+        verbindung.close()
+
+    migrations.apply_pending()
+
+    verbindung = psycopg2.connect(schema_url)
+    try:
+        with verbindung.cursor() as zeiger:
+            zeiger.execute("SELECT max_daily_hours FROM employees WHERE name = 'Anna'")
+            wert = zeiger.fetchone()[0]
+    finally:
+        verbindung.close()
+
+    assert wert == 10

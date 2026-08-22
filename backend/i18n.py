@@ -119,6 +119,10 @@ TRANSLATIONS = {
         'de': 'Die Mindestruhezeit',
         'en': 'The minimum rest period',
     },
+    'max_daily_hours_label': {
+        'de': 'Die tägliche Höchstarbeitszeit',
+        'en': 'The maximum daily working hours',
+    },
     'field_must_be_number': {
         'de': '{field} muss eine Zahl sein',
         'en': '{field} must be a number',
