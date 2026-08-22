@@ -22,9 +22,9 @@ from coverage_model import band_within, coverage_gaps, first_overlapping_pair, t
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
-    _ranges_overlap, _time_range_minutes, generate_schedule, legal_break_minutes,
-    net_working_minutes, rest_gap_hours, shift_datetimes, shift_duration_minutes,
-    window_contains_shift, window_is_valid_on,
+    MAX_CONSECUTIVE_DAYS, MIN_FREE_SUNDAYS_PER_YEAR, _ranges_overlap, _time_range_minutes,
+    generate_schedule, legal_break_minutes, net_working_minutes, rest_gap_hours,
+    shift_datetimes, shift_duration_minutes, window_contains_shift, window_is_valid_on,
 )
 
 # Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
@@ -1336,7 +1336,50 @@ def delete_shift_type(shift_type_id):
 
 # ---------- schedules ----------
 
-def load_employees_for_scheduling(cursor):
+def scheduling_history(cursor, employee_id, year, month):
+    """The two facts about an employee's past that the planner needs.
+
+    Returns (days_worked_before_month, sundays_worked_in_year).
+
+    Bounded by the *date range* of the month being planned, never by
+    schedule_id: generate_schedule_route() deletes the month's assignments only
+    after the search has run, so they are still in the database while this
+    loads. Counting them would dock everyone for shifts the very same request
+    is about to take away - someone with four Sundays in the current August
+    plan would have their yearly budget cut by four, for a plan being replaced.
+    A date inside the target month belongs to that month, whatever schedule row
+    it happens to hang off.
+
+    Both are counted over distinct *dates*, not assignments: a split shift with
+    two blocks does not make a day into two days.
+    """
+    first_of_month = date(year, month, 1)
+    last_of_month = date(year, month, calendar.monthrange(year, month)[1])
+
+    cursor.execute(
+        'SELECT DISTINCT date FROM shift_assignments '
+        'WHERE employee_id = ? AND date BETWEEN ? AND ? AND (date < ? OR date > ?)',
+        (employee_id, date(year, 1, 1).isoformat(), date(year, 12, 31).isoformat(),
+         first_of_month.isoformat(), last_of_month.isoformat()),
+    )
+    dates_in_year = {row['date'] for row in cursor.fetchall()}
+
+    sundays = sum(1 for iso in dates_in_year if date.fromisoformat(iso).weekday() == 6)
+
+    # Counting back from the day before the month starts. Stopping at
+    # MAX_CONSECUTIVE_DAYS is not an optimisation but the whole truth that
+    # matters: a run already at the limit blocks the first of the month no
+    # matter how much longer it really is.
+    run = 0
+    cursor_date = first_of_month - timedelta(days=1)
+    while run < MAX_CONSECUTIVE_DAYS and cursor_date.isoformat() in dates_in_year:
+        run += 1
+        cursor_date -= timedelta(days=1)
+
+    return run, sundays
+
+
+def load_employees_for_scheduling(cursor, year=None, month=None):
     cursor.execute('SELECT * FROM employees WHERE active = 1')
     employees = []
     for row in cursor.fetchall():
@@ -1378,6 +1421,17 @@ def load_employees_for_scheduling(cursor):
             'availability_mode': row['availability_mode'],
             'availability': availability,
         })
+        if year is not None and month is not None:
+            before, sundays = scheduling_history(cursor, employee_id, year, month)
+            employees[-1].update({
+                'days_worked_before_month': before,
+                'sundays_worked_in_year': sundays,
+                # The law fixes the number; the planner enforces what it is
+                # given, the same way min_rest_hours works. Supplying it here
+                # is what turns the rule on for real data while leaving callers
+                # that deal in shift counts alone.
+                'max_consecutive_days': MAX_CONSECUTIVE_DAYS,
+            })
     return employees
 
 
@@ -1557,7 +1611,7 @@ def generate_schedule_route():
     if not shift_types:
         return jsonify({'message': t(g.lang, 'need_a_shift_type_first')}), 400
 
-    employees = load_employees_for_scheduling(cursor)
+    employees = load_employees_for_scheduling(cursor, year, month)
 
     cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
     existing = cursor.fetchone()
