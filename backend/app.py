@@ -19,6 +19,7 @@ import security
 import timeutil
 from block_planner import build_month_blocks
 from coverage_model import band_within, coverage_gaps, first_overlapping_pair, trim_band_to_hours
+from holidays import REGIONS, holidays_in_range
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
@@ -1584,6 +1585,8 @@ def fetch_schedule(year, month):
         'distribution': build_distribution(assignments, active_employees),
         'coverage_gaps': coverage_gaps_for_month(cursor, year, month, assignments),
         'average_hours': average_hours_exceeded(cursor, year, month),
+        'holidays': [{'date': tag.isoformat(), 'name': name}
+                     for tag, name in holidays_for_month(cursor, year, month).items()],
     }
 
 
@@ -2137,6 +2140,19 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if run > MAX_CONSECUTIVE_DAYS:
         warnings.append(t(g.lang, 'warn_seventh_consecutive_day',
                           name=employee['name'], days=run))
+
+    # § 9 ArbZG forbids work on public holidays, and § 10 exempts whole
+    # industries. Which side this business is on is a fact about the business,
+    # not something the tool can derive - so this states the situation and
+    # leaves the judgement where it belongs. Silent while no federal state has
+    # been picked, because then no date is known to be a holiday.
+    feiertag = holidays_in_range(
+        date.fromisoformat(assignment_date), date.fromisoformat(assignment_date),
+        holiday_region(cursor),
+    )
+    if feiertag:
+        warnings.append(t(g.lang, 'warn_public_holiday', date=assignment_date,
+                          name=next(iter(feiertag.values()))))
 
     # § 11 Abs. 1 ArbZG: at least 15 Sundays a year stay free of work.
     if date.fromisoformat(assignment_date).weekday() == 6:
@@ -2959,6 +2975,81 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
     return gaps
 
 
+# The only setting so far. Kept as an explicit allow-list rather than "store
+# whatever arrives": a typo in a key would otherwise land in the table and
+# quietly never be read again.
+KNOWN_SETTINGS = {'holiday_region'}
+
+
+def read_settings(cursor):
+    cursor.execute('SELECT name, value FROM settings')
+    return {row['name']: row['value'] for row in cursor.fetchall()}
+
+
+def holiday_region(cursor):
+    """The federal state whose holidays apply, or None if none was picked.
+
+    None is a valid state of affairs, not an error - the tool then knows no
+    holidays and behaves as it did before this stage. There is deliberately no
+    default: guessing a state would be worse than having none.
+    """
+    return read_settings(cursor).get('holiday_region')
+
+
+def holidays_for_month(cursor, year, month):
+    first = date(year, month, 1)
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return holidays_in_range(first, last, holiday_region(cursor))
+
+
+@app.route('/settings', methods=['GET'])
+@hr_required
+def get_settings():
+    return jsonify(read_settings(get_db().cursor()))
+
+
+@app.route('/settings', methods=['PUT'])
+@hr_required
+def put_settings():
+    """Sets the keys it is given and leaves the rest alone.
+
+    Deliberately not the replace-completely semantics the constraint lists use:
+    a setting is not a stock someone maintains as a whole, and a caller setting
+    one key should not have to know the others. An unknown key is a 400 -
+    strictness is right here, because a typo would otherwise run into nothing
+    and look like it worked.
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    data = request.get_json(silent=True) or {}
+
+    unknown = set(data) - KNOWN_SETTINGS
+    if unknown:
+        return jsonify({'message': t(g.lang, 'unknown_setting',
+                                     names=', '.join(sorted(unknown)))}), 400
+
+    if 'holiday_region' in data and data['holiday_region'] is not None:
+        if data['holiday_region'] not in REGIONS:
+            return jsonify({'message': t(g.lang, 'unknown_holiday_region')}), 400
+
+    for name, value in data.items():
+        if value is None:
+            cursor.execute('DELETE FROM settings WHERE name = ?', (name,))
+            continue
+        cursor.execute('DELETE FROM settings WHERE name = ?', (name,))
+        cursor.execute('INSERT INTO settings (name, value) VALUES (?, ?)', (name, str(value)))
+    connection.commit()
+
+    return jsonify(read_settings(cursor))
+
+
+@app.route('/holiday-regions', methods=['GET'])
+@login_required
+def list_holiday_regions():
+    """The states to choose from, so the browser does not carry its own copy."""
+    return jsonify([{'code': code, 'name': name} for code, name in sorted(REGIONS.items())])
+
+
 def average_hours_exceeded(cursor, year, month):
     """Employees whose working time breaks § 3's eight-hour average.
 
@@ -2976,7 +3067,10 @@ def average_hours_exceeded(cursor, year, month):
     the same care coverage_gaps_for_month() takes with its three.
     """
     first, last = average_window(year, month)
-    working_days = working_days_in(first, last)
+    # Holidays are not working days. Empty while no state is picked, which is
+    # exactly the lenient behaviour working_days_in() documents.
+    working_days = working_days_in(
+        first, last, set(holidays_in_range(first, last, holiday_region(cursor))))
 
     cursor.execute(
         'SELECT sa.employee_id, sa.schedule_id, sa.date, sa.shift_type_id, '

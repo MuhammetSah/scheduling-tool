@@ -24,11 +24,13 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Alles bis einschließlich 5c und 5e ist gemergt, deployt und
-dokumentiert; es gibt keine offenen Branches und keine offenen Pull Requests.
+Etappe 5d ist **fertig umgesetzt, aber noch nicht gemergt** — Branch `etappe-5d-feiertage`.
 
-Vom Arbeitszeitrecht fehlt nur noch **5d** (Feiertagskalender). Danach bleiben die vier
-nicht-rechtlichen Teile von Etappe 5: Veröffentlichen-Workflow, Audit-Log, Exporte, DSGVO.
+**Damit ist das Arbeitszeitrecht vollständig**, soweit dieses Tool es tragen kann. Was bleibt,
+sind die vier nicht-rechtlichen Teile von Etappe 5: Veröffentlichen-Workflow, Audit-Log,
+Exporte, DSGVO. Beim DSGVO-Teil ist mit Entscheidungen zu rechnen, die beim Nutzer liegen
+(Aufbewahrungsfristen), und bei den Exporten mit der ersten neuen Laufzeitabhängigkeit des
+Projekts.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -41,11 +43,11 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | | |
 |---|---|
 | `main` | Etappen 0 bis 4 sowie 5a, 5b, 5c und 5e gemergt und deployt (PR #16–#20); die API antwortet mit 200 |
-| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 327 passed / 32 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 22 Frontend-Tests (Vitest + Testing Library) |
+| Branch-Situation | **Ein offener Branch: `etappe-5d-feiertage`** |
+| Aktueller Branch | `etappe-5d-feiertage` |
+| Testsuite | 372 passed / 33 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0010`. `0010_drop_shift_requirements` entfernt die alte Bedarfstabelle; ihr Inhalt lebt seit `0007` in `coverage_requirements` weiter |
+| Migrationen | `0001`–`0011`. `0011_settings` legt die erste Einstellungstabelle des Projekts an; erster Schlüssel ist `holiday_region` |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -350,7 +352,7 @@ Auch das Arbeitszeitrecht allein zerfällt in drei:
 | **5a** | Ruhepausen nach § 4, Arbeitszeit netto statt brutto | ✅ umgesetzt, siehe unten |
 | **5b** | Höchstens sechs Tage in Folge, 15 freie Sonntage im Jahr | ✅ umgesetzt, siehe unten |
 | **5c** | Achtstundenschnitt nach § 3 Satz 2, rollierend über 24 Wochen, gemeldet statt erzwungen | ✅ umgesetzt, siehe unten |
-| **5d** | Feiertagskalender mit Bundeslandauswahl — beim Ausarbeiten von 5b herausgelöst, weil er keine Regel durchsetzt | offen |
+| **5d** | Feiertagskalender mit Bundeslandauswahl | ✅ umgesetzt, siehe unten |
 | **5e** | `shift_requirements` entfernen — das lose Ende aus Etappe 4 | ✅ umgesetzt, siehe unten |
 
 Zwei Entscheidungen dazu sind mit dem Nutzer bereits gefallen und gelten für 5b und 5c:
@@ -540,6 +542,42 @@ nachsichtig — sie kann eine Überschreitung übersehen, nie eine erfinden. Lö
 
 Kein Schemaeingriff.
 
+## Etappe 5d — Feiertagskalender
+
+Spec: [`docs/superpowers/specs/2026-08-22-etappe-5d-feiertage-design.md`](superpowers/specs/2026-08-22-etappe-5d-feiertage-design.md)
+
+`backend/holidays.py`: neun bundesweite und zehn regionale Feiertage, Ostern über den anonymen
+gregorianischen Algorithmus, Buß- und Bettag als Mittwoch vor dem 23.11. Keine Bibliothek —
+zwölf Zeilen Arithmetik plus eine Tabelle.
+
+Das Bundesland ist eine Einstellung (`holiday_region` in der neuen `settings`-Tabelle,
+Migration `0011`). **Ohne Auswahl kennt das Tool keine Feiertage** und verhält sich wie zuvor;
+es gibt bewusst keinen Standard.
+
+**Feiertage werden nicht automatisch geschlossen** — das entscheiden die Öffnungszeiten, weil
+das Tool nicht wissen kann, ob der Betrieb unter § 10 fällt. Der Kalender kennzeichnet und
+warnt.
+
+**Die eine Stelle, an der er eine Rechnung schärft:** der Achtstundenschnitt aus 5c zählte
+Feiertage als Werktage und war dadurch zu nachsichtig. Mit gewähltem Bundesland fallen sie aus
+dem Nenner. Der Test dazu ist der aufwendigste der Etappe, weil die Stundenzahl zwischen beiden
+Grenzen liegen muss: das Fenster 16.04.–30.09.2026 enthält vier bayerische Feiertage auf
+Werktagen, 144 Werktage werden zu 140, die erlaubten 1152 Stunden zu 1120 — 87 Schichten von
+13 Stunden sind 1131 und liegen dazwischen.
+
+**Unterhalb der Bundeslandebene kennt der Kalender nichts** — Fronleichnam in katholischen
+Gemeinden Sachsens und Thüringens, Mariä Himmelfahrt in Bayern, das Augsburger Friedensfest.
+Er ist damit in der nachsichtigen Richtung unvollständig: einen Feiertag zu wenig, nie einen zu
+viel. Betroffene tragen den Tag als Öffnungszeit-Ausnahme ein.
+
+**Was einen roten CI-Lauf gekostet hat:** `0011_settings` hatte zuerst `name` als natürlichen
+Primärschlüssel und keine `id`-Spalte. Die Dialektschicht hängt an jedes `INSERT` ein
+`RETURNING id` an — auf SQLite unbemerkt, auf Postgres ein `UndefinedColumn`. Steht jetzt als
+Fallstrick 16 und hat einen eigenen Schreibtest gegen Postgres bekommen.
+
+Die regionalen Feiertage sind **paarweise** getestet — je ein Land mit und eines ohne. „Gilt in
+Bayern" allein wäre auch grün, wenn der Feiertag überall stünde.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -609,7 +647,14 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     Der erste verschwindet lautlos aus der Suite, ohne dass irgendetwas fehlschlägt. In
     Etappe 3 gaben zwei Task-Briefs (4 und 5) denselben Testnamen vor; der Implementer von
     Task 5 hat es bemerkt und beide eindeutig umbenannt. `pytest --collect-only` zeigt es.
-16. **Ein Modulname im Backend darf kein installiertes Paket verdecken.** `backend/coverage.py`
+16. **Jede Tabelle, in die eingefügt wird, braucht eine `id`-Spalte.** `_PostgresCursor.execute()`
+    hängt an jedes `INSERT` ohne eigenes `RETURNING` ein `RETURNING id` an, damit `lastrowid`
+    auch dort funktioniert. Eine Tabelle ohne `id` ist auf Postgres nicht beschreibbar — auf
+    SQLite dagegen schon, weshalb es lokal nicht auffällt. Die erste Fassung von
+    `0011_settings` hatte `name` als natürlichen Primärschlüssel und keine `id`; gekostet hat
+    das einen roten `backend-postgres`-Job. Ein Schreibtest in `test_migrations_postgres.py`
+    hält es jetzt fest.
+17. **Ein Modulname im Backend darf kein installiertes Paket verdecken.** `backend/coverage.py`
     hätte das PyPI-Paket `coverage` (Abhängigkeit von `pytest-cov`) verdeckt, sobald jemand das
     ergänzt — auch wenn `coverage` zum Entscheidungszeitpunkt nicht installiert war. Deshalb
     heißt die Datei `coverage_model.py`.

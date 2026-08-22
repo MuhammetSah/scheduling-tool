@@ -66,6 +66,7 @@ BASELINE_TABELLEN = {
 ALLE_MIGRATIONEN_TABELLEN = (BASELINE_TABELLEN | {
     'login_attempts', 'employee_availability',
     'business_hours', 'business_hours_exceptions', 'coverage_requirements',
+    'settings',
 }) - {
     # 0010 entfernt sie wieder. Nach 0001 gibt es sie, am Ende nicht mehr -
     # deshalb steht sie oben in BASELINE_TABELLEN und hier in der Gegenmenge,
@@ -1193,3 +1194,40 @@ def test_0010_stellt_beim_rollback_eine_leere_tabelle_her(fresh_db):
         connection.close()
 
     assert anzahl == 0
+
+
+# ---------- 0011_settings ----------
+
+
+def test_0011_legt_die_einstellungstabelle_an(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        spalten = {zeile[1] for zeile in connection.execute('PRAGMA table_info(settings)')}
+    finally:
+        connection.close()
+
+    # id ist Pflicht, nicht Zierde: die Dialektschicht haengt an jedes INSERT
+    # ein RETURNING id an, und eine Tabelle ohne die Spalte ist auf Postgres
+    # nicht beschreibbar. Auf SQLite faellt das nicht auf - deshalb steht es
+    # hier als Erwartung.
+    assert spalten == {'id', 'name', 'value'}
+
+
+def test_0011_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    zurueck_bis(migrations, '0011_settings')
+
+    connection = sqlite3.connect(db_file)
+    try:
+        tabellen = {zeile[0] for zeile in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        connection.close()
+    assert 'settings' not in tabellen
+
+    assert '0011_settings' in migrations.apply_pending()

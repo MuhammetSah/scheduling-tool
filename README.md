@@ -220,7 +220,19 @@ Two things about the calculation are easy to get wrong:
 
 Working time is counted net of breaks, as everywhere since [Breaks and net working time](#breaks-and-net-working-time).
 
-**Known gap: public holidays are counted as working days**, because the tool has no holiday calendar yet. They should shrink the denominator — over 24 weeks the count runs roughly three percent high, which makes the check too *lenient*: it can miss an excess, never invent one. Worth naming, because that is the more uncomfortable direction of the two.
+**Public holidays drop out of the denominator once a federal state is selected** (see [Public holidays](#public-holidays)). Without one the tool knows no holidays, counts them as working days, and the check is correspondingly too *lenient* — it can miss an excess, never invent one. Worth naming, because that is the more uncomfortable direction of the two.
+
+### Public holidays
+
+§ 9 forbids work on public holidays but **names none** — it uses the term and leaves the filling to state law. So the calendar is a table per federal state, and `backend/holidays.py` is that table: the nine nationwide holidays, ten regional ones, Easter by the anonymous Gregorian algorithm, and Buß- und Bettag as the Wednesday before 23 November. No library — Easter is twelve lines of arithmetic and the rest is a table, and the project built its own i18n and migration runner for the same reason.
+
+**The state is a setting**, `holiday_region` in the new `settings` table. **With none selected the tool knows no holidays** and behaves as it did before; there is deliberately no default, because guessing a state would be worse than having none.
+
+**Holidays are not closed automatically.** The opening hours decide that, as they always have — the tool cannot know whether the business falls under one of § 10's industry exemptions, and shutting a hospital or a restaurant on 3 October would simply be wrong. What the calendar does is mark and warn: dates show up in the calendar view, and assigning someone to one produces a non-blocking warning that states the situation and leaves the judgement where it belongs.
+
+**One place it sharpens a calculation.** [The eight-hour average](#the-eight-hour-average) counts holidays as working days when no state is selected, which makes it too lenient. With a state, they drop out of the denominator — over a 24-week window that is typically four or five days, and the allowance falls accordingly.
+
+**Not included: holidays below state level.** Corpus Christi is a holiday in Saxony and Thuringia only in predominantly Catholic municipalities, Assumption Day likewise in Bavaria, and the Augsburg Peace Festival only in the city of Augsburg. A state alone does not settle those, and a municipality list would be its own undertaking. The calendar is therefore incomplete in the lenient direction — it knows one holiday too few, never one too many. Anyone affected enters the day as an opening-hours exception, as before.
 
 ### Fairness (v1.3)
 
@@ -287,7 +299,6 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
-- A public-holiday calendar with per-state selection: it changes none of the rules above, but it would let HR see that a date is a holiday before publishing
 - Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
@@ -314,6 +325,7 @@ schichtplan-tool/
 │   ├── scheduler.py            # Stage 2: backtracking search (ordering + fairness)
 │   ├── block_planner.py        # Stage 1: demand bands + templates + windows -> blocks (no DB)
 │   ├── coverage_model.py       # Pure coverage-curve/gap math (weekday demand bands, no DB)
+│   ├── holidays.py             # Public holidays per federal state (no DB)
 │   ├── security.py             # Login throttling, backed by the login_attempts table
 │   ├── timeutil.py             # "Current month" in the operating timezone
 │   ├── migrations/              # Versioned schema migrations, 0001-0008 (see Operations below)
@@ -323,6 +335,7 @@ schichtplan-tool/
 │   ├── test_block_planner.py   # Unit tests for stage 1, including the trimming
 │   ├── test_scheduler_split_shifts.py  # Split shifts, daily cap, rest across days
 │   ├── test_working_time.py    # § 4 break thresholds and net working time
+│   ├── test_holidays.py        # The holiday table, Easter, and Buß- und Bettag
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
@@ -444,7 +457,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)). To manage by hand:
 
 ```bash
 cd backend
@@ -513,6 +526,9 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | GET    | `/business-hours/exceptions`      | List one-off date exceptions to the weekday rule (HR)                |
 | POST   | `/business-hours/exceptions`      | Add an exception for one date `{date, open_time, close_time, closed, label}` (HR) |
 | DELETE | `/business-hours/exceptions/<date>` | Remove a date's exception, reverting it to the weekday rule (HR)   |
+| GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
+| PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
+| GET    | `/holiday-regions`                | The federal states to choose from                                    |
 | GET    | `/coverage-requirements`          | List all coverage bands, every weekday (HR)                          |
 | PUT    | `/coverage-requirements`          | Replace the full set of coverage bands at once; rejects a band that overlaps another on the same weekday or falls outside that weekday's opening hours (HR) |
 | POST   | `/schedules/generate`            | Generate (or regenerate) a month's schedule `{year, month}`      |
@@ -527,7 +543,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (327 tests at the time of writing — `cd backend && pytest` prints the current number; 32 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (372 tests at the time of writing — `cd backend && pytest` prints the current number; 33 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

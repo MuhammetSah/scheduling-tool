@@ -730,6 +730,21 @@ button.btn-small {
    oder auf ein Arbeitszeitfenster zugeschnittene Bloecke derselben Vorlage.
    Ab der zweiten Gruppe eine Trennlinie, damit erkennbar bleibt, welche
    Personen zu welcher Zeitangabe gehoeren. */
+/* Gesetzlicher Feiertag - Kennzeichnung, keine Regel. Zurueckhaltend, weil das
+   Tool nicht weiss, ob der Betrieb unter eine Ausnahme des Paragraph 10 faellt. */
+.calendar-day-holiday {
+  background: rgba(180, 83, 9, 0.06);
+}
+
+.calendar-holiday {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #b45309;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cell-time-group + .cell-time-group {
   margin-top: 0.4rem;
   padding-top: 0.4rem;

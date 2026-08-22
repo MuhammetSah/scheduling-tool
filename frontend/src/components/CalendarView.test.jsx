@@ -77,3 +77,54 @@ describe('CalendarView mit mehreren Zeitpaaren an einem Tag', () => {
     expect(container.querySelectorAll('.calendar-person')).toHaveLength(2)
   })
 })
+
+describe('CalendarView mit Feiertagen', () => {
+  it('kennzeichnet einen Feiertag mit seinem Namen', () => {
+    const { container } = render(
+      <LanguageProvider>
+        <CalendarView
+          schedule={{
+            year: 2026, month: 10, assignments: [],
+            holidays: [{ date: '2026-10-03', name: 'Tag der Deutschen Einheit' }],
+          }}
+          shiftTypes={[]}
+          highlightEmployeeId={null}
+        />
+      </LanguageProvider>
+    )
+
+    expect(container.querySelectorAll('.calendar-day-holiday')).toHaveLength(1)
+    expect(container.textContent).toContain('Tag der Deutschen Einheit')
+  })
+
+  it('kennzeichnet nichts, wenn kein Bundesland gewaehlt ist', () => {
+    // Die Gegenprobe: ohne Auswahl liefert die API eine leere Liste, und der
+    // Kalender darf dann keinen Tag hervorheben.
+    const { container } = render(
+      <LanguageProvider>
+        <CalendarView
+          schedule={{ year: 2026, month: 10, assignments: [], holidays: [] }}
+          shiftTypes={[]}
+          highlightEmployeeId={null}
+        />
+      </LanguageProvider>
+    )
+
+    expect(container.querySelectorAll('.calendar-day-holiday')).toHaveLength(0)
+  })
+
+  it('kommt ohne das Feld zurecht', () => {
+    // Die Ansicht eines Mitarbeiters bekommt holidays gar nicht.
+    const { container } = render(
+      <LanguageProvider>
+        <CalendarView
+          schedule={{ year: 2026, month: 10, assignments: [] }}
+          shiftTypes={[]}
+          highlightEmployeeId={null}
+        />
+      </LanguageProvider>
+    )
+
+    expect(container.querySelectorAll('.calendar-day-holiday')).toHaveLength(0)
+  })
+})

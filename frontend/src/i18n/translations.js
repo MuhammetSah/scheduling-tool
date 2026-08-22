@@ -196,6 +196,11 @@ const de = {
   },
 
   businessHours: {
+    regionTitle: 'Gesetzliche Feiertage',
+    regionLabel: 'Bundesland',
+    regionNone: '— keines gewählt —',
+    regionSaved: 'Bundesland gespeichert',
+    regionHint: 'Bestimmt, welche Tage als gesetzliche Feiertage gelten. Ohne Auswahl kennt das Tool keine. Feiertage werden nicht automatisch geschlossen — das entscheiden die Öffnungszeiten, weil nur du weißt, ob der Betrieb unter eine Ausnahme des § 10 ArbZG fällt. Regionale Feiertage unterhalb der Landesebene (etwa Fronleichnam in katholischen Gemeinden Sachsens) sind nicht enthalten; trage sie als Ausnahme ein.',
     title: 'Öffnungszeiten',
     openLabel: 'Öffnet',
     closeLabel: 'Schließt',
@@ -227,7 +232,7 @@ const de = {
   averageHours: {
     title: 'Achtstundenschnitt überschritten',
     entry: '{name}: {average} Std. je Werktag im Schnitt — {worked} von {allowed} Std. in den letzten 24 Wochen',
-    hint: 'Zehn Stunden am Tag sind zulässig, solange der Schnitt über 24 Wochen bei acht Stunden je Werktag bleibt (§ 3 ArbZG). Feiertage sind dabei nicht berücksichtigt, die Rechnung ist also eher nachsichtig.',
+    hint: 'Zehn Stunden am Tag sind zulässig, solange der Schnitt über 24 Wochen bei acht Stunden je Werktag bleibt (§ 3 ArbZG). Feiertage zählen nicht als Werktage, sobald unter „Öffnungszeiten“ ein Bundesland gewählt ist — ohne Auswahl zählen sie mit, und die Rechnung fällt eher nachsichtig aus.',
   },
   coverageGaps: {
     title: 'Offene Deckungslücken',
@@ -513,6 +518,11 @@ const en = {
   },
 
   businessHours: {
+    regionTitle: 'Public holidays',
+    regionLabel: 'Federal state',
+    regionNone: '— none selected —',
+    regionSaved: 'Federal state saved',
+    regionHint: 'Decides which dates count as public holidays. With none selected the tool knows none. Holidays are not closed automatically — the opening hours decide that, because only you know whether the business falls under an exemption in § 10 ArbZG. Holidays below state level (Corpus Christi in Catholic municipalities of Saxony, for instance) are not included; enter those as an exception.',
     title: 'Business Hours',
     openLabel: 'Opens',
     closeLabel: 'Closes',
@@ -544,7 +554,7 @@ const en = {
   averageHours: {
     title: 'Eight-hour average exceeded',
     entry: '{name}: {average}h per working day on average — {worked} of {allowed}h over the last 24 weeks',
-    hint: 'Ten-hour days are lawful as long as the average over 24 weeks stays at eight hours per working day (§ 3 ArbZG). Public holidays are not accounted for, so this count errs on the lenient side.',
+    hint: 'Ten-hour days are lawful as long as the average over 24 weeks stays at eight hours per working day (§ 3 ArbZG). Public holidays stop counting as working days once a federal state is selected under “Opening hours” — without one they count, and the figure errs on the lenient side.',
   },
   coverageGaps: {
     title: 'Open Coverage Gaps',
