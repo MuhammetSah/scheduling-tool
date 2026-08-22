@@ -126,6 +126,52 @@ def shift_duration_minutes(start_time, end_time):
     return int((end - start).total_seconds() // 60)
 
 
+# § 4 ArbZG, resolved onto the span rather than onto working time.
+#
+# The law measures the break against the *working* time, and working time is
+# the span minus the break - so read literally the rule chases its own tail: a
+# 6:30 span is 6:30 of work without a break, which is "more than six hours" and
+# demands 30 minutes, which brings the work down to exactly 6:00, which demands
+# nothing at all. Resolved by asking which break is sufficient for the working
+# time it itself produces, and taking the smallest such break.
+#
+# On the span that lands on 6:00 and 9:30 - note 9:30, not 9:00. At a 9:30 span
+# a 30-minute break still leaves exactly nine hours, and nine hours is not
+# "more than nine"; only from 9:31 does 30 minutes stop being enough. Applying
+# the law's own numbers directly to the span is the obvious mistake here.
+BREAK_THRESHOLDS = ((6 * 60, 0), (9 * 60 + 30, 30))
+LONG_SHIFT_BREAK_MINUTES = 45
+
+
+def legal_break_minutes(duration_minutes):
+    """The shortest break § 4 ArbZG allows for a block of this span."""
+    if duration_minutes is None:
+        return 0
+    for limit, minutes in BREAK_THRESHOLDS:
+        if duration_minutes <= limit:
+            return minutes
+    return LONG_SHIFT_BREAK_MINUTES
+
+
+def net_working_minutes(duration_minutes, break_minutes):
+    """Working time in the sense of § 2 Abs. 1 ArbZG: the span without the break.
+
+    `break_minutes` None means "not separately agreed", which reads as the
+    legal minimum for this span - the law requires that break, so a plan that
+    did not subtract it would be claiming someone works eight hours straight
+    through. A stored value wins, including a zero: that is HR saying
+    something, and constraint_warnings() is where it gets questioned, not here.
+
+    None duration in, None out - same backward compatibility as
+    duration_minutes in build_slots(): a caller that only ever dealt in shift
+    counts has no hours to subtract from, and gets nothing to enforce.
+    """
+    if duration_minutes is None:
+        return None
+    taken = legal_break_minutes(duration_minutes) if break_minutes is None else break_minutes
+    return max(0, duration_minutes - taken)
+
+
 def shift_datetimes(iso_date, start_time, end_time):
     """The (start, end) datetimes of a shift on a given calendar date.
 
