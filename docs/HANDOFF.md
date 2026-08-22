@@ -26,12 +26,12 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 | | |
 |---|---|
-| `main` | `8116e63` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11, #12) gemergt. Etappe 2 und Etappe 3 sind **noch nicht** gemergt |
-| Branch-Situation | Zwei offene, gestapelte Branches. `etappe-2-individuelle-zeiten` (ab `main`, PR #13, **offen**) — Etappe 2 lokal abgeschlossen, Abschluss-Review und Merge stehen aus. Darauf aufbauend `etappe-3-oeffnungszeiten-bedarf` (Draft-PR #14, **offen**): das Schema von Etappe 3 baut auf Migration `0005` aus Etappe 2 auf, deshalb stapelt der Branch statt direkt ab `main` zu verzweigen. Löst sich mit dem Merge von #13 von selbst auf |
-| Aktueller Branch | `etappe-3-oeffnungszeiten-bedarf`, HEAD `d392583` — Etappe 3 lokal abgeschlossen, inklusive Dokumentation |
-| Testsuite | 188 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu erstmals eine Frontend-Testsuite (Vitest + Testing Library), 5 Tests |
-| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (der `frontend`-Job führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `d392583`. Ein kleiner Nachtrag-Commit (Korrektur eines veralteten Commit-Hashs in dieser Tabelle) läuft zum Zeitpunkt dieses Standes noch durch die eigene CI |
-| Migrationen | `0001`–`0007` lokal angewandt und rundlauffest (up → down → up geprüft). In `main` stecken bislang nur `0001`–`0004` (Etappe 0 und 1); `0004` war laut Etappe-1-Handoff beim nächsten Deploy fällig, der tatsächliche Produktionsstand wurde in dieser Sitzung nicht neu geprüft. `0005` (Etappe 2) und `0006`/`0007` (Etappe 3) liegen noch auf den offenen PRs #13/#14 und erreichen Produktion erst mit deren Merge |
+| `main` | `12b73ba` — Etappen 0 bis 3 gemergt (PR #9, #10, #11, #12, #13, #14) und **in Produktion deployt** |
+| Branch-Situation | Keine offenen Branches. Beide gestapelten PRs sind gemergt: #13 (Etappe 2) am 22.08. 12:15, #14 (Etappe 3) am 22.08. 12:16. Etappe 4 beginnt frisch ab `main` |
+| Aktueller Branch | keiner — `main` ist der Stand |
+| Testsuite | 196 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 5 Frontend-Tests (Vitest + Testing Library) |
+| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
+| Migrationen | `0001`–`0007`, **alle in Produktion angewandt**. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -289,6 +289,9 @@ Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante
 
 ## Offen — liegt beim Nutzer
 
+**Erledigt am 22.08.2026:** Etappe 2 und 3 sind gemergt und deployt, alle Migrationen
+sind in Produktion angewandt. Was hier steht, ist der verbliebene Rest.
+
 - **Postgres läuft am 07.09.2026 ab.** Kostenloser Plan. Entscheidung nötig: bezahlter Plan,
   Umzug, oder bewusster Datenverlust. Datenbestand ist klein (3 Mitarbeiter, 62 Zuweisungen),
   also kein Notfall, aber ein Termin.
@@ -296,8 +299,14 @@ Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante
 - **Datenbankpasswort wurde in einem Chatverlauf offengelegt** und sollte getauscht werden.
   Entschärft dadurch, dass externer Zugriff nur von einer IP erlaubt ist und die Instanz
   ohnehin am 07.09. verschwindet.
-- **Render-Startbefehl angleichen** (optional): Dashboard → Settings → Start Command auf
-  `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --threads 4 --timeout 60`
+- **Render-Startbefehl angleichen** (optional, aber besser begründet als bisher): die Logs vom
+  22.08. zeigen, was tatsächlich läuft — `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT`,
+  ohne `--preload`, ohne `--threads`. Render setzt zusätzlich `WEB_CONCURRENCY=1`. Der Dienst
+  läuft also mit **einem** Worker; das ist der Grund, warum das Migrations-Rennen bisher nie
+  auftrat, und zugleich der Grund, warum `--preload` derzeit nichts schützt. Solange es bei
+  einem Worker bleibt, ist das harmlos. Wird je auf mehrere erhöht, **muss** `--preload` in den
+  Dashboard-Befehl, sonst greift genau die Race, gegen die `render.yaml` es vorsieht:
+  `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --preload --threads 4 --timeout 60`
 - **`pg_dump` fehlt**: `winget install --id PostgreSQL.PostgreSQL.18` (Version 18, passend zum Server)
 
 ## Zurückgestellte Befunde
