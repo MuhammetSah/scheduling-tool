@@ -245,18 +245,6 @@ TRANSLATIONS = {
         'de': 'Schichtart gelöscht',
         'en': 'Shift type deleted',
     },
-    'requirements_length': {
-        'de': 'Der Bedarf muss genau 7 Einträge enthalten (Montag bis Sonntag)',
-        'en': 'Requirements must contain exactly 7 entries (Monday through Sunday)',
-    },
-    'requirements_must_be_int': {
-        'de': 'Der Personalbedarf muss für jeden Wochentag eine ganze Zahl sein',
-        'en': 'Staffing needs must be a whole number for every weekday',
-    },
-    'requirements_must_not_be_negative': {
-        'de': 'Der benötigte Personalbedarf darf nicht negativ sein',
-        'en': 'Required staffing must not be negative',
-    },
 
     # ---- schedule generation ----
     'year_month_required': {

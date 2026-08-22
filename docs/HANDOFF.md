@@ -24,14 +24,13 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Etappen 0 bis 4, 5a und 5b sind gemergt, deployt und dokumentiert,
-es gibt keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün.
+Es ist nichts halb fertig. Etappen 0 bis 4, 5a, 5b und 5e sind gemergt, deployt und
+dokumentiert, es gibt keine offenen Branches und keine offenen Pull Requests.
 
 Der nächste Schritt ist eines der offenen Teilstücke — siehe den Abschnitt „Etappe 5" weiter
-unten. **5c** (Achtstundenschnitt, hängt an 5a) und **5d** (Feiertagskalender) sind beide
-vorbereitet: die Entscheidungen dazu sind gefallen und stehen dort. Daneben liegen die vier
-nicht-rechtlichen Teile: `shift_requirements` entfernen, Veröffentlichen-Workflow, Audit-Log,
-Exporte, DSGVO.
+unten. **5c** (Achtstundenschnitt) und **5d** (Feiertagskalender) sind beide vorbereitet: die
+Entscheidungen dazu sind gefallen und stehen dort. Daneben liegen Veröffentlichen-Workflow,
+Audit-Log, Exporte und DSGVO.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -46,9 +45,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | `main` | `a6e06e2` — Etappen 0 bis 4, 5a und 5b gemergt und deployt (PR #16, #17, #18); Render-Deploy `dep-da5166ht0dsc73c3d1i0` ist `live`, die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Die Etappen-Branches sind nach dem Merge lokal und remote gelöscht |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 316 passed / 31 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 322 passed / 32 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0009`, **alle in Produktion angewandt** — `0005` bis `0007` mit den Deploys von #13 und #14, `0008` mit #16, `0009` mit #17. Nach jedem Deploy antwortet die API mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar |
+| Migrationen | `0001`–`0010`. `0010_drop_shift_requirements` entfernt die alte Bedarfstabelle; ihr Inhalt lebt seit `0007` in `coverage_requirements` weiter |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -354,6 +353,7 @@ Auch das Arbeitszeitrecht allein zerfällt in drei:
 | **5b** | Höchstens sechs Tage in Folge, 15 freie Sonntage im Jahr | ✅ umgesetzt, siehe unten |
 | **5c** | Achtstundenschnitt nach § 3 Satz 2, rollierend über 24 Wochen, **gemeldet statt erzwungen** | offen, hängt an 5a |
 | **5d** | Feiertagskalender mit Bundeslandauswahl — beim Ausarbeiten von 5b herausgelöst, weil er keine Regel durchsetzt | offen |
+| **5e** | `shift_requirements` entfernen — das lose Ende aus Etappe 4 | ✅ umgesetzt, siehe unten |
 
 Zwei Entscheidungen dazu sind mit dem Nutzer bereits gefallen und gelten für 5b und 5c:
 
@@ -484,6 +484,40 @@ werden **nicht** automatisch geschlossen — das entscheiden weiterhin die Öffn
 
 Alle vier CI-Jobs grün. **Kein Browser-Durchlauf gefahren** — diese Etappe hat allerdings
 keine Oberfläche berührt, die Warnungen kommen fertig übersetzt aus dem Backend.
+
+## Etappe 5e — die alte Bedarfsquelle entfernt
+
+Spec: [`docs/superpowers/specs/2026-08-22-etappe-5e-bedarfsquelle-design.md`](superpowers/specs/2026-08-22-etappe-5e-bedarfsquelle-design.md)
+
+Aufräumen, kein Nutzenversprechen an HR. `shift_requirements` wurde seit Etappe 4 geschrieben
+und gespeichert, aber von nichts mehr gelesen, was den Plan beeinflusst; die übergeordnete Spec
+sah die Entfernung ausdrücklich „erst nach Etappe 4" vor.
+
+Weg sind: die Tabelle (Migration `0010`), `replace_shift_requirements()`, die drei
+`requirements_*`-i18n-Schlüssel, das Feld in beiden Serialisierungen und im Frontend-Payload.
+
+**`build_slots()` bleibt** — sie liest die Tabelle gar nicht, sondern erwartet die Zahlen im
+übergebenen Dict. Zwei Aufrufer bleiben: der Benchmark als Vergleichsbasis der Etappe-4-
+Umstellung, und die 23 Bestandstests. Dass sie damit auf keinem Produktionspfad mehr steht,
+steht jetzt in ihrem Docstring.
+
+**`requirements` im Rumpf wird ignoriert, nicht abgelehnt.** Ein `400` wäre die strengere
+Lesart, bräche aber jeden Aufrufer, der noch die alte Form schickt, ohne dass er etwas falsch
+macht.
+
+Drei Dinge, die beim Umsetzen auffielen:
+
+- **`0007` bleibt unangetastet.** Sie liest `shift_requirements` und ist Geschichte. Auf einer
+  frischen Datenbank läuft die Kette `0001` → `0007` → `0010` durch: anlegen, nichts vorfinden,
+  entfernen.
+- **Ein Rundlauftest musste umgedreht werden.** `test_ableitung_laesst_bestehende_baender_
+  unangetastet` legte seine Testdaten an, nachdem alle Migrationen gelaufen waren — nach `0010`
+  gibt es die Tabelle dort nicht mehr. Es rollt jetzt erst bis `0007` zurück und legt die Daten
+  dann an, was ohnehin die wahrheitsgetreuere Anordnung ist.
+- **Kein eigenes `table_exists()`.** `table_columns()` liefert für eine fehlende Tabelle eine
+  leere Menge, und eine Tabelle ohne Spalten gibt es nicht. Ein zweiter Helfer wäre dieselbe
+  Frage in einer zweiten Fassung, samt der Postgres-Eigenheit mit `current_schema()`, die dort
+  schon gelöst ist.
 
 ## Arbeitsweise
 

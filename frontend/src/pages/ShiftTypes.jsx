@@ -8,12 +8,6 @@ const emptyForm = {
   start_time: '08:00',
   end_time: '16:00',
   color: '#0d9488',
-  // Der Planer liest diese Zahlen seit Etappe 4 nicht mehr - Bedarf wird ueber
-  // /coverage-requirements gepflegt. Sie bleiben trotzdem im Formular und im
-  // Payload: das Backend speichert sie weiter, und sie beim Speichern
-  // stillschweigend auf 0 zu setzen wuerde die Rueckfallebene zerstoeren, die
-  // die Spec bis nach Etappe 4 ausdruecklich erhalten wissen will.
-  requirements: [1, 1, 1, 1, 1, 1, 1],
 }
 
 function ShiftTypes({ setFlash }) {
@@ -40,13 +34,13 @@ function ShiftTypes({ setFlash }) {
   }
 
   function startEdit(st) {
-    setForm({ id: st.id, name: st.name, start_time: st.start_time, end_time: st.end_time, color: st.color, requirements: [...st.requirements] })
+    setForm({ id: st.id, name: st.name, start_time: st.start_time, end_time: st.end_time, color: st.color })
     setShowForm(true)
   }
 
   async function submitForm(e) {
     e.preventDefault()
-    const payload = { name: form.name, start_time: form.start_time, end_time: form.end_time, color: form.color, requirements: form.requirements }
+    const payload = { name: form.name, start_time: form.start_time, end_time: form.end_time, color: form.color }
     try {
       if (form.id) {
         await api.put(`/shift-types/${form.id}`, payload)
