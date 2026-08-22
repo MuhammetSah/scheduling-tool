@@ -75,14 +75,27 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
             }
 
             const dayAssignments = byDate.get(iso) || []
+            // Keyed on the hours as well as the template, not on the
+            // template alone: every template-less block of the day shares the
+            // id null, and since Etappe 4 a block trimmed to someone's
+            // availability window shares its template's id while running
+            // shorter hours. Either way one heading per distinct pair is the
+            // only honest rendering - the old key showed the first block's
+            // times above everyone in the group.
             const groups = new Map()
             for (const a of dayAssignments) {
-              if (!groups.has(a.shift_type_id)) groups.set(a.shift_type_id, [])
-              groups.get(a.shift_type_id).push(a)
+              const key = `${a.shift_type_id ?? 'free'}|${a.start_time}|${a.end_time}`
+              if (!groups.has(key)) groups.set(key, [])
+              groups.get(key).push(a)
             }
-            const orderedGroups = [...groups.entries()].sort(
-              (a, b) => (shiftOrder.get(a[0]) ?? 0) - (shiftOrder.get(b[0]) ?? 0)
-            )
+            // Template order first, then start time, so two groups of the same
+            // template keep a stable, readable order instead of depending on
+            // insertion.
+            const orderedGroups = [...groups.entries()].sort((a, b) => {
+              const orderDiff = (shiftOrder.get(a[1][0].shift_type_id) ?? 0)
+                - (shiftOrder.get(b[1][0].shift_type_id) ?? 0)
+              return orderDiff !== 0 ? orderDiff : a[1][0].start_time.localeCompare(b[1][0].start_time)
+            })
             const isWeekend = dayIndex >= 5
             const hasGap = dayAssignments.some(a => a.employee_id === null)
 
@@ -93,8 +106,8 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                   {hasGap && <span className="calendar-gap-dot" title={t('calendar.gapTitle')} />}
                 </div>
 
-                {orderedGroups.map(([shiftTypeId, slots]) => (
-                  <div key={shiftTypeId ?? 'free-block'} className="calendar-shift">
+                {orderedGroups.map(([groupKey, slots]) => (
+                  <div key={groupKey} className="calendar-shift">
                     <div className="calendar-shift-name">
                       {/* A block with no shift type of its own has neither a
                           name nor a color to show - fall back to the same
