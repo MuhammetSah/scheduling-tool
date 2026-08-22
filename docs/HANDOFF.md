@@ -24,12 +24,17 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Etappen 0 bis 4 und 5a sind gemergt, deployt und dokumentiert, es
-gibt keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün.
+Etappe 5b ist **fertig umgesetzt, aber weder gepusht noch gemergt.** Sie liegt vollständig auf
+dem Branch `etappe-5b-sonntage`, sieben Commits ab `e61c96b`. Die Suite ist grün (316 passed,
+31 übersprungen — Postgres-only).
 
-Der nächste Schritt ist **Etappe 5b oder 5c** — siehe den Abschnitt „Etappe 5" weiter unten.
-Sie sind unabhängig voneinander; 5c hängt an 5a und ist damit jetzt möglich. Beide beginnen
-mit einer eigenen Spec auf einem neuen Branch ab `main`, nach dem Muster der Etappen davor.
+**Der nächste Schritt ist ein Abschluss-Review dieser Etappe**, danach Push und Pull Request.
+Besonderes Augenmerk verdient `scheduling_history()` in `app.py`: der Generator liest damit
+erstmals Daten außerhalb seines Monats, und wenn die Abgrenzung falsch ist, bestraft der Planer
+Leute für Schichten, die er ihnen selbst gerade wegnimmt.
+
+Danach steht 5c an (Achtstundenschnitt, hängt an 5a), 5d (Feiertagskalender, siehe unten) oder
+einer der vier nicht-rechtlichen Teile von Etappe 5.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -41,12 +46,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `c74032a` — Etappen 0 bis 4 und 5a gemergt und deployt. Etappe 4 über PR #16 (17:28), Etappe 5a über PR #17 (18:29); Render-Deploy `dep-da4ukueq1p3s73ar5r60` ist `live`, die API antwortet mit 200 |
-| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Beide Etappen-Branches sind nach dem Merge lokal und remote gelöscht |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 291 passed / 31 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
+| `main` | `e61c96b` — Etappen 0 bis 4 und 5a gemergt und deployt. Etappe 4 über PR #16, Etappe 5a über PR #17; Render-Deploy `dep-da4ukueq1p3s73ar5r60` ist `live` |
+| Branch-Situation | **Ein offener Branch: `etappe-5b-sonntage`**, sieben Commits ab `e61c96b`, lokal, nicht gepusht. Keine offenen Pull Requests |
+| Aktueller Branch | `etappe-5b-sonntage` |
+| Testsuite | 316 passed / 31 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0009`, **alle in Produktion angewandt**. `0009_break_minutes` mit dem Deploy von #17; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. `0008_max_daily_hours` mit dem Deploy von #16; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
+| Migrationen | `0001`–`0009`, **alle in Produktion angewandt** — `0005` bis `0007` mit den Deploys von #13 und #14, `0008` mit #16, `0009` mit #17. Nach jedem Deploy antwortet die API mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -349,8 +354,9 @@ Auch das Arbeitszeitrecht allein zerfällt in drei:
 | Teil | Inhalt | Stand |
 |---|---|---|
 | **5a** | Ruhepausen nach § 4, Arbeitszeit netto statt brutto | ✅ umgesetzt, siehe unten |
-| **5b** | Sonn- und Feiertagsruhe: **eingebauter Feiertagskalender mit Bundeslandauswahl**, 15 freie Sonntage, Ersatzruhetag (2 bzw. 8 Wochen), höchstens sechs Tage in Folge | offen |
+| **5b** | Höchstens sechs Tage in Folge, 15 freie Sonntage im Jahr | ✅ umgesetzt, siehe unten |
 | **5c** | Achtstundenschnitt nach § 3 Satz 2, rollierend über 24 Wochen, **gemeldet statt erzwungen** | offen, hängt an 5a |
+| **5d** | Feiertagskalender mit Bundeslandauswahl — beim Ausarbeiten von 5b herausgelöst, weil er keine Regel durchsetzt | offen |
 
 Zwei Entscheidungen dazu sind mit dem Nutzer bereits gefallen und gelten für 5b und 5c:
 
@@ -427,6 +433,59 @@ Alle vier CI-Jobs grün, einschließlich `backend-postgres` — der einzige Ort,
 Rundlauf von `0009` gegen Postgres läuft.
 
 **Kein Browser-Durchlauf gefahren.** Die Oberfläche ist nur über die 18 Vitest-Tests belegt.
+
+## Etappe 5b — abgeschlossen, noch nicht gemergt
+
+Spec: [`docs/superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md`](superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md)
+Plan: [`docs/superpowers/plans/2026-08-22-etappe-5b-sonntage.md`](superpowers/plans/2026-08-22-etappe-5b-sonntage.md)
+Branch: `etappe-5b-sonntage`, **nicht gepusht und nicht gemergt**
+
+| Task | Stand | Commit |
+|---|---|---|
+| 1 Sechstageregel im Suchkern | ✅ | `2dc430e` |
+| 2 Sonntagsbudget im Suchkern | ✅ | `af2d4ee` |
+| 3 Vorgeschichte über den Monatsrand | ✅ | `6e4d2e0` |
+| 4 Warnungen auf dem Handkorrektur-Pfad | ✅ | `29029a1` |
+| 5 Dokumentation | ✅ | dieser Commit |
+
+**Kein Schemaeingriff** — die erste Etappe seit 0 ohne Migration. Beide Größen werden gerechnet.
+
+### Die drei Dinge, die man wissen muss
+
+**Die Sechstageregel ist strenger als § 11 Abs. 3.** Wer Montag bis Sonntag durcharbeitet und
+am Montag darauf frei hat, erfüllt die Norm — die Regel lehnt ihn trotzdem ab. Bewusst so: der
+Ersatzruhetag ist eine Bedingung über das *Fehlen* von Zuweisungen und lässt sich erst
+beurteilen, wenn der ganze Monat steht. Sechs Tage in Folge sind lokal prüfbar und decken
+sowohl das Zweiwochenfenster der Sonntage als auch das Achtwochenfenster der Feiertage ab.
+
+**Der Generator liest erstmals außerhalb seines Monats.** `scheduling_history()` in `app.py`
+lädt zwei Zahlen je Mitarbeiter. Die Falle dabei: `generate_schedule_route()` löscht die
+Zuweisungen des Monats erst *nach* dem Suchlauf, sie stehen beim Laden also noch in der
+Datenbank. Abgegrenzt wird deshalb über den **Datumsbereich**, nie über `schedule_id`.
+
+**Beide Regeln hängen daran, dass der Aufrufer die Felder mitgibt** (`max_consecutive_days`,
+`sundays_worked_in_year`) — genau wie `min_rest_hours`. Der erste Anlauf prüfte bedingungslos
+und riss sieben der 23 Bestandstests; die Regel des Projekts ist da eindeutig. Nebenbei war die
+bedingungslose Fassung auch teuer: die Suite lief 100 statt 42 Sekunden.
+
+### Herausgelöst: Etappe 5d — Feiertagskalender
+
+Der Nutzer hatte zunächst einen eingebauten Kalender mit Bundeslandauswahl für 5b gewählt. Beim
+Ausarbeiten zeigte sich, dass er **keine Regel durchsetzt**: § 11 Abs. 3 für Feiertage ist
+durch die Sechstageregel abgedeckt, § 9 wird über die Öffnungszeiten entschieden, und § 11
+Abs. 1 betrifft nur Sonntage. Was bleibt, ist Kennzeichnung und Warnung — echter Nutzen, aber
+Bewusstsein statt Regeldurchsetzung.
+
+**Für 5d gilt damit als entschieden:** eingebauter Kalender mit Bundeslandauswahl, bewegliche
+Feiertage über die Osterrechnung, regionale Sonderfälle unterhalb der Bundeslandebene
+(Fronleichnam in Teilen von Sachsen und Thüringen, Mariä Himmelfahrt in katholischen
+bayerischen Gemeinden, das Augsburger Friedensfest) ausdrücklich nicht abgedeckt. Feiertage
+werden **nicht** automatisch geschlossen — das entscheiden weiterhin die Öffnungszeiten.
+
+### Was vor dem Merge noch fehlt
+
+- Push, Pull Request, CI
+- Kein Browser-Durchlauf gefahren
 
 ## Arbeitsweise
 

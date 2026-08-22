@@ -58,3 +58,72 @@ def test_bestaetigtes_erzeugen_ueberschreibt(hr_client):
                             json={'year': 2026, 'month': 3, 'confirm': True})
 
     assert erneut.status_code == 201
+
+
+def test_zweimal_erzeugen_ergibt_zweimal_denselben_plan(hr_client):
+    """Die Vorgeschichte darf den eigenen Monat nicht mitzaehlen.
+
+    generate_schedule_route() loescht die Zuweisungen des Monats erst NACH dem
+    Suchlauf; beim Laden der Vorgeschichte stehen sie also noch in der
+    Datenbank. Wuerden sie mitgezaehlt, kuerzte der Planer jedem das
+    Sonntagsbudget um Schichten, die er ihm im selben Atemzug wegnimmt - und
+    der zweite Lauf fiele aermer aus als der erste.
+
+    Diskriminierend nur, weil der Bedarf Sonntage einschliesst und die eine
+    Person sie alle traegt: ohne Sonntagsschichten koennte die Vorgeschichte
+    gar nichts falsch machen. Die Sechstageregel greift hier ebenfalls - der
+    Bedarf laeuft ueber alle sieben Wochentage.
+    """
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00', 'requirements': [0] * 7,
+    })
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': wochentag, 'start_time': '08:00', 'end_time': '16:00',
+         'required_count': 1}
+        for wochentag in range(7)
+    ])
+
+    erster = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 3}).json
+    assert any(z['employee_id'] is not None for z in erster['assignments']), erster
+
+    zweiter = hr_client.post('/schedules/generate',
+                             json={'year': 2026, 'month': 3, 'confirm': True}).json
+
+    besetzt = lambda plan: sum(1 for z in plan['assignments'] if z['employee_id'] is not None)
+    assert besetzt(zweiter) == besetzt(erster)
+    assert zweiter['unfilled_count'] == erster['unfilled_count']
+
+
+def test_sonntage_aus_einem_anderen_monat_zaehlen_sehr_wohl(hr_client):
+    """Gegenprobe zum Test darueber.
+
+    Ohne sie waere eine Umsetzung gruen, die die Vorgeschichte einfach gar
+    nicht laedt. Anna arbeitet im Januar und Februar so viele Sonntage, dass
+    ihr Budget fuer das Jahr erschoepft ist - im Maerz darf sie an keinem
+    Sonntag mehr eingeplant werden.
+    """
+    from datetime import date
+
+    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00', 'requirements': [0] * 7,
+    }).json
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 6, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+
+    # 2026 hat 52 Sonntage, 37 duerfen gearbeitet werden. Januar und Februar
+    # allein haben nicht genug - deshalb werden die Zuweisungen ueber das ganze
+    # Jahr ausserhalb des Maerz gestreut, ueber die Slot-Route von Hand.
+    for monat in (1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12):
+        hr_client.post('/schedules/generate', json={'year': 2026, 'month': monat})
+
+    gearbeitet = 0
+    for monat in (1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12):
+        plan = hr_client.get(f'/schedules/2026/{monat}').json
+        gearbeitet += sum(1 for z in plan['assignments'] if z['employee_id'] is not None)
+
+    # Mehr als 37 Sonntage kann Anna im Jahr nicht bekommen - genau das ist die
+    # Aussage. Waere die Vorgeschichte nicht geladen, bekaeme sie jeden.
+    assert gearbeitet == 52 - 15, gearbeitet

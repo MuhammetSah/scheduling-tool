@@ -1299,3 +1299,156 @@ def test_die_tagesgrenze_der_handkorrektur_bindet_trotzdem(hr_client):
         })
 
     assert any('Höchstarbeitszeit' in w for w in antwort.json['warnings']), antwort.json
+
+
+# ---------- Etappe 5b: Sechstageregel und freie Sonntage ----------
+
+
+def _person_und_schicht(hr_client, **anna):
+    """Anna arbeitet dienstags regulaer nicht - so besetzt der Generator den
+    01.09.2026 nicht selbst und die Handkorrektur hat etwas zu zeigen."""
+    daten = {'name': 'Anna', 'unavailable_weekdays': [1]}
+    daten.update(anna)
+    person = hr_client.post('/employees', json=daten).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    }).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    return person, schicht
+
+
+def _besetze(hr_client, person, schicht, iso_datum):
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': iso_datum, 'shift_type_id': schicht['id'],
+    }).json
+    return hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': person['id']})
+
+
+def test_der_siebte_tag_in_folge_warnt(hr_client):
+    """Paragraph 11 Abs. 3 ArbZG ueber die Sechstageregel.
+
+    Der 01.09.2026 ist ein Dienstag. Anna arbeitet vom 01. bis zum 06., der
+    siebte Tag meldet.
+    """
+    person, schicht = _person_und_schicht(hr_client)
+    for tag in range(1, 7):
+        _besetze(hr_client, person, schicht, f'2026-09-{tag:02d}')
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-07')
+
+    assert antwort.status_code == 200, antwort.json
+    assert any('in Folge' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_sechs_tage_in_folge_warnen_nicht(hr_client):
+    """Gegenprobe: ohne sie waere eine Umsetzung gruen, die ab dem zweiten Tag
+    meldet."""
+    person, schicht = _person_und_schicht(hr_client)
+    for tag in range(1, 6):
+        _besetze(hr_client, person, schicht, f'2026-09-{tag:02d}')
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-06')
+
+    assert not any('in Folge' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_die_kette_wird_auch_nach_vorn_gezaehlt(hr_client):
+    """Der Unterschied zum Generator, und der Grund, warum dieser Pfad strenger ist.
+
+    Zuerst werden der 02. bis 07. besetzt, danach der 01. Zum Zeitpunkt der
+    letzten Zuweisung liegen alle sechs anderen Tage in der Zukunft - wer die
+    Kette nur nach hinten zaehlt, sieht eine Kette der Laenge eins und meldet
+    nichts.
+    """
+    person, schicht = _person_und_schicht(hr_client)
+    for tag in range(2, 8):
+        _besetze(hr_client, person, schicht, f'2026-09-{tag:02d}')
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-01')
+
+    assert any('in Folge' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_eine_luecke_setzt_die_kette_auch_hier_zurueck(hr_client):
+    """Gegenprobe zur Zaehlung in beide Richtungen: mit einem freien Tag in der
+    Mitte sind sieben Tage zwei kurze Ketten."""
+    person, schicht = _person_und_schicht(hr_client)
+    for tag in (1, 2, 3, 5, 6, 7):
+        _besetze(hr_client, person, schicht, f'2026-09-{tag:02d}')
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-08')
+
+    assert not any('in Folge' in w for w in antwort.json['warnings']), antwort.json
+
+
+def _sonntage_2026(anzahl):
+    """Die ersten `anzahl` Sonntage des Jahres 2026, ohne den September."""
+    from datetime import date, timedelta
+
+    tag = date(2026, 1, 1)
+    while tag.weekday() != 6:
+        tag += timedelta(days=1)
+
+    gesammelt = []
+    while len(gesammelt) < anzahl:
+        if tag.month != 9:
+            gesammelt.append(tag.isoformat())
+        tag += timedelta(days=7)
+    return gesammelt
+
+
+def _sonntage_vorbelegen(hr_client, person_id, schicht_id, daten):
+    """Vorgeschichte direkt in der Datenbank anlegen.
+
+    Ueber die API waeren das 37 Plaene und ebenso viele Plaetze. Geprueft wird
+    hier die Warnung, nicht der Weg, auf dem die Zeilen entstanden sind.
+    """
+    from app import get_db
+
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 1, 'generated')")
+        schedule_id = cursor.lastrowid
+        for index, iso in enumerate(daten):
+            cursor.execute(
+                'INSERT INTO shift_assignments '
+                '(schedule_id, date, shift_type_id, slot_index, employee_id) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (schedule_id, iso, schicht_id, index, person_id))
+        connection.commit()
+
+
+def test_ausgeschoepftes_sonntagsbudget_warnt(hr_client):
+    """Paragraph 11 Abs. 1 ArbZG: 2026 hat 52 Sonntage, 15 muessen frei bleiben.
+
+    Mit 37 bereits gearbeiteten waere der 38. einer zu viel.
+    """
+    person, schicht = _person_und_schicht(hr_client)
+    _sonntage_vorbelegen(hr_client, person['id'], schicht['id'], _sonntage_2026(37))
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-06')
+
+    assert antwort.status_code == 200, antwort.json
+    assert any('Sonntage' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_ein_sonntag_unter_dem_budget_warnt_nicht(hr_client):
+    """Gegenprobe: mit 36 bleibt genau die 15. freie Sonntag uebrig."""
+    person, schicht = _person_und_schicht(hr_client)
+    _sonntage_vorbelegen(hr_client, person['id'], schicht['id'], _sonntage_2026(36))
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-06')
+
+    assert not any('Sonntage' in w for w in antwort.json['warnings']), antwort.json
+
+
+def test_ein_werktag_beruehrt_das_sonntagsbudget_nicht(hr_client):
+    """Der 07.09.2026 ist ein Montag - trotz erschoepftem Budget keine Meldung."""
+    person, schicht = _person_und_schicht(hr_client)
+    _sonntage_vorbelegen(hr_client, person['id'], schicht['id'], _sonntage_2026(37))
+
+    antwort = _besetze(hr_client, person, schicht, '2026-09-07')
+
+    assert not any('Sonntage' in w for w in antwort.json['warnings']), antwort.json
