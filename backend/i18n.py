@@ -379,6 +379,18 @@ TRANSLATIONS = {
         'de': '{name} hätte damit nur noch {free} freie Sonntage in {year}; § 11 Abs. 1 ArbZG verlangt mindestens 15',
         'en': '{name} would be left with only {free} free Sundays in {year}; § 11 Abs. 1 ArbZG requires at least 15',
     },
+    'unknown_setting': {
+        'de': 'Unbekannte Einstellung: {names}',
+        'en': 'Unknown setting: {names}',
+    },
+    'unknown_holiday_region': {
+        'de': 'Unbekanntes Bundesland',
+        'en': 'Unknown federal state',
+    },
+    'warn_public_holiday': {
+        'de': '{date} ist ein gesetzlicher Feiertag ({name}); nach § 9 ArbZG darf dort nur gearbeitet werden, wenn der Betrieb unter eine Ausnahme des § 10 fällt',
+        'en': '{date} is a public holiday ({name}); under § 9 ArbZG work is only allowed there if the business falls under an exemption in § 10',
+    },
     'warn_break_below_minimum': {
         'de': '{name} hätte bei {hours:.1f} Std. nur {minutes} Min. Pause; nach § 4 ArbZG sind mindestens {required} Min. vorgeschrieben',
         'en': '{name} would get only {minutes} min of break for {hours:.1f}h; § 4 ArbZG requires at least {required} min',

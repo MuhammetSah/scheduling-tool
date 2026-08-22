@@ -18,15 +18,25 @@ function BusinessHours({ setFlash }) {
   const [hours, setHours] = useState([])
   const [exceptions, setExceptions] = useState([])
   const [excForm, setExcForm] = useState(emptyExceptionForm)
+  // The federal state whose public holidays apply. Lives here because it is a
+  // fact about the business as a whole, like the opening hours themselves.
+  // Empty means none picked - the tool then knows no holidays at all, which is
+  // a valid state and deliberately not defaulted to some state or other.
+  const [regions, setRegions] = useState([])
+  const [region, setRegion] = useState('')
 
   async function load() {
     try {
-      const [h, exc] = await Promise.all([
+      const [h, exc, moeglicheRegionen, settings] = await Promise.all([
         api.get('/business-hours'),
         api.get('/business-hours/exceptions'),
+        api.get('/holiday-regions'),
+        api.get('/settings'),
       ])
       setHours(h)
       setExceptions(exc)
+      setRegions(moeglicheRegionen)
+      setRegion(settings.holiday_region || '')
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }
@@ -94,8 +104,32 @@ function BusinessHours({ setFlash }) {
     return `${weekdayLabels[weekdayIndex]} ${d.toLocaleDateString(dateLocale, { day: '2-digit', month: '2-digit', year: 'numeric' })}`
   }
 
+  async function saveRegion(code) {
+    setRegion(code)
+    try {
+      await api.put('/settings', { holiday_region: code || null })
+      setFlash({ type: 'success', text: t('businessHours.regionSaved') })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   return (
     <>
+      <div className="panel">
+        <div className="panel-header">
+          <h2>{t('businessHours.regionTitle')}</h2>
+        </div>
+        <div className="field">
+          <label htmlFor="holiday-region">{t('businessHours.regionLabel')}</label>
+          <select id="holiday-region" value={region} onChange={e => saveRegion(e.target.value)}>
+            <option value="">{t('businessHours.regionNone')}</option>
+            {regions.map(r => <option key={r.code} value={r.code}>{r.name}</option>)}
+          </select>
+          <p className="hint">{t('businessHours.regionHint')}</p>
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel-header">
           <h2>{t('businessHours.title')}</h2>

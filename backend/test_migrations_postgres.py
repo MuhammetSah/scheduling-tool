@@ -1112,3 +1112,19 @@ def test_alte_bedarfstabelle_laesst_sich_zurueckrollen_und_danach_erneut_entfern
 
     assert '0010_drop_shift_requirements' in migrations.apply_pending()
     assert 'shift_requirements' not in tabellen(schema_url, schema)
+
+
+def test_einstellungstabelle_laesst_sich_zurueckrollen_und_erneut_anlegen(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0011_settings."""
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    assert 'settings' in tabellen(schema_url, schema)
+
+    while '0011_settings' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    assert 'settings' not in tabellen(schema_url, schema)
+
+    assert '0011_settings' in migrations.apply_pending()
+    assert 'settings' in tabellen(schema_url, schema)
