@@ -24,17 +24,12 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5a ist **fertig umgesetzt, aber weder gepusht noch gemergt.** Sie liegt vollständig auf
-dem Branch `etappe-5a-ruhepausen`, acht Commits ab `69fd9e8`. Die Suite ist grün (291 passed,
-31 übersprungen — Postgres-only), Frontend 18 Tests, Lint und Build sauber.
+Es ist nichts halb fertig. Etappen 0 bis 4 und 5a sind gemergt, deployt und dokumentiert, es
+gibt keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün.
 
-**Der nächste Schritt ist ein Abschluss-Review dieser Etappe**, danach Push und Pull Request.
-Besonderes Augenmerk verdient die Umstellung von brutto auf netto: sie lockert die Grenzen aus
-Etappe 1 und 4, ohne dass jemand etwas angefasst hat, und die Trennung von Anwesenheit und
-Arbeitszeit ist die Stelle, an der die Etappe schiefgehen kann.
-
-Danach steht Etappe 5b oder 5c an — siehe den Abschnitt „Etappe 5" weiter unten. Sie sind
-unabhängig voneinander; 5c hängt an 5a und ist damit jetzt möglich.
+Der nächste Schritt ist **Etappe 5b oder 5c** — siehe den Abschnitt „Etappe 5" weiter unten.
+Sie sind unabhängig voneinander; 5c hängt an 5a und ist damit jetzt möglich. Beide beginnen
+mit einer eigenen Spec auf einem neuen Branch ab `main`, nach dem Muster der Etappen davor.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -46,12 +41,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `69fd9e8` — Etappen 0 bis 4 gemergt und deployt. Etappe 4 über PR #16 am 22.08. 17:28, Render-Deploy `dep-da4toioae00c73aslg5g` ist `live` |
-| Branch-Situation | **Ein offener Branch: `etappe-5a-ruhepausen`**, acht Commits ab `69fd9e8`, lokal, nicht gepusht. Keine offenen Pull Requests |
-| Aktueller Branch | `etappe-5a-ruhepausen` |
+| `main` | `c74032a` — Etappen 0 bis 4 und 5a gemergt und deployt. Etappe 4 über PR #16 (17:28), Etappe 5a über PR #17 (18:29); Render-Deploy `dep-da4ukueq1p3s73ar5r60` ist `live`, die API antwortet mit 200 |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Beide Etappen-Branches sind nach dem Merge lokal und remote gelöscht |
+| Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 291 passed / 31 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0008` **in Produktion angewandt**, `0009_break_minutes` liegt auf dem Branch und ist noch nicht deployt. `0008_max_daily_hours` mit dem Deploy von #16; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
+| Migrationen | `0001`–`0009`, **alle in Produktion angewandt**. `0009_break_minutes` mit dem Deploy von #17; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. `0008_max_daily_hours` mit dem Deploy von #16; die API antwortet danach mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -374,11 +369,11 @@ einen Monat. `constraint_warnings()` fragt dagegen bewusst ohne `schedule_id`-Fi
 sieht über Monatsgrenzen. Für 5b muss die Vorgeschichte je Mitarbeiter in `app.py` geladen und
 dem Planer mitgegeben werden — das ist der strukturelle Kern dieser Teilaufgabe.
 
-## Etappe 5a — abgeschlossen, noch nicht gemergt
+## Etappe 5a — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md`](superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md)
 Plan: [`docs/superpowers/plans/2026-08-22-etappe-5a-ruhepausen.md`](superpowers/plans/2026-08-22-etappe-5a-ruhepausen.md)
-Branch: `etappe-5a-ruhepausen`, **nicht gepusht und nicht gemergt**
+PR #17, acht Commits, gemergt am 22.08. 18:29 als `c74032a`, Deploy live
 
 | Task | Stand | Commit |
 |---|---|---|
@@ -387,7 +382,8 @@ Branch: `etappe-5a-ruhepausen`, **nicht gepusht und nicht gemergt**
 | 3 Netto-Arbeitszeit im Suchkern | ✅ | `bdc66f3` |
 | 4 Netto und Pausenwarnung auf dem Handkorrektur-Pfad | ✅ | `8a9f7e8` |
 | 5 Frontend | ✅ | `3963d3b` |
-| 6 Dokumentation | ✅ | dieser Commit |
+| 6 Dokumentation | ✅ | `ec85081` |
+| Merge nach `main` | ✅ PR #17 | `c74032a` |
 
 ### Die zwei Dinge, die man wissen muss
 
@@ -425,10 +421,12 @@ nahm an, `0008` sei die letzte Migration — derselbe Fehler, den `0007` in Etap
 ihn ein drittes Mal zu machen, rollen alle drei über den gemeinsamen Helfer `zurueck_bis()`
 zurück, bis ihre eigene Version an der Reihe war.
 
-### Was vor dem Merge noch fehlt
+### Zum Merge
 
-- Push, Pull Request, CI — insbesondere `backend-postgres` für den Rundlauf von `0009`
-- Kein Browser-Durchlauf gefahren
+Alle vier CI-Jobs grün, einschließlich `backend-postgres` — der einzige Ort, an dem der
+Rundlauf von `0009` gegen Postgres läuft.
+
+**Kein Browser-Durchlauf gefahren.** Die Oberfläche ist nur über die 18 Vitest-Tests belegt.
 
 ## Arbeitsweise
 
@@ -500,13 +498,21 @@ Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante
 behoben und gemergt (PR #15), und ein vollständiges Backup gezogen und geprüft. Was hier steht,
 ist der verbliebene Rest.
 
-### Der Termin
+### Die Datenbank läuft am 07.09.2026 ab — Entscheidung ist gefallen
 
-- **Die Postgres-Instanz läuft am 07.09.2026 ab** (`expiresAt`, per Render-API bestätigt).
-  Kostenloser Plan, Region Frankfurt, Version 18. Entscheidung nötig: bezahlter Plan, Umzug zu
-  einem anderen Anbieter, oder bewusster Datenverlust. **Ein geprüftes Backup existiert**
-  (siehe unten), der Verlust wäre also nicht endgültig — aber die laufende Anwendung verliert
-  ihre Datenbank und braucht dann eine neue.
+**Der Nutzer hat am 22.08.2026 entschieden: die Instanz darf ablaufen, die Datenbank wird neu
+aufgezogen.** Kein bezahlter Plan, kein Umzug des Bestands.
+
+Was daraus folgt:
+
+- Ab dem 07.09. hat die Anwendung keine Datenbank mehr und braucht eine neue. Render legt sie
+  nicht von selbst an; `DATABASE_URL` muss auf die neue Instanz zeigen.
+- Der Bestand ist **nicht** verloren, falls er doch gebraucht wird: das geprüfte Backup vom
+  22.08. liegt (siehe unten) und lässt sich zurückspielen. Nach der Entscheidung ist das aber
+  nicht der Plan.
+- Migrationen `0001`–`0009` laufen auf einer leeren neuen Datenbank von selbst durch, weil
+  `app.py` sie beim Modulimport anwendet. `0007_derive_coverage` findet dort nichts zum
+  Ableiten und tut nichts — das ist der Wächter in der Migration, kein Fehler.
 
 ### Das Backup — vorhanden und geprüft
 
@@ -546,10 +552,12 @@ Teil des Dumps.
 
 ### Zugangsdaten und Zugriff
 
-- **Datenbankpasswort wurde in einem Chatverlauf offengelegt** und sollte getauscht werden.
-  Entschärft dadurch, dass externer Zugriff nur von freigegebenen IPs erlaubt ist und die
-  Instanz ohnehin am 07.09. verschwindet. **Bei einem Umzug oder einem bezahlten Plan gehört es
-  rotiert.**
+- **Datenbankpasswort wurde in einem Chatverlauf offengelegt.** Mit der Entscheidung, die
+  Instanz ablaufen zu lassen, erledigt sich das für diese Datenbank von selbst: das Passwort
+  verschwindet am 07.09. mit ihr. Zwei Dinge bleiben und liegen beim Nutzer: die **neue**
+  Datenbank bekommt ein neues Passwort, nicht dasselbe wieder — und falls dasselbe Passwort
+  noch anderswo benutzt wird, gilt es dort weiter als offengelegt. Das kann nur der Nutzer
+  prüfen.
 - **IP-Freigabe an der Datenbank aufräumen.** Am 22.08. wurde eine aktuelle IP ergänzt, damit
   der Dump laufen konnte — der alte Eintrag `88.130.158.137/32` vom 08.08. war durch die
   Zwangstrennung des Anschlusses veraltet. Erst entfernen, wenn kein Dump mehr nötig ist.
