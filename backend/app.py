@@ -643,6 +643,32 @@ def parse_optional_hours(value, field_key):
     return value
 
 
+def parse_assignment_times(data):
+    """The optional start/end pair from a request body, validated as a pair.
+
+    Returns (start, end) with both set or both None. Raises ValueError with a
+    translated message otherwise - the caller turns that into a 400, the same
+    way replace_employee_constraints does.
+    """
+    start_time = data.get('start_time') or None
+    end_time = data.get('end_time') or None
+
+    if (start_time is None) != (end_time is None):
+        raise ValueError(t(g.lang, 'assignment_times_need_both'))
+    for value in (start_time, end_time):
+        if value is not None and not valid_time(value):
+            # Reuses availability_time_invalid rather than adding a second key
+            # with identical text - it already covers "value isn't HH:MM" for
+            # any time field, not just availability windows.
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=value))
+    # Equal start/end isn't a zero-length shift - shift_duration_minutes()
+    # treats end <= start as running past midnight, so this would silently
+    # become a 1440-minute shift instead of the empty range it looks like.
+    if start_time is not None and start_time == end_time:
+        raise ValueError(t(g.lang, 'assignment_times_must_differ'))
+    return start_time, end_time
+
+
 def replace_employee_constraints(connection, employee_id, data):
     cursor = connection.cursor()
 
@@ -1273,29 +1299,39 @@ def fetch_schedule(year, month):
 
     cursor.execute('''
         SELECT sa.id, sa.date, sa.shift_type_id, sa.slot_index, sa.employee_id, sa.manually_edited,
-               sa.absence_type, sa.absent_employee_id,
-               st.name AS shift_type_name, st.color AS shift_type_color, st.start_time, st.end_time,
+               sa.absence_type, sa.absent_employee_id, sa.start_time, sa.end_time,
+               st.name AS shift_type_name, st.color AS shift_type_color,
+               st.start_time AS type_start_time, st.end_time AS type_end_time,
                e.name AS employee_name, ae.name AS absent_employee_name
         FROM shift_assignments sa
-        JOIN shift_types st ON st.id = sa.shift_type_id
+        LEFT JOIN shift_types st ON st.id = sa.shift_type_id
         LEFT JOIN employees e ON e.id = sa.employee_id
         LEFT JOIN employees ae ON ae.id = sa.absent_employee_id
         WHERE sa.schedule_id = ?
-        ORDER BY sa.date, st.start_time, sa.slot_index
+        ORDER BY sa.date, COALESCE(sa.start_time, st.start_time), sa.slot_index
     ''', (schedule['id'],))
 
     assignments = []
     for row in cursor.fetchall():
         a = dict(row)
         a['manually_edited'] = bool(a['manually_edited'])
-        # The shift type's hours are the default; a per-date override wins.
+        # Three layers, outermost first: this assignment's own hours, then a
+        # per-date override for the shift type, then the type's usual hours.
+        # The flags tell the browser which layer won, so it can mark a cell
+        # that deviates without re-deriving the rule.
         override = overrides.get((a['date'], a['shift_type_id']))
-        a['default_start_time'] = a['start_time']
-        a['default_end_time'] = a['end_time']
+        a['default_start_time'] = a['type_start_time']
+        a['default_end_time'] = a['type_end_time']
+        a['assignment_time_set'] = bool(a['start_time'] and a['end_time'])
         a['time_overridden'] = override is not None
-        if override:
-            a['start_time'] = override['start_time']
-            a['end_time'] = override['end_time']
+        if not a['assignment_time_set']:
+            if override:
+                a['start_time'] = override['start_time']
+                a['end_time'] = override['end_time']
+            else:
+                a['start_time'] = a['type_start_time']
+                a['end_time'] = a['type_end_time']
+        del a['type_start_time'], a['type_end_time']
         assignments.append(a)
 
     cursor.execute('SELECT id, name FROM employees WHERE active = 1 ORDER BY name')
@@ -1568,10 +1604,24 @@ def add_slot(year, month):
 
     The shift type's required headcount stays as it is - this is a one-off
     change to this date, not a change to what the shift normally needs.
+
+    shift_type_id may be omitted/null for a block with no template of its own;
+    start_time/end_time are then taken straight from the request body, subject
+    to the same pair/format validation as update_assignment(), and a block
+    without a shift type is rejected unless it brings its own times - it has
+    no template to inherit them from.
     """
     data = request.get_json(silent=True) or {}
     iso_date = data.get('date')
     shift_type_id = data.get('shift_type_id')
+
+    try:
+        start_time, end_time = parse_assignment_times(data)
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
+    if shift_type_id is None and start_time is None:
+        return jsonify({'message': t(g.lang, 'assignment_without_shift_type_needs_times')}), 400
 
     try:
         parsed = date.fromisoformat(iso_date)
@@ -1587,21 +1637,30 @@ def add_slot(year, month):
     if not schedule_id:
         return jsonify({'message': t(g.lang, 'no_schedule_found')}), 404
 
-    cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
-    if not cursor.fetchone():
-        return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
+    if shift_type_id is not None:
+        cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
+        if not cursor.fetchone():
+            return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
 
-    cursor.execute(
-        'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
-        'WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
-        (schedule_id, iso_date, shift_type_id),
-    )
+    # "WHERE shift_type_id = NULL" matches nothing in SQL - not even the NULL
+    # rows - so a block without a template would keep getting slot_index 0 and
+    # collide with the unique index on its second insert.
+    if shift_type_id is None:
+        cursor.execute(
+            'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
+            'WHERE schedule_id = ? AND date = ? AND shift_type_id IS NULL',
+            (schedule_id, iso_date))
+    else:
+        cursor.execute(
+            'SELECT COALESCE(MAX(slot_index), -1) AS highest FROM shift_assignments '
+            'WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
+            (schedule_id, iso_date, shift_type_id))
     next_index = cursor.fetchone()['highest'] + 1
 
     cursor.execute(
-        'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited) '
-        'VALUES (?, ?, ?, ?, NULL, 1)',
-        (schedule_id, iso_date, shift_type_id, next_index),
+        'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id, manually_edited, start_time, end_time) '
+        'VALUES (?, ?, ?, ?, NULL, 1, ?, ?)',
+        (schedule_id, iso_date, shift_type_id, next_index, start_time, end_time),
     )
     assignment_id = cursor.lastrowid
     refresh_unfilled_count(cursor, schedule_id)
@@ -1631,7 +1690,13 @@ def delete_assignment(assignment_id):
 # ---------- manual editing (reassign / swap) ----------
 
 def effective_shift_hours(cursor, schedule_id, iso_date, shift_type_id, default_start, default_end):
-    """A shift's actual hours on one date: a per-date override if one exists, else the shift type's usual hours."""
+    """A shift type's actual hours on one date: a per-date override if one exists, else its usual hours.
+
+    For an assignment, prefer assignment_hours() - it puts the assignment's own
+    times in front of these two layers.
+    """
+    if shift_type_id is None:
+        return default_start, default_end
     cursor.execute(
         'SELECT start_time, end_time FROM shift_time_overrides WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
         (schedule_id, iso_date, shift_type_id),
@@ -1640,6 +1705,40 @@ def effective_shift_hours(cursor, schedule_id, iso_date, shift_type_id, default_
     if override:
         return override['start_time'], override['end_time']
     return default_start, default_end
+
+
+def assignment_hours(cursor, row):
+    """The hours one assignment actually runs, by precedence.
+
+    1. the assignment's own start_time/end_time, when set - this person, this
+       slot, these hours
+    2. otherwise a per-date override for the shift type, which applies to
+       everyone on that shift that day
+    3. otherwise the shift type's usual hours
+
+    Returns (None, None) for a block that has neither its own times nor a shift
+    type to inherit from. The API rejects that combination (see the validation
+    in update_assignment), but a caller reading old or hand-edited rows should
+    get a value it can test rather than an exception.
+
+    `row` needs the keys schedule_id, date, shift_type_id, start_time and
+    end_time - a sqlite3.Row and a plain dict both work.
+    """
+    if row['start_time'] and row['end_time']:
+        return row['start_time'], row['end_time']
+
+    shift_type_id = row['shift_type_id']
+    if shift_type_id is None:
+        return None, None
+
+    cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
+    shift_type = cursor.fetchone()
+    if not shift_type:
+        return None, None
+
+    return effective_shift_hours(
+        cursor, row['schedule_id'], row['date'], shift_type_id,
+        shift_type['start_time'], shift_type['end_time'])
 
 
 def week_bounds(iso_date):
@@ -1658,7 +1757,8 @@ def weekday_adverb(lang, weekday_index):
     return (name.lower() if lang == 'de' else name) + 's'
 
 
-def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, schedule_id, exclude_assignment_id=None):
+def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, schedule_id,
+                        exclude_assignment_id=None, start_time=None, end_time=None):
     """Non-blocking warnings for assigning `employee_id` to one shift.
 
     Unlike the scheduler's hard constraints (which only ever see one month at a
@@ -1666,6 +1766,9 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     rest-period checks below deliberately query shift_assignments *without*
     scoping by schedule_id - the employee's neighbouring shift may belong to a
     different month's schedule row, and it should still be found.
+
+    `start_time`/`end_time` are this assignment's own proposed hours, if any -
+    passed straight through to assignment_hours() alongside shift_type_id.
     """
     if employee_id is None:
         return []
@@ -1684,24 +1787,26 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if cursor.fetchone():
         warnings.append(t(g.lang, 'warn_marked_unavailable', name=employee['name'], date=assignment_date))
 
-    cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
-    if cursor.fetchone():
-        cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ? AND shift_type_id = ?', (employee_id, shift_type_id))
-        if not cursor.fetchone():
-            warnings.append(t(g.lang, 'warn_restricted_shift_types', name=employee['name']))
+    # A block without a template isn't any shift type, so a restriction on
+    # which types this person may work has nothing to say about it.
+    if shift_type_id is not None:
+        cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
+        if cursor.fetchone():
+            cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ? AND shift_type_id = ?',
+                           (employee_id, shift_type_id))
+            if not cursor.fetchone():
+                warnings.append(t(g.lang, 'warn_restricted_shift_types', name=employee['name']))
 
     if employee['availability_mode'] == 'windows':
-        cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
-        shift_type_row = cursor.fetchone()
-        if shift_type_row:
-            # The actual hours this assignment runs, respecting a per-date
-            # override - same source of truth the rest-period check below uses,
-            # so a shortened shift is judged against the times it now runs, not
-            # the shift type's nominal ones.
-            start_time, end_time = effective_shift_hours(
-                cursor, schedule_id, assignment_date, shift_type_id,
-                shift_type_row['start_time'], shift_type_row['end_time'])
-
+        # The actual hours this assignment runs, respecting the assignment's
+        # own times and a per-date override - same source of truth the
+        # rest-period check below uses, so a shortened shift is judged against
+        # the times it now runs, not the shift type's nominal ones.
+        start_time_effective, end_time_effective = assignment_hours(cursor, {
+            'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
+            'start_time': start_time, 'end_time': end_time,
+        })
+        if start_time_effective and end_time_effective:
             cursor.execute(
                 'SELECT weekday, start_time, end_time, valid_from, valid_until FROM employee_availability '
                 'WHERE employee_id = ? AND weekday = ? ORDER BY start_time',
@@ -1712,7 +1817,7 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             # rule the scheduler's structurally_eligible() enforces.
             applicable_windows = [w for w in windows_today if window_is_valid_on(w, assignment_date)]
 
-            if not any(window_contains_shift(w, start_time, end_time) for w in applicable_windows):
+            if not any(window_contains_shift(w, start_time_effective, end_time_effective) for w in applicable_windows):
                 if applicable_windows:
                     windows_text = ', '.join(f"{w['start_time']}–{w['end_time']}" for w in applicable_windows)
                     warnings.append(t(g.lang, 'warn_outside_availability', name=employee['name'],
@@ -1741,35 +1846,34 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if employee['weekly_hours'] is not None:
         week_start, week_end = week_bounds(assignment_date)
         cursor.execute('''
-            SELECT sa.id, sa.date, sa.schedule_id, sa.shift_type_id, st.start_time, st.end_time
+            SELECT sa.id, sa.date, sa.schedule_id, sa.shift_type_id, sa.start_time, sa.end_time
             FROM shift_assignments sa
-            JOIN shift_types st ON st.id = sa.shift_type_id
             WHERE sa.employee_id = ? AND sa.date BETWEEN ? AND ?
         ''', (employee_id, week_start, week_end))
         total_minutes = 0
         for row in cursor.fetchall():
             if exclude_assignment_id is not None and row['id'] == exclude_assignment_id:
                 continue
-            start, end = effective_shift_hours(
-                cursor, row['schedule_id'], row['date'], row['shift_type_id'], row['start_time'], row['end_time'])
-            total_minutes += shift_duration_minutes(start, end)
+            start, end = assignment_hours(cursor, row)
+            if start and end:
+                total_minutes += shift_duration_minutes(start, end)
 
-        cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
-        proposed_type = cursor.fetchone()
-        if proposed_type:
-            new_start, new_end = effective_shift_hours(
-                cursor, schedule_id, assignment_date, shift_type_id, proposed_type['start_time'], proposed_type['end_time'])
+        new_start, new_end = assignment_hours(cursor, {
+            'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
+            'start_time': start_time, 'end_time': end_time,
+        })
+        if new_start and new_end:
             total_minutes += shift_duration_minutes(new_start, new_end)
 
         if total_minutes > employee['weekly_hours'] * 60:
             warnings.append(t(g.lang, 'warn_weekly_hours_exceeded', name=employee['name'],
                              hours=total_minutes / 60, target=employee['weekly_hours']))
 
-    cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (shift_type_id,))
-    this_shift_type = cursor.fetchone()
-    if this_shift_type:
-        cur_start, cur_end = effective_shift_hours(
-            cursor, schedule_id, assignment_date, shift_type_id, this_shift_type['start_time'], this_shift_type['end_time'])
+    cur_start, cur_end = assignment_hours(cursor, {
+        'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
+        'start_time': start_time, 'end_time': end_time,
+    })
+    if cur_start and cur_end:
         this_shift = shift_datetimes(assignment_date, cur_start, cur_end)
         min_rest = employee['min_rest_hours']
         d = date.fromisoformat(assignment_date)
@@ -1777,7 +1881,8 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
         # (neighbouring date, is that neighbour the earlier of the two shifts?)
         neighbors = [((d - timedelta(days=1)).isoformat(), True), ((d + timedelta(days=1)).isoformat(), False)]
         for neighbor_date, neighbor_is_earlier in neighbors:
-            query = 'SELECT id, schedule_id, shift_type_id FROM shift_assignments WHERE employee_id = ? AND date = ?'
+            query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time '
+                     'FROM shift_assignments WHERE employee_id = ? AND date = ?')
             params = [employee_id, neighbor_date]
             if exclude_assignment_id is not None:
                 query += ' AND id != ?'
@@ -1786,13 +1891,9 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             neighbor = cursor.fetchone()
             if not neighbor:
                 continue
-            cursor.execute('SELECT start_time, end_time FROM shift_types WHERE id = ?', (neighbor['shift_type_id'],))
-            neighbor_type = cursor.fetchone()
-            if not neighbor_type:
+            n_start, n_end = assignment_hours(cursor, neighbor)
+            if not n_start or not n_end:
                 continue
-            n_start, n_end = effective_shift_hours(
-                cursor, neighbor['schedule_id'], neighbor_date, neighbor['shift_type_id'],
-                neighbor_type['start_time'], neighbor_type['end_time'])
             neighbor_shift = shift_datetimes(neighbor_date, n_start, n_end)
 
             gap = (rest_gap_hours(neighbor_shift, this_shift) if neighbor_is_earlier
@@ -1834,12 +1935,28 @@ def update_assignment(assignment_id):
         if not cursor.fetchone():
             return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
 
+    try:
+        start_time, end_time = parse_assignment_times(data)
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
+    if assignment['shift_type_id'] is None and start_time is None:
+        return jsonify({'message': t(g.lang, 'assignment_without_shift_type_needs_times')}), 400
+
     warnings = constraint_warnings(
         cursor, employee_id, assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
-        exclude_assignment_id=assignment_id,
+        exclude_assignment_id=assignment_id, start_time=start_time, end_time=end_time,
     )
 
-    cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (employee_id, assignment_id))
+    # start_time/end_time are written on every PUT, same "absent means empty"
+    # semantics as employee_id above: leaving them out of the body clears them
+    # to NULL rather than keeping whatever was there before. Consequence: a
+    # caller that only wants to swap the employee must resend the current
+    # times, or they get wiped. The frontend does this (Task 6).
+    cursor.execute(
+        'UPDATE shift_assignments SET employee_id = ?, start_time = ?, end_time = ?, manually_edited = 1 '
+        'WHERE id = ?',
+        (employee_id, start_time, end_time, assignment_id))
     refresh_unfilled_count(cursor, assignment['schedule_id'])
 
     connection.commit()
@@ -1869,9 +1986,16 @@ def swap_assignments():
     cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (b['employee_id'], a['id']))
     cursor.execute('UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?', (a['employee_id'], b['id']))
 
+    # The times stay with the slot, not the person - a and b still hold the
+    # rows as fetched before the swap above, so a['start_time']/a['end_time']
+    # are the place's own times, unaffected by which employee now sits there.
     warnings = []
-    warnings += constraint_warnings(cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'], exclude_assignment_id=a['id'])
-    warnings += constraint_warnings(cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'], exclude_assignment_id=b['id'])
+    warnings += constraint_warnings(cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'],
+                                    exclude_assignment_id=a['id'],
+                                    start_time=a['start_time'], end_time=a['end_time'])
+    warnings += constraint_warnings(cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'],
+                                    exclude_assignment_id=b['id'],
+                                    start_time=b['start_time'], end_time=b['end_time'])
 
     refresh_unfilled_count(cursor, a['schedule_id'])
 
@@ -1909,6 +2033,7 @@ def replacement_suggestions(assignment_id):
         warnings = constraint_warnings(
             cursor, row['id'], assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
             exclude_assignment_id=assignment_id,
+            start_time=assignment['start_time'], end_time=assignment['end_time'],
         )
         if warnings:
             continue

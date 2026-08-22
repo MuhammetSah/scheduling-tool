@@ -153,10 +153,24 @@ function SchedulePage({ setFlash, user }) {
     }
   }
 
-  async function reassign(assignmentId, employeeIdRaw) {
+  // start_time/end_time are written on every PUT /assignments/<id> call - the
+  // backend clears them to NULL when they're absent from the body, the same
+  // "missing means empty" rule it applies to employee_id. So every caller of
+  // reassign() must pass the time pair it wants kept, not just a new
+  // employee: the assignment's current individual times to preserve them
+  // across a plain reassignment, freshly edited values to change them, or
+  // null/null to drop back to the shift's own hours. No defaults here on
+  // purpose: a future two-argument call (`reassign(id, employeeId)`) would
+  // silently wipe individual times instead of failing loudly, so
+  // startTime/endTime are required - every call site must decide.
+  async function reassign(assignmentId, employeeIdRaw, startTime, endTime) {
     const employeeId = employeeIdRaw === '' ? null : Number(employeeIdRaw)
     try {
-      const result = await api.put(`/assignments/${assignmentId}`, { employee_id: employeeId })
+      const result = await api.put(`/assignments/${assignmentId}`, {
+        employee_id: employeeId,
+        start_time: startTime,
+        end_time: endTime,
+      })
       setWarnings(result.warnings || [])
       await refreshSchedule()
     } catch (err) {

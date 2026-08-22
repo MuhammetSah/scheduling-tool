@@ -221,6 +221,7 @@ const de = {
     slotAddedFlash: 'Platz hinzugefügt - jetzt jemanden zuweisen.',
     absenceReportedFreedFlash: 'Abwesenheit eingetragen. Die Schicht an diesem Tag ist jetzt wieder frei.',
     absenceReportedFlash: 'Abwesenheit eingetragen.',
+    freeBlockColumn: 'Dienst',
   },
 
   scheduleGrid: {
@@ -247,6 +248,9 @@ const de = {
     noSuggestions: 'Keine geeigneten Vorschläge gefunden.',
     suggestionLoadTitle: '{n} Schichten in diesem Monat',
     absentWasPrefix: 'war',
+    personalTimeTitle: 'Eigene Zeit dieser Person, abweichend von der Schicht',
+    editPersonTimeTitle: 'Zeiten für diese Person ändern',
+    resetPersonTimeTitle: 'Wieder die Zeiten der Schicht übernehmen',
   },
 
   calendar: {
@@ -483,6 +487,7 @@ const en = {
     slotAddedFlash: 'Slot added - now assign someone.',
     absenceReportedFreedFlash: 'Absence reported. The shift on that day is now open again.',
     absenceReportedFlash: 'Absence reported.',
+    freeBlockColumn: 'Shift',
   },
 
   scheduleGrid: {
@@ -509,6 +514,9 @@ const en = {
     noSuggestions: 'No suitable suggestions found.',
     suggestionLoadTitle: '{n} shifts this month',
     absentWasPrefix: 'was',
+    personalTimeTitle: "This person's own time, different from the shift",
+    editPersonTimeTitle: "Change this person's hours",
+    resetPersonTimeTitle: "Go back to following the shift's hours",
   },
 
   calendar: {

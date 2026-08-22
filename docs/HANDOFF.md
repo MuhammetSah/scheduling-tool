@@ -1,7 +1,7 @@
 # Handoff — Stand und offene Punkte
 
 Kompakte Übergabe, damit eine neue Sitzung ohne Vorwissen weiterarbeiten kann.
-Stand: 17.08.2026.
+Stand: 18.08.2026.
 
 ## Das Projekt
 
@@ -16,18 +16,19 @@ Dialektschicht** in `backend/db.py`, kein ORM. Backend auf Render, Frontend auf 
 
 Kern ist `backend/scheduler.py`: Backtracking-Suche mit Branch-and-Bound, lexikografisches
 Ziel (erst unbesetzte Schichten minimieren, dann Fairness über die Summe quadrierter
-Schichtzahlen). Diese Suche wurde in beiden Etappen **nicht** angefasst.
+Schichtzahlen). Diese Suche wurde in allen drei Etappen **nicht** angefasst — auch Etappe 2
+(individuelle Zeiten) betrifft ausschließlich den Handkorrektur-Pfad, nie den Generator.
 
 ## Aktueller Stand
 
 | | |
 |---|---|
-| `main` | `b65db6e` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11) gemergt |
-| Arbeitsbranch | keiner. Etappe 2 beginnt auf einem neuen Branch ab `main` |
-| Testsuite | 112 passed / 17 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning` |
-| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` — alle grün auf `main` |
-| Migrationen | `0001`–`0003` in Produktion angewandt, `0004` gemergt und beim nächsten Deploy fällig |
-| Laufzeitabhängigkeiten | fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
+| `main` | `8116e63` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11, #12) gemergt |
+| Arbeitsbranch | `etappe-2-individuelle-zeiten`, ab `b65db6e` verzweigt. Etappe 2 lokal abgeschlossen (dieser Commit), Abschluss-Review und Merge nach `main` stehen noch aus |
+| Testsuite | 141 passed / 22 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning` |
+| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` — alle grün auf `251d8c7` (Stand vor diesem Dokumentations-Commit; der Lauf für diesen Commit selbst steht noch aus) |
+| Migrationen | `0001`–`0005` lokal angewandt und rundlauffest (up → down → up geprüft); in Produktion bislang nur `0001`–`0003`, `0004` und `0005` sind beim nächsten Deploy fällig |
+| Laufzeitabhängigkeiten | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 
 ## Etappe 0 — abgeschlossen, gemergt, deployt
 
@@ -108,26 +109,52 @@ Funktionen in `backend/scheduler.py`: `time_to_minutes()`, `window_contains_shif
 sie, und weil `swap_assignments()` und `replacement_suggestions()` ihrerseits
 `constraint_warnings()` wiederverwenden, hängen alle Pfade an derselben Implementierung.
 
-**Für Etappe 2 vormerken:** der Fenster-Block in `constraint_warnings()` (`app.py:1684-1713`)
-setzt `shift_types.start_time/end_time` als NOT NULL voraus. Sobald `shift_type_id` nullable
-wird und Zuweisungen eigene Zeiten tragen, muss er auf `LEFT JOIN`-Semantik und `None`-Zeiten
-umgestellt werden — `window_contains_shift(w, None, None)` liefe sonst als `AttributeError` in
-einen 500. Heute unerreichbar, mit Etappe 2 nicht mehr.
+## Etappe 2 — abgeschlossen
 
-### Die Semantik, einmal präzise
+Plan: [`docs/superpowers/plans/2026-08-17-etappe-2-individuelle-zeiten.md`](superpowers/plans/2026-08-17-etappe-2-individuelle-zeiten.md)
+Ledger: `.superpowers/sdd/2026-08-17-etappe-2-individuelle-zeiten/progress.md` (gitignoriert)
 
-`employees.availability_mode` ist `'anytime'` (Standard, wie bisher) oder `'windows'`.
-Im Fenster-Modus gilt: nur innerhalb der eingetragenen Fenster; ein Wochentag ohne Fenster
-heißt „an dem Tag gar nicht". `unavailable_dates` und Abwesenheiten gelten zusätzlich.
+Ziel erreicht: eine Zuweisung kann eigene Start-/Endzeiten tragen, die vor dem Datums-Override
+der Schichtart und vor deren üblicher Zeit gelten (drei Stufen, siehe unten), und ein
+Zuweisungsplatz kann auch ganz ohne Schichtart existieren, wenn er eigene Zeiten mitbringt.
+Der Fenster-Block in `constraint_warnings()`, für den das Etappe-1-Handoff eine Umstellung
+vormerkte (siehe oben, jetzt entfernt), rechnet damit korrekt statt in einen 500 zu laufen.
 
-Eine Schicht ist erlaubt, wenn sie **vollständig in ein einzelnes** Fenster passt — nicht in
-die Vereinigung mehrerer. Gerechnet in Minuten ab Mitternacht des Starttags; ein Ende ≤ Start
-bekommt 1440 aufgeschlagen, für Fenster **und** Schicht. Der Wochentag ist der des
-Schichtbeginns, auch bei Nachtschichten. Gültigkeitsgrenzen sind einschließlich.
+| Task | Stand | Commit |
+|---|---|---|
+| 1 Migration und Schema für individuelle Zeiten | ✅ Review sauber nach einer Fix-Runde | `592dd39` |
+| 2 Zeitauflösung einer Zuweisung an einer Stelle bündeln | ✅ Review sauber nach einer Fix-Runde | `bca00ad` |
+| 3 Plan liefert die tatsächlichen Zeiten und Blöcke ohne Vorlage | ✅ Review sauber nach einer Fix-Runde | `b445903` |
+| 4 Warnungen und Platzvergabe kommen ohne Schichtart aus | ✅ Review sauber (0 Findings) | `c71d1cf` |
+| 5 Individuelle Zeiten über die API setzen | ✅ Review sauber nach einer Fix-Runde | `99701b6` |
+| 6 Individuelle Zeiten pro Person in der Planansicht (Frontend) | ✅ Review sauber nach einer Fix-Runde | `251d8c7` |
+| 7 Dokumentation | ✅ | dieser Commit |
 
-Funktionen in `backend/scheduler.py`: `time_to_minutes()`, `window_contains_shift()`,
-`window_is_valid_on()`. **Nicht duplizieren** — Task 4 und alles Spätere müssen sie
-wiederverwenden, sonst driften Planer und Warnung auseinander.
+**Die Vorrangregel**, einmal präzise: eine Zuweisung läuft an einem Datum zu genau einem
+Zeitpaar, in dieser Reihenfolge — `shift_assignments.start_time`/`end_time`, wenn gefüllt
+(genau diese Person, genau dieser Platz); sonst ein Eintrag in `shift_time_overrides` für
+`(schedule_id, date, shift_type_id)` (gilt für alle auf der Schicht an diesem Tag); sonst
+`shift_types.start_time`/`end_time`. Gebündelt in `assignment_hours()` (`backend/app.py`) und
+von allen zeitabhängigen Prüfungen genutzt — Wochenstunden, Ruhezeit, Verfügbarkeitsfenster.
+Betrifft ausschließlich den Handkorrektur-Pfad; der Generator setzt nie eigene Zeiten oder
+einen Datums-Override, eine frisch erzeugte Zuweisung läuft immer auf der dritten Stufe.
+
+Beide neuen Spalten sind entweder beide gefüllt oder beide `NULL`; ein halb gefülltes Paar
+oder ein Paar mit gleicher Start-/Endzeit wird mit 400 abgelehnt (Letzteres wegen der
+projektweiten Mitternachtskonvention `end <= start`, die sonst still eine 24-Stunden-Schicht
+daraus machen würde).
+
+`shift_assignments.shift_type_id` ist jetzt nullable. Ein Block ohne Schichtart muss eigene
+Zeiten tragen — er hat keine Stufe 2 und keine Stufe 3, von der er erben könnte, und die API
+erzwingt das. In dieser Etappe erzeugt niemand einen solchen Block: der Generator weist immer
+eine echte Schichtart zu, und es gibt bewusst keine Schaltfläche im Frontend dafür. Das
+Datenmodell geht dem Planer damit absichtlich voraus — Etappe 4 baut darauf auf, ohne Schema
+und Algorithmus gleichzeitig ändern zu müssen.
+
+**Nächster Schritt einer neuen Sitzung:** Abschluss-Review für Etappe 2 einholen (die sechs
+Task-Reviews oben sind einzeln sauber, aber es gab noch keine Gesamtdurchsicht wie am Ende von
+Etappe 1), dann PR nach `main`. Danach Etappe 3 (Öffnungszeiten und Bedarf auf der Zeitachse)
+auf einem neuen Branch beginnen.
 
 ## Arbeitsweise
 
@@ -176,6 +203,13 @@ Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante
 12. **Was die Oberfläche ausblendet, wirkt trotzdem weiter.** Ein ausgeblendetes Formularfeld
     schickt seinen Wert weiter mit, und eine ausgeblendete Einschränkung wird weiter geprüft.
     Beide Important-Befunde des Abschluss-Reviews von Etappe 1 waren genau das.
+13. **`WHERE shift_type_id = ?` mit `None` trifft in SQL keine Zeile**, auch nicht die mit
+    NULL. Deshalb der `IS NULL`-Zweig in `add_slot()` und `COALESCE(shift_type_id, 0)` im
+    UNIQUE-Index — ohne den würde Postgres NULLs als voneinander verschieden behandeln und
+    der Index nichts mehr garantieren.
+14. **`PUT /assignments/<id>` schreibt die Zeiten bei jedem Aufruf mit.** Fehlen sie im Body,
+    werden sie auf NULL gesetzt. Wer nur den Mitarbeiter tauschen will, muss die Zeiten
+    mitschicken. Das Frontend tut das; ein künftiger Aufrufer muss es auch.
 
 ## Offen — liegt beim Nutzer
 
@@ -230,12 +264,35 @@ Neu aus dem Abschluss-Review von Etappe 1:
   Sicherheitsseitig die konservative Richtung, aber ein Mitarbeiter sieht seine eigenen
   Arbeitszeiten nicht. **Etappe 2 und 3 dürfen die Route nicht als vorhanden annehmen**
 
+Neu aus den Reviews von Etappe 2:
+
+- ungenutzte Konstante `ASSIGNMENT_TIMES_PY_PATH` in `test_migrations_postgres.py`
+- der Bestandstest zum Tabellenneubau prüft nur 6 von 9 kopierten Spalten
+- `ux_assignment_slot_v2` ist ein Ausdrucksindex und damit als Zugriffspfad schwächer als sein
+  Vorgänger — nutzbarer Präfix nur `(schedule_id, date)`
+- der SQLite-Tabellenneubau läuft mit eingeschalteten Fremdschlüsseln; eine verwaiste
+  Bestandszeile ließe die Kopie scheitern (laut und vollständig zurückgerollt, nur lokal
+  möglich)
+- halb gefüllte Zeitpaare fallen in `assignment_hours()` still auf Stufe 2/3 durch, statt
+  einen Fehler zu erzeugen
+- in der Wochenschleife von `constraint_warnings()` laufen jetzt zwei Abfragen pro Zeile statt
+  einer, multipliziert in `replacement_suggestions()`
+- die `end_time`-Hälfte der Zeitformat-Prüfung ist ungetestet
+- die Validierungsreihenfolge in `add_slot()` prüft Zeiten vor dem Datum
+- die Regel „Block ohne Vorlage braucht Zeiten" steht an zwei Stellen (`add_slot()` und
+  `update_assignment()`)
+- `set_shift_times()` hat dieselbe Gleichheitslücke, die in `parse_assignment_times()`
+  behoben wurde (vorbestehend)
+- der i18n-Schlüssel `availability_time_invalid` wird jetzt auch für Zuweisungen benutzt,
+  obwohl sein Name nach Etappe 1 klingt
+- ein unübersetztes `OK`-Literal in `ShiftCell.jsx` (aus dem Bestandsmuster übernommen)
+- mehrere vorlagenlose Blöcke am selben Datum landen in derselben Zelle und nur der erste
+  liefert die Zellenzeile — erst ab Etappe 4 erzeugbar
+
 ## Roadmap
 
 Design: [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md)
 
-- **Etappe 2** — individuelle Zeiten pro Zuweisung: `shift_assignments.start_time/end_time`,
-  `shift_type_id` nullable, damit ein freier Block „10:00–16:00" ohne passende Vorlage möglich wird
 - **Etappe 3** — Öffnungszeiten und Bedarf auf der Zeitachse: `business_hours`,
   `business_hours_exceptions`, `coverage_requirements` (nicht überlappend, absolute
   Besetzungsstärke), Migration aus `shift_requirements`, Deckungslücken-Anzeige

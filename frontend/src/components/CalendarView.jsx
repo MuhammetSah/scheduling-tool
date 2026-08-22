@@ -94,10 +94,14 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                 </div>
 
                 {orderedGroups.map(([shiftTypeId, slots]) => (
-                  <div key={shiftTypeId} className="calendar-shift">
+                  <div key={shiftTypeId ?? 'free-block'} className="calendar-shift">
                     <div className="calendar-shift-name">
-                      <span className="badge-dot" style={{ backgroundColor: slots[0].shift_type_color }} />
-                      {slots[0].shift_type_name}
+                      {/* A block with no shift type of its own has neither a
+                          name nor a color to show - fall back to the same
+                          generic label ScheduleGrid uses for it and a neutral
+                          dot instead of a missing/undefined color. */}
+                      <span className="badge-dot" style={{ backgroundColor: slots[0].shift_type_color ?? 'var(--text-muted)' }} />
+                      {slots[0].shift_type_name ?? t('schedule.freeBlockColumn')}
                       <span
                         className={`calendar-shift-time ${slots[0].time_overridden ? 'calendar-shift-time-changed' : ''}`}
                         title={slots[0].time_overridden
