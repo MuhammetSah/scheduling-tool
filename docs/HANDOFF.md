@@ -24,14 +24,22 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5h ist **fertig umgesetzt, aber noch nicht gemergt** — Branch `etappe-5h-exporte`.
+Es ist nichts halb fertig. Alles bis einschließlich 5h ist gemergt, deployt und dokumentiert;
+es gibt keine offenen Branches und keine offenen Pull Requests.
 
-Damit bleibt **ein** Teil von Etappe 5 offen, und der braucht eine Entscheidung, die keine
-Sitzung treffen kann:
+**Offen ist nur noch der DSGVO-Teil**, und er braucht zwei Festlegungen, die keine Sitzung
+treffen kann — beide mit rechtlicher Folge:
 
-| Teil | Was zu klären ist |
-|---|---|
-| **DSGVO** | **Aufbewahrungsfristen** — für Krankmeldungen (Art.-9-Daten) und für das Audit-Log aus 5g. Eine betriebliche Festlegung. Das Mechanische (konfigurierbare Frist, Auskunft, Löschung) lässt sich bauen; die Zahl gehört dem Nutzer |
+1. **Aufbewahrungsfristen.** Wie lange bleiben Krankmeldungen (Art.-9-Daten) und die Einträge
+   des Audit-Logs? Art. 5 Abs. 1 lit. e verlangt eine Begrenzung; welche, hängt vom Betrieb ab.
+2. **Löschen oder anonymisieren.** Wird ein Mitarbeiter gelöscht, verschwinden dann seine
+   vergangenen Schichten — oder bleiben sie ohne Namen stehen? Löschen schreibt die Geschichte
+   um und nimmt dem Audit-Log seinen Zweck; Anonymisieren behält den Plan und entfernt die
+   Person.
+
+Das Mechanische lässt sich ohne diese Zahlen bauen (Auskunft nach Art. 15, Löschweg,
+konfigurierbare Frist mit „keine automatische Löschung" als Vorgabe). Die Zahlen selbst gehören
+dem Nutzer.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -43,9 +51,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Alles bis 5g gemergt und deployt (PR #16–#23); die API antwortet mit 200 |
-| Branch-Situation | **Ein offener Branch: `etappe-5h-exporte`** |
-| Aktueller Branch | `etappe-5h-exporte` |
+| `main` | Alles bis 5h gemergt und deployt (PR #16–#24); die API antwortet mit 200 |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
+| Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 421 passed / 35 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0013`. `0013_audit_log` legt das Änderungsprotokoll an |
@@ -636,7 +644,7 @@ Protokoll, dessen Einträge mit dem Konto verschwinden, ist keines.
 **Die Aufbewahrungsfrist fehlt und ist bewusst offen** — das Log ist selbst personenbezogen. Sie
 gehört zum DSGVO-Teil und ist eine Entscheidung des Nutzers.
 
-## Etappe 5h — Exporte
+## Etappe 5h — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-23-etappe-5h-exporte-design.md`](superpowers/specs/2026-08-23-etappe-5h-exporte-design.md)
 
