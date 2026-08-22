@@ -229,7 +229,18 @@ def order_slots(slots, employees, ordering):
     def sort_key(slot):
         eligible_count = sum(1 for e in employees if structurally_eligible(e, slot))
         # Date/shift tie-breakers only exist to keep the ordering deterministic.
-        return (eligible_count, slot['date'], slot['shift_type_id'], slot['slot_index'])
+        # shift_type_id is None for a block with no template, and None does not
+        # compare against int - the raw value would raise TypeError as soon as
+        # stage 1 emits one. Same shape as the result sort at the end of
+        # _search(): template-less last, then by the hours.
+        return (
+            eligible_count,
+            slot['date'],
+            slot['shift_type_id'] is None,
+            slot['shift_type_id'] or 0,
+            slot.get('start_time') or '',
+            slot['slot_index'],
+        )
 
     return sorted(slots, key=sort_key)
 
@@ -282,6 +293,7 @@ def _search(
     weekend_weight,
     node_budget,
     time_budget_seconds,
+    slots=None,
 ):
     """Run one backtracking search with a fixed slot ordering.
 
@@ -302,7 +314,11 @@ def _search(
     search goes deeper, so a branch whose partial cost already loses to the best
     complete plan can be pruned safely.
     """
-    raw_slots = build_slots(year, month, shift_types)
+    # Stage 1 (block_planner.build_month_blocks) hands its blocks in ready-made
+    # since Etappe 4; build_slots() below is the pre-Etappe-4 path, still used
+    # by benchmark.py as a comparison basis and by the 23 backward-compatibility
+    # tests in test_scheduler.py.
+    raw_slots = build_slots(year, month, shift_types) if slots is None else slots
     slots = order_slots(raw_slots, employees, ordering)
 
     total_slots = len(slots)
@@ -481,11 +497,27 @@ def _search(
             'slot_index': slot['slot_index'],
             'employee_id': emp_id,
             'is_weekend': slot['is_weekend'],
+            # Carried through since Etappe 4: the generator now decides a
+            # block's hours (stage 1 cuts them to demand and to availability
+            # windows), so the caller has something to store. Still None for
+            # callers that only ever dealt in shift counts.
+            'start_time': slot.get('start_time'),
+            'end_time': slot.get('end_time'),
         }
         for slot, emp_id in zip(slots, result_assignment)
     ]
     # Emit in calendar order regardless of the order the search used internally.
-    assignments.sort(key=lambda a: (a['date'], a['shift_type_id'], a['slot_index']))
+    # shift_type_id is None for a block with no template, and None does not
+    # compare against int - sorting the raw value raises TypeError the moment
+    # stage 1 emits its first template-less block. Those sort last, then by
+    # the hours, so a date's blocks come out in a stable, readable order.
+    assignments.sort(key=lambda a: (
+        a['date'],
+        a['shift_type_id'] is None,
+        a['shift_type_id'] or 0,
+        a['start_time'] or '',
+        a['slot_index'],
+    ))
 
     hit_ideal = fairness and unfilled_count == 0 and best['cost'] <= ideal_cost
 
@@ -515,6 +547,7 @@ def generate_schedule(
     weekend_weight=0,
     node_budget=DEFAULT_NODE_BUDGET,
     time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+    slots=None,
 ):
     """Build a month's schedule, choosing a search strategy to suit the month.
 
@@ -527,6 +560,14 @@ def generate_schedule(
                  optional, only consulted when availability_mode == 'windows'}]
     shift_types: [{id, requirements: {weekday(0-6): required_count},
                    start_time: "HH:MM" or None, end_time: "HH:MM" or None}]
+
+    slots: the month's blocks, ready-made. Since Etappe 4 this is how the
+    application plans: block_planner.build_month_blocks() builds the blocks out
+    of the demand bands, cutting them to demand and to availability windows,
+    and `requirements` above is no longer read at all. Left as None - the
+    default - build_slots() expands `requirements` the pre-Etappe-4 way, which
+    is what benchmark.py compares against and what the 23 backward-compatibility
+    tests in test_scheduler.py exercise.
 
     weekly_hours and min_rest_hours are both optional, hard, best-effort caps -
     same "no guarantee, reports gaps rather than failing" philosophy as
@@ -557,7 +598,7 @@ def generate_schedule(
     """
     def run(order):
         return _search(year, month, employees, shift_types, order, fairness,
-                       weekend_weight, node_budget, time_budget_seconds)
+                       weekend_weight, node_budget, time_budget_seconds, slots)
 
     if ordering != AUTO:
         result = run(ordering)

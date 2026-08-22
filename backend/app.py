@@ -17,6 +17,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import mailer
 import security
 import timeutil
+from block_planner import build_month_blocks
 from coverage_model import band_within, coverage_gaps, first_overlapping_pair, trim_band_to_hours
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
@@ -1544,8 +1545,15 @@ def generate_schedule_route():
                 'manually_edited_count': manually_edited,
             }), 409
 
+    # Stage 1: the month's blocks come out of the demand bands now, not out of
+    # shift_requirements. The shift types still matter - stage 1 covers demand
+    # with them wherever it can, so a normal month still looks like "2 early,
+    # 3 midday, 2 late" - but their per-weekday counts are no longer read.
     try:
-        result = generate_schedule(year, month, employees, shift_types, weekend_weight=weekend_weight)
+        slots = build_month_blocks(
+            year, month, shift_types, effective_bands_by_date(cursor, year, month), employees)
+        result = generate_schedule(year, month, employees, shift_types,
+                                   weekend_weight=weekend_weight, slots=slots)
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_year_or_month')}), 400
 
@@ -1564,9 +1572,17 @@ def generate_schedule_route():
         schedule_id = cursor.lastrowid
 
     for a in result['assignments']:
+        # start_time/end_time have been on this table since Etappe 2 but only
+        # the manual-correction path ever filled them. Stage 1 decides a
+        # block's hours now - trimmed to demand and to availability windows -
+        # so they have to be stored, or the plan would read back at the shift
+        # type's nominal times and the trimming would be invisible.
         cursor.execute(
-            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id) VALUES (?, ?, ?, ?, ?)',
-            (schedule_id, a['date'], a['shift_type_id'], a['slot_index'], a['employee_id']),
+            'INSERT INTO shift_assignments '
+            '(schedule_id, date, shift_type_id, slot_index, employee_id, start_time, end_time) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (schedule_id, a['date'], a['shift_type_id'], a['slot_index'], a['employee_id'],
+             a['start_time'], a['end_time']),
         )
 
     connection.commit()
@@ -2669,15 +2685,11 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
     database edited before /business-hours started cross-checking can hold the
     same thing. A band that is trimmed away entirely produces no gap.
     """
-    bands_by_weekday = coverage_requirements_by_weekday(cursor)
-    if not bands_by_weekday:
+    bands_by_date = effective_bands_by_date(cursor, year, month)
+    if not bands_by_date:
         return []
 
-    hours_by_weekday = load_business_hours_by_weekday(cursor)
     days_in_month = calendar.monthrange(year, month)[1]
-    exceptions_by_date = business_hours_exceptions_by_date(
-        cursor, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat(),
-    )
 
     intervals_by_date = {}
     for a in assignments:
@@ -2688,6 +2700,49 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
         )
 
     gaps = []
+    for day in range(1, days_in_month + 1):
+        iso_date = date(year, month, day).isoformat()
+        bands = bands_by_date.get(iso_date)
+        if not bands:
+            continue
+
+        for gap in coverage_gaps(bands, intervals_by_date.get(iso_date, [])):
+            gaps.append({'date': iso_date, **gap})
+
+    return gaps
+
+
+def effective_bands_by_date(cursor, year, month):
+    """Every date of the month mapped to the demand bands that actually apply.
+
+    Loaded once for the whole month rather than per day, and shared by the two
+    callers that need exactly this: coverage_gaps_for_month() above, which
+    compares the bands against what is staffed, and the generator, which builds
+    the month's blocks out of them. Keeping it in one place is what stops the
+    trimming rules below from drifting apart between "what we planned for" and
+    "what we report as missing" - Etappe 3 already had that happen once with
+    business_hours_for().
+
+    Effective means: a closed date contributes nothing, and every band is
+    trimmed to the opening window business_hours_for() resolves, so a special
+    opening on a single date narrows or widens that date's demand and not just
+    its open/closed state. Trimming is what keeps a band that predates the
+    current opening hours from demanding staff for a closed business - bands
+    derived by migration 0007 never passed the API's validation at all, and any
+    database edited before /business-hours started cross-checking can hold the
+    same thing. A date whose bands are all trimmed away is left out entirely.
+    """
+    bands_by_weekday = coverage_requirements_by_weekday(cursor)
+    if not bands_by_weekday:
+        return {}
+
+    hours_by_weekday = load_business_hours_by_weekday(cursor)
+    days_in_month = calendar.monthrange(year, month)[1]
+    exceptions_by_date = business_hours_exceptions_by_date(
+        cursor, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat(),
+    )
+
+    by_date = {}
     for day in range(1, days_in_month + 1):
         day_date = date(year, month, day)
         iso_date = day_date.isoformat()
@@ -2712,10 +2767,9 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
             if not bands:
                 continue
 
-        for gap in coverage_gaps(bands, intervals_by_date.get(iso_date, [])):
-            gaps.append({'date': iso_date, **gap})
+        by_date[iso_date] = bands
 
-    return gaps
+    return by_date
 
 
 # ---------- error handling ----------

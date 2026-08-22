@@ -13,9 +13,13 @@ block_planner statt planner, damit kein installiertes Paket verdeckt werden
 kann.
 """
 
+import calendar
+from datetime import date, timedelta
+
 from coverage_model import _minutes_to_time
 from scheduler import (
-    _ranges_overlap, _time_range_minutes, structurally_eligible, window_is_valid_on,
+    _ranges_overlap, _time_range_minutes, shift_duration_minutes, structurally_eligible,
+    window_is_valid_on,
 )
 
 # Kuerzer als das schneidet Stufe 1 nichts zu - sonst entstehen Schnipsel, die
@@ -429,3 +433,56 @@ def plan_day(bands, templates, candidates, iso_date, weekday,
             break
 
     return blocks
+
+
+def build_month_blocks(year, month, templates, bands_by_date, candidates):
+    """Die Bloecke eines ganzen Monats, in der Form, die der Suchkern erwartet.
+
+    Ersetzt scheduler.build_slots() auf dem Erzeugen-Pfad: gebaut wird nicht
+    mehr aus shift_requirements ("montags braucht die Fruehschicht 3 Leute"),
+    sondern aus den Bedarfsbaendern des Tages. build_slots() selbst bleibt
+    unveraendert stehen - als Vergleichsbasis im Benchmark und weil die 23
+    Bestandstests in test_scheduler.py daran haengen.
+
+    Warum diese Funktion hier lebt und nicht in scheduler.py: block_planner
+    importiert aus scheduler. Der umgekehrte Import waere ein Zirkel, und
+    scheduler ist die Datei, die als Erste geladen wird. So bleibt die
+    Abhaengigkeit einseitig, und generate_schedule() bekommt die fertigen
+    Bloecke schlicht uebergeben.
+
+    bands_by_date kommt aus app.effective_bands_by_date() - Tage ohne Bedarf
+    und geschlossene Tage stehen dort gar nicht erst drin.
+    """
+    slots = []
+    for day in range(1, calendar.monthrange(year, month)[1] + 1):
+        day_date = date(year, month, day)
+        iso_date = day_date.isoformat()
+        bands = bands_by_date.get(iso_date)
+        if not bands:
+            continue
+
+        weekday = day_date.weekday()
+        # Montag dieser Kalenderwoche - der Topf, gegen den die
+        # Wochenstundengrenze zaehlt (0=Montag, wie WEEKDAYS in db.py).
+        week_start = (day_date - timedelta(days=weekday)).isoformat()
+
+        for slot_index, block in enumerate(plan_day(bands, templates, candidates,
+                                                    iso_date, weekday)):
+            slots.append({
+                'date': iso_date,
+                'weekday': weekday,
+                'week_start': week_start,
+                'shift_type_id': block['shift_type_id'],
+                # Durchgezaehlt ueber alle Bloecke des Tages, nicht je
+                # Schichtart. Der UNIQUE-Index laeuft ueber
+                # (schedule_id, date, COALESCE(shift_type_id, 0), slot_index)
+                # und traegt das - die Nummern sind je Schichtart nur nicht
+                # mehr luckenlos, was niemanden stoert.
+                'slot_index': slot_index,
+                'is_weekend': weekday >= 5,
+                'start_time': block['start_time'],
+                'end_time': block['end_time'],
+                'duration_minutes': shift_duration_minutes(
+                    block['start_time'], block['end_time']),
+            })
+    return slots

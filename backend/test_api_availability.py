@@ -262,6 +262,14 @@ def test_planer_haelt_sich_end_to_end_an_die_ueber_die_api_gesetzten_fenster(hr_
         'end_time': '16:00',
         'requirements': [1, 1, 1, 1, 1, 1, 1],
     })
+    # Seit Etappe 4 ist das Bedarfsband die Quelle des Planers; die
+    # requirements der Schichtart oben beschreiben dasselbe Bild im alten
+    # Modell und bleiben als Beleg dafuer stehen.
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': wochentag, 'start_time': '08:00', 'end_time': '16:00',
+         'required_count': 1}
+        for wochentag in range(7)
+    ])
 
     antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
     assert antwort.status_code == 201, antwort.json
