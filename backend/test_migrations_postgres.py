@@ -1152,3 +1152,22 @@ def test_in_die_einstellungstabelle_laesst_sich_schreiben(pg_db):
             assert zeiger.fetchone()[0] == 'BY'
     finally:
         verbindung.close()
+
+
+def test_in_das_protokoll_laesst_sich_schreiben(pg_db):
+    """Fallstrick 16: jede Tabelle, in die eingefuegt wird, braucht eine id."""
+    migrations, schema_url, _schema = pg_db
+    migrations.apply_pending()
+
+    verbindung = psycopg2.connect(schema_url)
+    try:
+        with verbindung.cursor() as zeiger:
+            zeiger.execute(
+                "INSERT INTO audit_log (at, user_id, username, method, path, status) "
+                "VALUES ('2026-08-23 10:00:00', 1, 'hr', 'PUT', '/assignments/1', 200)")
+        verbindung.commit()
+        with verbindung.cursor() as zeiger:
+            zeiger.execute('SELECT path FROM audit_log')
+            assert zeiger.fetchone()[0] == '/assignments/1'
+    finally:
+        verbindung.close()

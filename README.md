@@ -67,6 +67,25 @@ The migration sets every existing plan to **published**, not draft. A migration 
 
 Setting the state a plan already has is not an error — that is idempotent, and `published_at` stays put rather than moving, so pressing the button twice does not rewrite the answer to "since when?".
 
+## The change log
+
+`published_at` answers *since when* a plan has been visible. It does not answer *who released it*, or who swapped the assignment on the 3rd. In an argument about a roster that is the second question, and there was no answer.
+
+The log records **requests, not narrative**: time, user, method, path, response status, for every request that is not a `GET`. One `after_request` hook, complete by construction, with no route left to forget.
+
+**And deliberately without bodies.** A narrative log ("put Anna on the early shift") would read better, but its details would write sick notes a second time — and those are health data under Art. 9 GDPR. Storing them again is the operator's decision, not a technical one, so the log stops at *that* something changed and by whom. That is the price of the request-level design, and the honest half of the trade.
+
+**Failed requests are recorded too.** A rejected attempt to change the roster is at least as interesting as a successful one; a log that only knows successes hides exactly the cases people open it for.
+
+**No foreign key to `users`, and the username is copied alongside.** Accounts get deleted, and with `ON DELETE CASCADE` the log would go with them — a log whose entries can be removed by deleting the account is not a log. `user_id` stays as a bare number so related entries remain findable.
+
+**It never breaks a request.** The write sits in a `try/except` that logs the failure and lets the response through; a log that turns an otherwise fine change into a `500` would fail first in exactly the moments when something is already wrong. Two implementation details earned their comments the hard way:
+
+- The hook **rolls back before writing**, on the request's own connection. Without that, committing the log entry also commits whatever a half-failed request left pending — an existing test caught it when an invalid employee suddenly persisted.
+- The obvious alternative, a connection of its own per request, is more decoupled but doubled the test suite's runtime (68 to 134 seconds) and would mean an extra Postgres connection for every write against an instance with a limited supply.
+
+There is **no route to clear it**. Something that empties at the press of a button is not a log. Retention is real and still open — the log is itself personal data and needs a period — but that is a decision for the operator and belongs with the GDPR work.
+
 ## Self-service sick / vacation
 
 The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
@@ -316,7 +335,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
-- Remaining production-readiness work: an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
+- Remaining production-readiness work: data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
@@ -354,6 +373,7 @@ schichtplan-tool/
 │   ├── test_working_time.py    # § 4 break thresholds and net working time
 │   ├── test_holidays.py        # The holiday table, Easter, and Buß- und Bettag
 │   ├── test_api_publishing.py  # Who sees which plan, and when
+│   ├── test_api_audit.py       # The change log, including that it never breaks a request
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
@@ -378,6 +398,7 @@ schichtplan-tool/
         │   ├── BusinessHours.test.jsx
         │   ├── CoverageEditor.jsx     # Coverage-band editor (overlap/opening-hours validation)
         │   ├── CoverageEditor.test.jsx
+        │   ├── AuditLog.jsx      # The change log, deliberately raw
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
         └── components/
             ├── ScheduleGrid.jsx    # The schedule grid: reassign + swap UI
@@ -475,7 +496,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)). To manage by hand:
 
 ```bash
 cd backend
@@ -545,6 +566,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | POST   | `/business-hours/exceptions`      | Add an exception for one date `{date, open_time, close_time, closed, label}` (HR) |
 | DELETE | `/business-hours/exceptions/<date>` | Remove a date's exception, reverting it to the weekday rule (HR)   |
 | PUT    | `/schedules/<year>/<month>/status` | Publish a schedule or pull it back to a draft (HR)                  |
+| GET    | `/audit-log`                      | The most recent change-log entries, newest first; `?limit=` up to 500 (HR) |
 | GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
 | PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
 | GET    | `/holiday-regions`                | The federal states to choose from                                    |
@@ -562,7 +584,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (385 tests at the time of writing — `cd backend && pytest` prints the current number; 33 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (397 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

@@ -24,17 +24,15 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5f ist **fertig umgesetzt, aber noch nicht gemergt** — Branch
-`etappe-5f-veroeffentlichen`.
+Etappe 5g ist **fertig umgesetzt, aber noch nicht gemergt** — Branch `etappe-5g-audit-log`.
+5f ist gemergt und deployt.
 
-Das Arbeitszeitrecht ist vollständig, soweit dieses Tool es tragen kann. Offen bleiben drei
-Teile von Etappe 5:
+Offen bleiben zwei Teile, und bei beiden ist mit einer Entscheidung des Nutzers zu rechnen:
 
-| Teil | Anmerkung |
+| Teil | Was zu klären ist |
 |---|---|
-| **Audit-Log** | `login_attempts` ist laut Design-Spec der erste Baustein |
-| **Exporte** | Hier stellt sich die Frage nach neuen Laufzeitabhängigkeiten. iCal und CSV gehen ohne, PDF und Excel nicht — **das gehört entschieden, bevor jemand anfängt** |
-| **DSGVO** | Krankmeldungen sind Art.-9-Daten. **Aufbewahrungsfristen sind eine Entscheidung des Nutzers**, keine, die eine Sitzung treffen kann |
+| **Exporte** | Neue Laufzeitabhängigkeiten. iCal und CSV gehen ohne, PDF und Excel nicht. Das Projekt hat bewusst fünf |
+| **DSGVO** | **Aufbewahrungsfristen** — für Krankmeldungen (Art.-9-Daten) und für das Audit-Log aus 5g. Eine betriebliche Festlegung, keine technische |
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -47,11 +45,11 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | | |
 |---|---|
 | `main` | Alles bis 5e gemergt und deployt (PR #16–#21); die API antwortet mit 200 |
-| Branch-Situation | **Ein offener Branch: `etappe-5f-veroeffentlichen`** |
-| Aktueller Branch | `etappe-5f-veroeffentlichen` |
-| Testsuite | 385 passed / 34 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
+| Branch-Situation | **Ein offener Branch: `etappe-5g-audit-log`** |
+| Aktueller Branch | `etappe-5g-audit-log` |
+| Testsuite | 397 passed / 35 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0012`. `0012_publish_state` macht aus `schedules.status` einen Zustand mit Bedeutung und setzt alle Bestandspläne auf `published` |
+| Migrationen | `0001`–`0013`. `0013_audit_log` legt das Änderungsprotokoll an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -582,7 +580,7 @@ Fallstrick 16 und hat einen eigenen Schreibtest gegen Postgres bekommen.
 Die regionalen Feiertage sind **paarweise** getestet — je ein Land mit und eines ohne. „Gilt in
 Bayern" allein wäre auch grün, wenn der Feiertag überall stünde.
 
-## Etappe 5f — Veröffentlichen-Workflow
+## Etappe 5f — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-23-etappe-5f-veroeffentlichen-design.md`](superpowers/specs/2026-08-23-etappe-5f-veroeffentlichen-design.md)
 
@@ -610,6 +608,34 @@ veröffentlicht" für einen Plan, den es nicht mehr gibt.
 **Kein Frontend-Test für die Schaltfläche.** `SchedulePage.jsx` hat auch bisher keinen — die
 Komponente hängt an einem guten Dutzend API-Aufrufen, und der Aufwand für einen sinnvollen Test
 gehört in eine eigene Aufgabe. Die Logik ist backendseitig durch zehn Tests gedeckt.
+
+## Etappe 5g — Audit-Log
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-5g-audit-log-design.md`](superpowers/specs/2026-08-23-etappe-5g-audit-log-design.md)
+
+Ein `after_request`-Haken protokolliert jede verändernde Anfrage: Zeitpunkt, Benutzer, Methode,
+Pfad, Status. Eine Stelle, lückenlos per Konstruktion — und **ohne Anfrageinhalte**, weil die
+Krankmeldungen enthalten und das Art.-9-Daten sind. Der Preis steht im README: das Log sagt,
+*dass* etwas geändert wurde und von wem, nicht worauf.
+
+Kein Fremdschlüssel auf `users`, Benutzername als Kopie: Konten werden gelöscht, und ein
+Protokoll, dessen Einträge mit dem Konto verschwinden, ist keines.
+
+**Drei Dinge, die beim Bauen schiefgingen und deshalb Kommentare tragen:**
+
+1. **Der Haken committete die halbfertige Arbeit fehlgeschlagener Anfragen.** Er benutzte die
+   Verbindung der Anfrage, und `commit()` nahm mit, was die gescheiterte Route offen gelassen
+   hatte. Gefangen von einem Bestandstest — ein ungültig angelegter Mitarbeiter blieb plötzlich
+   stehen. Jetzt `rollback()` vor dem Schreiben.
+2. **Die naheliegende Lösung war zu teuer.** Eine eigene Verbindung je Anfrage ist entkoppelter,
+   verdoppelte aber die Testlaufzeit (68 → 134 s) und wäre in Produktion eine zusätzliche
+   Postgres-Verbindung pro Schreibzugriff auf einer Instanz mit begrenztem Vorrat.
+3. **Das `try/except` verschluckte einen `NameError` und schrieb still gar nichts.** Genau die
+   Fehlerart, die ein solcher Haken erzeugt. Der erste Test der Datei prüft deshalb
+   ausdrücklich, dass ein Eintrag *entsteht*.
+
+**Die Aufbewahrungsfrist fehlt und ist bewusst offen** — das Log ist selbst personenbezogen. Sie
+gehört zum DSGVO-Teil und ist eine Entscheidung des Nutzers.
 
 ## Arbeitsweise
 
