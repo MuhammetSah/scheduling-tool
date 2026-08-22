@@ -139,6 +139,19 @@ def shift_duration_minutes(start_time, end_time):
 # a 30-minute break still leaves exactly nine hours, and nine hours is not
 # "more than nine"; only from 9:31 does 30 minutes stop being enough. Applying
 # the law's own numbers directly to the span is the obvious mistake here.
+# § 11 Abs. 3 ArbZG grants a replacement rest day within two weeks of every
+# Sunday worked - a condition about the *absence* of assignments, which a
+# backtracking search handles badly: it cannot be judged until the whole month
+# stands. Never working more than six days in a row means a free day at least
+# every seven, which satisfies that window, and the eight-week one for public
+# holidays outright. Stricter than the law reads - Monday through Sunday with
+# the following Monday off is lawful and this rejects it - and deliberately
+# so: it is a condition the search can actually carry.
+MAX_CONSECUTIVE_DAYS = 6
+
+# § 11 Abs. 1 ArbZG: at least 15 Sundays a year must stay free of work.
+MIN_FREE_SUNDAYS_PER_YEAR = 15
+
 BREAK_THRESHOLDS = ((6 * 60, 0), (9 * 60 + 30, 30))
 LONG_SHIFT_BREAK_MINUTES = 45
 
@@ -473,6 +486,49 @@ def _search(
 
         return True
 
+    def works_on(eid, iso_date):
+        """Does this employee already hold a block on that calendar date?
+
+        Reads the two structures Etappe 4 introduced rather than adding a
+        third: day_hours for blocks with known times, day_untimed for the ones
+        without. Either one means the day is taken.
+        """
+        key = (eid, iso_date)
+        return bool(day_hours.get(key)) or bool(day_untimed.get(key))
+
+    def consecutive_days_with(emp, iso_date):
+        """Length of the unbroken run of worked days this assignment would join.
+
+        Counted in *both* directions. Chronological ordering would make a
+        leftward count enough, but MOST_CONSTRAINED does not run in calendar
+        order and AUTO uses both - counting only leftwards would let a run of
+        seven build itself from the back, one harmless-looking day at a time.
+        Same reasoning as rest_period_ok(), which checks the day before *and*
+        the day after.
+
+        Leftwards the run stops at the first of the month and carries on into
+        days_worked_before_month: the previous month is already saved and
+        cannot be replanned, so its tail is a fact rather than a choice.
+        Rightwards no month boundary is needed - the next month is empty in
+        this search either way, so the loop ends there on its own.
+        """
+        d = date.fromisoformat(iso_date)
+        run = 1
+
+        cursor = d - timedelta(days=1)
+        while cursor.month == d.month and works_on(emp['id'], cursor.isoformat()):
+            run += 1
+            cursor -= timedelta(days=1)
+        if cursor.month != d.month:
+            run += emp.get('days_worked_before_month') or 0
+
+        cursor = d + timedelta(days=1)
+        while works_on(emp['id'], cursor.isoformat()):
+            run += 1
+            cursor += timedelta(days=1)
+
+        return run
+
     def day_is_free(emp, slot):
         """May `emp` take this block on top of what they already have that day?
 
@@ -519,6 +575,15 @@ def _search(
                 current = week_minutes.get((eid, slot['week_start']), 0)
                 if current + working > weekly_cap * 60:
                     continue
+            # Read from the employee rather than applied unconditionally, the
+            # same way min_rest_hours is: the law fixes the number, but the
+            # planner only enforces what a caller supplies. That is what keeps
+            # the 23 backward-compatibility tests in test_scheduler.py - which
+            # deal in shift counts and nothing else - unchanged and green.
+            # load_employees_for_scheduling() always supplies it.
+            consecutive_cap = emp.get('max_consecutive_days')
+            if consecutive_cap is not None and                     consecutive_days_with(emp, slot['date']) > consecutive_cap:
+                continue
             if not rest_period_ok(emp, slot):
                 continue
             candidates.append(emp)
