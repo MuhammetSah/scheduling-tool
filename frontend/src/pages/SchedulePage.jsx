@@ -23,6 +23,7 @@ function SchedulePage({ setFlash, user }) {
   const [warnings, setWarnings] = useState([])
   const [swapSelection, setSwapSelection] = useState(null)
   const [view, setView] = useState('calendar')
+  const [emptyMessage, setEmptyMessage] = useState('')
   // Off by default: evening out weekend duty specifically can cost a little of
   // the overall balance (see README), so it's an opt-in rather than always-on.
   const [weekendEquity, setWeekendEquity] = useState(false)
@@ -45,9 +46,11 @@ function SchedulePage({ setFlash, user }) {
     }
   }
 
+  // Liefert immer { data, message }: data ist der Plan oder null, message die
+  // Auskunft des Servers, warum es keinen gibt.
   async function fetchSchedule() {
     try {
-      return await api.get(`/schedules/${year}/${month}`)
+      return { data: await api.get(`/schedules/${year}/${month}`), message: '' }
     } catch (err) {
       // Nur ein echtes "kein Plan fuer diesen Monat" wird als null behandelt -
       // das ist ausschliesslich das 404, das GET /schedules/<year>/<month>
@@ -58,14 +61,40 @@ function SchedulePage({ setFlash, user }) {
       // generate() ueberspringt dann seine Rueckfrage vor dem Ueberschreiben
       // eines bestehenden Plans (siehe dort), und ohne Handkorrekturen
       // darauf hat auch der Server nichts, worauf er ein 409 stuetzen koennte.
-      if (err.status === 404) return null
+      // Die Meldung wird zurueckgegeben statt hier gesetzt: seit dem
+      // Veroeffentlichen-Workflow sind "es gibt keinen Plan" und "der Plan ist
+      // noch nicht veroeffentlicht" zwei verschiedene Auskuenfte, und beide
+      // kommen als 404. Gesetzt wird sie beim Aufrufer - diese Funktion wird
+      // synchron aus einem Effekt heraus gerufen, und setState gehoert dort
+      // in den .then()-Zweig.
+      if (err.status === 404) return { data: null, message: err.message || '' }
       throw err
     }
   }
 
+  async function setStatus(status) {
+    try {
+      setSchedule(await api.put(`/schedules/${year}/${month}/status`, { status }))
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
+  function publish() {
+    setStatus('published')
+  }
+
+  function withdraw() {
+    // Nachfragen: das Zurueckziehen nimmt allen die Sicht auf ihren Plan.
+    if (!confirm(t('schedule.withdrawConfirm'))) return
+    setStatus('draft')
+  }
+
   async function refreshSchedule() {
     try {
-      setSchedule(await fetchSchedule())
+      const { data, message } = await fetchSchedule()
+      setSchedule(data)
+      setEmptyMessage(message)
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }
@@ -80,7 +109,11 @@ function SchedulePage({ setFlash, user }) {
   useEffect(() => {
     let cancelled = false
     fetchSchedule()
-      .then(data => { if (!cancelled) setSchedule(data) })
+      .then(({ data, message }) => {
+        if (cancelled) return
+        setSchedule(data)
+        setEmptyMessage(message)
+      })
       .catch(err => { if (!cancelled) setFlash({ type: 'error', text: err.message }) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -94,6 +127,7 @@ function SchedulePage({ setFlash, user }) {
     // Monats im State - ein Klick auf "Neu erzeugen" waehrend dieser Luecke
     // wuerde dann faelschlich gegen den alten Monat pruefen/generieren.
     setSchedule(null)
+    setEmptyMessage('')
     setWarnings([])
     setSwapSelection(null)
   }
@@ -149,6 +183,9 @@ function SchedulePage({ setFlash, user }) {
     try {
       const result = await api.delete(`/schedules/${year}/${month}`)
       setSchedule(null)
+      // Sonst stuende im leeren Zustand noch die Auskunft von vorhin - etwa
+      // "noch nicht veroeffentlicht" fuer einen Plan, den es gar nicht mehr gibt.
+      setEmptyMessage('')
       setFlash({ type: 'success', text: result.message })
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
@@ -318,13 +355,41 @@ function SchedulePage({ setFlash, user }) {
 
         {!loading && !schedule && (
           <p className="empty-state">
-            {t('schedule.noScheduleYet', { month: monthNames[month - 1], year })}
-            {!canEdit && t('schedule.noScheduleEmployeeHint')}
+            {emptyMessage || (
+              <>
+                {t('schedule.noScheduleYet', { month: monthNames[month - 1], year })}
+                {!canEdit && t('schedule.noScheduleEmployeeHint')}
+              </>
+            )}
           </p>
         )}
 
         {!loading && schedule && (
           <>
+            {canEdit && (
+              <div className="schedule-publish">
+                <span className={`badge ${schedule.status === 'published' ? '' : 'badge-pending'}`}>
+                  {schedule.status === 'published'
+                    ? t('schedule.publishedBadge')
+                    : t('schedule.draftBadge')}
+                </span>
+                {schedule.status === 'published' ? (
+                  <button type="button" className="btn-secondary btn-small" onClick={withdraw}>
+                    {t('schedule.withdrawButton')}
+                  </button>
+                ) : (
+                  <button type="button" className="btn-small" onClick={publish}>
+                    {t('schedule.publishButton')}
+                  </button>
+                )}
+                <span className="hint">
+                  {schedule.status === 'published'
+                    ? t('schedule.publishedHint')
+                    : t('schedule.draftHint')}
+                </span>
+              </div>
+            )}
+
             <div className="schedule-summary">
               <span className="badge">
                 {schedule.scope === 'own'

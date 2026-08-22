@@ -379,6 +379,14 @@ TRANSLATIONS = {
         'de': '{name} hätte damit nur noch {free} freie Sonntage in {year}; § 11 Abs. 1 ArbZG verlangt mindestens 15',
         'en': '{name} would be left with only {free} free Sundays in {year}; § 11 Abs. 1 ArbZG requires at least 15',
     },
+    'schedule_not_published_yet': {
+        'de': 'Der Plan für diesen Monat ist noch nicht veröffentlicht',
+        'en': 'The schedule for this month has not been published yet',
+    },
+    'unknown_schedule_status': {
+        'de': 'Unbekannter Zustand. Erlaubt sind: {allowed}',
+        'en': 'Unknown status. Allowed values are: {allowed}',
+    },
     'unknown_setting': {
         'de': 'Unbekannte Einstellung: {names}',
         'en': 'Unknown setting: {names}',

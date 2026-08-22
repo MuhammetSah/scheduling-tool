@@ -1231,3 +1231,75 @@ def test_0011_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
     assert 'settings' not in tabellen
 
     assert '0011_settings' in migrations.apply_pending()
+
+
+# ---------- 0012_publish_state ----------
+
+
+def test_0012_veroeffentlicht_bestandsplaene(fresh_db):
+    """Die Richtung, auf die es ankommt.
+
+    Eine Migration darf nicht aendern, was Leute gestern sehen konnten. Auf
+    'draft' zu setzen liesse alle laufenden Plaene verschwinden, bis jemand
+    sie einzeln freigibt.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    zurueck_bis(migrations, '0012_publish_state')
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 3, 'generated')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        zeile = connection.execute('SELECT status, published_at FROM schedules').fetchone()
+    finally:
+        connection.close()
+
+    assert zeile['status'] == 'published'
+    assert zeile['published_at'] is not None
+
+
+def test_0012_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    migrations, _db_file = fresh_db
+    migrations.apply_pending()
+
+    zurueck_bis(migrations, '0012_publish_state')
+
+    assert '0012_publish_state' in migrations.apply_pending()
+
+
+def test_0012_dreht_die_zustaende_beim_rollback_zurueck(fresh_db):
+    """Sonst faende der Bestand nach einem Rollback Werte vor, die die alte
+    Fassung nicht kennt."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 4, 'draft')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    zurueck_bis(migrations, '0012_publish_state')
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        zustaende = {z['status'] for z in connection.execute('SELECT status FROM schedules')}
+    finally:
+        connection.close()
+
+    assert zustaende == {'generated'}

@@ -1578,6 +1578,7 @@ def fetch_schedule(year, month):
         'year': schedule['year'],
         'month': schedule['month'],
         'status': schedule['status'],
+        'published_at': schedule['published_at'],
         'unfilled_count': schedule['unfilled_count'],
         'generated_at': schedule['generated_at'],
         'assignments': assignments,
@@ -1697,12 +1698,19 @@ def generate_schedule_route():
         schedule_id = existing['id']
         cursor.execute('DELETE FROM shift_assignments WHERE schedule_id = ?', (schedule_id,))
         cursor.execute(
-            "UPDATE schedules SET status = 'generated', unfilled_count = ?, generated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            # Back to draft, deliberately. The plan HR published is not this
+            # plan any more - regenerating discards every manual correction, and
+            # leaving it published would slip employees a different roster than
+            # the one they looked at. The response says so, so nobody has to
+            # wonder where the plan went.
+            "UPDATE schedules SET status = 'draft', published_at = NULL, "
+            "unfilled_count = ?, generated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (result['unfilled_count'], schedule_id),
         )
     else:
         cursor.execute(
-            "INSERT INTO schedules (year, month, status, unfilled_count, generated_at) VALUES (?, ?, 'generated', ?, CURRENT_TIMESTAMP)",
+            "INSERT INTO schedules (year, month, status, unfilled_count, generated_at) "
+            "VALUES (?, ?, 'draft', ?, CURRENT_TIMESTAMP)",
             (year, month, result['unfilled_count']),
         )
         schedule_id = cursor.lastrowid
@@ -1736,6 +1744,12 @@ def get_schedule(year, month):
         schedule['scope'] = 'all'
         return jsonify(schedule)
 
+    # A draft does not exist for employees - but with its own message. "There
+    # is nothing" and "it is not ready yet" are two different answers, and the
+    # second is the one that stops people asking.
+    if schedule['status'] != SCHEDULE_PUBLISHED:
+        return jsonify({'message': t(g.lang, 'schedule_not_published_yet')}), 404
+
     # An employee sees their own shifts and nothing else: not colleagues'
     # shifts, not gaps in the plan, and not the workload comparison, which is
     # a management view. Filtering happens here rather than in the browser so
@@ -1756,6 +1770,42 @@ def get_schedule(year, month):
     schedule['linked_employee_id'] = linked_employee_id
 
     return jsonify(schedule)
+
+
+@app.route('/schedules/<int:year>/<int:month>/status', methods=['PUT'])
+@hr_required
+def set_schedule_status(year, month):
+    """Publish a schedule, or pull it back to a draft.
+
+    Setting the state it already has is not an error: that is idempotent and
+    spares the caller a case distinction. published_at then stays where it was
+    rather than moving - "since when have people been able to see this?" should
+    not change just because someone pressed the button twice.
+    """
+    data = request.get_json(silent=True) or {}
+    status = data.get('status')
+    if status not in SCHEDULE_STATES:
+        return jsonify({'message': t(g.lang, 'unknown_schedule_status',
+                                     allowed=', '.join(SCHEDULE_STATES))}), 400
+
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id, status FROM schedules WHERE year = ? AND month = ?', (year, month))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'message': t(g.lang, 'no_schedule_found')}), 404
+
+    if status == SCHEDULE_PUBLISHED and row['status'] != SCHEDULE_PUBLISHED:
+        cursor.execute(
+            'UPDATE schedules SET status = ?, published_at = CURRENT_TIMESTAMP WHERE id = ?',
+            (status, row['id']))
+    elif status == SCHEDULE_DRAFT:
+        cursor.execute(
+            'UPDATE schedules SET status = ?, published_at = NULL WHERE id = ?',
+            (status, row['id']))
+    connection.commit()
+
+    return jsonify(fetch_schedule(year, month))
 
 
 @app.route('/schedules/<int:year>/<int:month>', methods=['DELETE'])
@@ -2978,6 +3028,15 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
 # The only setting so far. Kept as an explicit allow-list rather than "store
 # whatever arrives": a typo in a key would otherwise land in the table and
 # quietly never be read again.
+# The two states a schedule can be in. A draft is HR's business only; a
+# published plan is what employees see. Kept here rather than as a CHECK on the
+# table: the project has none anywhere, the API is the only writer, and
+# changing a CHECK on SQLite later means rebuilding the table - which
+# 0005_assignment_times already cost once.
+SCHEDULE_DRAFT = 'draft'
+SCHEDULE_PUBLISHED = 'published'
+SCHEDULE_STATES = (SCHEDULE_DRAFT, SCHEDULE_PUBLISHED)
+
 KNOWN_SETTINGS = {'holiday_region'}
 
 
