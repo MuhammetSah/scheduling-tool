@@ -75,7 +75,7 @@ A greedy algorithm assigns the first workable candidate to each slot and never r
 
 This algorithm instead explores assignments slot by slot in calendar order, and **undoes (backtracks) a choice** whenever it turns out to block a later slot with no other eligible candidate. It keeps searching after finding one complete assignment, in case a different set of choices leaves fewer slots unfilled (branch-and-bound: a running best-so-far result prunes any branch that can't beat it, and search stops early once a fully-staffed solution is found). A node/time budget acts as a safety valve on pathologically understaffed inputs, so a request always returns a best-effort result instead of hanging.
 
-Hard constraints enforced during search: an employee can't work two blocks that **overlap** on the same day (two blocks either side of a break are allowed — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), can't exceed their maximum daily working time, can't be scheduled on a weekday/date they're marked unavailable, can't be scheduled outside their availability windows (if in `windows` mode — see [Availability windows](#availability-windows)), can't be scheduled outside their allowed shift types (if restricted), can't exceed their monthly shift cap (if set), can't exceed their weekly target hours (if set — see [Part-time / weekly hours](#part-time--weekly-hours)), and can't be left with less than their minimum rest period against the shift immediately before or after (see [Rest periods](#rest-periods)).
+Hard constraints enforced during search: an employee can't work two blocks that **overlap** on the same day (two blocks either side of a break are allowed — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), can't exceed their maximum daily working time, can't be scheduled on a weekday/date they're marked unavailable, can't be scheduled outside their availability windows (if in `windows` mode — see [Availability windows](#availability-windows)), can't be scheduled outside their allowed shift types (if restricted), can't exceed their monthly shift cap (if set), can't exceed their weekly target hours (if set — see [Part-time / weekly hours](#part-time--weekly-hours)), and can't be left with less than their minimum rest period against the shift immediately before or after (see [Rest periods](#rest-periods)), can't work more than six days in a row, and can't be given a Sunday once their yearly budget of them is spent (both see [Rest days and free Sundays](#rest-days-and-free-sundays)).
 
 `backend/test_scheduler.py` includes a test that constructs a scenario where a literal greedy-first-fit pass provably leaves gaps that this algorithm closes, alongside tests for each hard constraint and for graceful degradation when there isn't enough staff to fill every slot.
 
@@ -155,7 +155,7 @@ Both the generator and the manual-correction path apply these, and as everywhere
 
 - **The eight-hour average of § 3 Satz 2.** Ten hours a day are only lawful if six calendar months (or 24 weeks) average out at eight. The planner works one month at a time and structurally cannot see that window — the same boundary at which `max_shifts_per_month` and the rest-period check at the month's edge already stop. A `max_daily_hours` above 8 is therefore **not self-supporting in law**; the employee form says so at the field, and the compensation remains HR's responsibility.
 - **The position of a break within a block, and with it § 4 Satz 3** (no more than six hours' work at a stretch). Breaks themselves are modelled since the following stage — see [Breaks and net working time](#breaks-and-net-working-time) — but as a duration, not a position. Worth noting in the other direction: an interruption of at least 30 minutes between two blocks *satisfies* § 4 in form, which makes a split shift the cleaner arrangement of the two.
-- **Sunday rules (§ 11 ArbZG)** and the "no more than six consecutive days" rule that follows from them.
+- ~~Sunday rules (§ 11 ArbZG)~~ — implemented since, see [Rest days and free Sundays](#rest-days-and-free-sundays). What remains open there is § 9 and § 10, which the tool cannot decide, and the holiday calendar.
 
 `employees.max_daily_hours` is `NOT NULL DEFAULT 10` rather than nullable, following the same reasoning `0001_baseline.py` gives for `min_rest_hours`: a safety-relevant setting should never be unset. "No daily limit" must not be what a forgotten field quietly means.
 
@@ -184,6 +184,28 @@ Note **9:30, not 9:00**. At a 9:30 span a 30-minute break still leaves exactly n
 **Still not checked: § 4 Satz 3** — "no more than six hours of work at a stretch without a break". That needs the break's *position*, not just its length, and the position is deliberately not modelled. Nor is the law's allowance to split a break into segments of at least 15 minutes each; what is stored is one total.
 
 The one place § 4 can be broken at all is the manual-correction path: left alone the break is the legal minimum and every plan is compliant by construction, so only someone entering a shorter break by hand gets a warning — and it stays a warning.
+
+### Rest days and free Sundays
+
+Two more rules bind the planner since this stage, both hard in the generator and warnings on the manual-correction path.
+
+**No more than six days in a row.** § 11 Abs. 3 ArbZG grants a replacement rest day within two weeks of every Sunday worked, and within eight weeks of every public holiday worked on a weekday. That is a condition about the **absence** of assignments — it cannot be judged until the whole month stands, which a backtracking search handles badly. Never working more than six days in a row means a free day at least every seven, which satisfies the two-week window, and the eight-week one outright.
+
+This is **stricter than the law reads**, deliberately: Monday through Sunday with the following Monday off is lawful, and this rejects it. It buys a condition the search can actually carry, and it is checked in *both* directions from the day in question — `MOST_CONSTRAINED` does not run in calendar order and `AUTO` uses both orderings, so counting only backwards would let a run of seven assemble itself from the back, one harmless-looking day at a time.
+
+**At least 15 free Sundays a year.** § 11 Abs. 1. The budget is the year's Sundays (52 or 53 — computed, not assumed; the difference is one Sunday of everyone's allowance) minus 15, minus the ones already worked. A second block on a Sunday someone already works costs nothing extra: § 11 Abs. 1 asks whether the day is free, not how many blocks sit on it, and charging twice would make a split shift on a Sunday dearer than one on a weekday. A budget that already went negative in the past reads as zero — the planner stops adding Sundays, but it does not raise over data it did not cause.
+
+**The generator now reads outside its month.** That boundary had stood since the beginning: `max_shifts_per_month` and the rest-period check both simply end at the edge of the month being generated. Both rules here reach past it, so `scheduling_history()` in `backend/app.py` loads two numbers per employee — the length of the run of days worked immediately before the month starts, and the Sundays already worked this calendar year.
+
+That loading has one trap worth knowing about. `generate_schedule_route()` deletes the month's assignments only *after* the search has run, so they are still in the database while the history loads. Counting them would dock everyone for shifts the same request is about to take away. The history is therefore bounded by the **date range** of the target month, never by `schedule_id` — a date inside the month belongs to that month, whatever schedule row it hangs off. `test_zweimal_erzeugen_ergibt_zweimal_denselben_plan` in `backend/test_api_schedules.py` is the test for it.
+
+Both rules are read from the employee dict (`max_consecutive_days`, `sundays_worked_in_year`) rather than applied unconditionally, exactly as `min_rest_hours` is: the law fixes the number, the planner enforces what its caller supplies. That is what leaves the 23 backward-compatibility tests in `test_scheduler.py`, which deal in shift counts and nothing else, untouched.
+
+**Still not enforced: § 9 and § 10.** Sunday and public-holiday work is forbidden in principle, and § 10 exempts whole industries — restaurants, hospitals, care, transport, bakeries and a dozen more. Whether *this* business falls under one is a fact about the business, not something the tool can derive. It is decided the way it always was, through the opening hours: a business closed on Sundays has no Sunday demand and gets no blocks. A "Sunday work permitted" switch is deliberately **not** built — it would do nothing the opening hours do not already do.
+
+**And still not known: which dates are public holidays.** A holiday calendar with per-state selection is its own stage; it changes nothing about the rules above, since the six-day rule covers the eight-week window regardless. What it would add is awareness — HR seeing that a date is a holiday before publishing.
+
+**The manual-correction path is the stricter of the two.** It runs against saved data, so it also sees *forward* past the end of the month; the generator cannot, because next month's blocks do not exist yet when it runs.
 
 ### Fairness (v1.3)
 
@@ -251,7 +273,8 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
 - Retiring `shift_requirements`: the table and its route are still written and stored, but nothing reads them for planning any more (see [Block planning and automatic trimming](#block-planning-and-automatic-trimming))
-- Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the eight-hour average behind a ten-hour day, the position of a break within a block (§ 4 Satz 3), and the Sunday and public-holiday rules under § 9 and § 11
+- A public-holiday calendar with per-state selection: it changes none of the rules above, but it would let HR see that a date is a holiday before publishing
+- Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the eight-hour average behind a ten-hour day, the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
@@ -286,6 +309,7 @@ schichtplan-tool/
 │   ├── test_block_planner.py   # Unit tests for stage 1, including the trimming
 │   ├── test_scheduler_split_shifts.py  # Split shifts, daily cap, rest across days
 │   ├── test_working_time.py    # § 4 break thresholds and net working time
+│   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
 └── frontend/
@@ -487,7 +511,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (291 tests at the time of writing — `cd backend && pytest` prints the current number; 31 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (316 tests at the time of writing — `cd backend && pytest` prints the current number; 31 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 
