@@ -8,6 +8,7 @@ import CoverageEditor from './pages/CoverageEditor'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Accounts from './pages/Accounts'
+import AuditLog from './pages/AuditLog'
 import SetPassword from './pages/SetPassword'
 import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
@@ -133,6 +134,7 @@ function App() {
                     <NavLink to="/business-hours" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.businessHours')}</NavLink>
                     <NavLink to="/coverage-requirements" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.coverageRequirements')}</NavLink>
                     <NavLink to="/register" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.accounts')}</NavLink>
+                    <NavLink to="/audit-log" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.auditLog')}</NavLink>
                   </>
                 )}
                 <button onClick={handleLogout}>{t('nav.logout', { username: user.username })}</button>
@@ -174,6 +176,11 @@ function App() {
               <Route path="/coverage-requirements" element={
                 <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
                   <CoverageEditor setFlash={setFlash} />
+                </RequireAuth>
+              } />
+              <Route path="/audit-log" element={
+                <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
+                  <AuditLog setFlash={setFlash} />
                 </RequireAuth>
               } />
               {/* Public: the token from the invitation email is the credential. */}

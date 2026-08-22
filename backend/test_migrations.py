@@ -67,6 +67,7 @@ ALLE_MIGRATIONEN_TABELLEN = (BASELINE_TABELLEN | {
     'login_attempts', 'employee_availability',
     'business_hours', 'business_hours_exceptions', 'coverage_requirements',
     'settings',
+    'audit_log',
 }) - {
     # 0010 entfernt sie wieder. Nach 0001 gibt es sie, am Ende nicht mehr -
     # deshalb steht sie oben in BASELINE_TABELLEN und hier in der Gegenmenge,
@@ -1303,3 +1304,53 @@ def test_0012_dreht_die_zustaende_beim_rollback_zurueck(fresh_db):
         connection.close()
 
     assert zustaende == {'generated'}
+
+
+# ---------- 0013_audit_log ----------
+
+
+def test_0013_legt_das_protokoll_an(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        spalten = {zeile[1] for zeile in connection.execute('PRAGMA table_info(audit_log)')}
+    finally:
+        connection.close()
+
+    assert spalten == {'id', 'at', 'user_id', 'username', 'method', 'path', 'status'}
+
+
+def test_0013_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    migrations, _db_file = fresh_db
+    migrations.apply_pending()
+
+    zurueck_bis(migrations, '0013_audit_log')
+
+    assert '0013_audit_log' in migrations.apply_pending()
+
+
+def test_0013_haelt_eintraege_ohne_fremdschluessel_auf_users(fresh_db):
+    """Ein Protokoll, dessen Eintraege sich loeschen lassen, indem man das Konto
+    loescht, ist keines.
+
+    Geprueft ueber eine user_id, die es gar nicht gibt: mit Fremdschluessel
+    waere das ein Fehler, ohne einen ist es genau der Zustand, den ein
+    geloeschtes Konto hinterlaesst.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute('PRAGMA foreign_keys = ON')
+        connection.execute(
+            "INSERT INTO audit_log (at, user_id, username, method, path, status) "
+            "VALUES ('2026-08-23 10:00:00', 9999, 'hr', 'PUT', '/assignments/1', 200)")
+        connection.commit()
+        anzahl = connection.execute('SELECT COUNT(*) FROM audit_log').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert anzahl == 1

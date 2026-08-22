@@ -95,6 +95,74 @@ def resolve_request_lang():
     g.request_id = uuid.uuid4().hex[:8]
 
 
+# Requests that change nothing are not worth a row, and the two that carry a
+# password in their body are already covered by login_attempts - two records of
+# the same event would be one too many.
+AUDIT_SKIP_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+AUDIT_SKIP_PATHS = frozenset({'/login'})
+AUDIT_LIMIT_DEFAULT = 100
+AUDIT_LIMIT_MAX = 500
+
+
+@app.after_request
+def record_audit_entry(response):
+    """Log every changing request: who, when, what method and path, what status.
+
+    Deliberately request-level and **without bodies**. A narrative log ("put
+    Anna on the early shift") would read better, but its details would write
+    sick notes a second time, and those are health data under Art. 9 GDPR -
+    that is the operator's call to make, not the schema's. What this answers is
+    the question actually asked: who touched this assignment, and when.
+
+    Failed requests are recorded too. A rejected attempt to change the roster
+    is at least as interesting as a successful one, and a log that only knows
+    successes hides exactly the cases people open it for.
+
+    This must never turn a request into an error. A log that breaks an
+    otherwise fine change is worse than no log - it would fail first in the
+    moments when something is already wrong. Hence the try/except: the failure
+    goes to the application log and the response goes out untouched.
+    """
+    if request.method in AUDIT_SKIP_METHODS:
+        return response
+    if request.path in AUDIT_SKIP_PATHS or request.path.startswith('/invitations/'):
+        return response
+
+    try:
+        user = getattr(g, 'user', None)
+        connection = get_db()
+        # Erst zurueckrollen, dann schreiben. Der Haken laeuft, nachdem die
+        # Route zurueckgekehrt ist: eine erfolgreiche hat laengst committet und
+        # laesst nichts offen, eine gescheiterte laesst genau die halbfertigen
+        # Zeilen stehen, die teardown_appcontext ohnehin verwerfen wuerde. Ohne
+        # dieses rollback() committet der Eintrag sie mit - genau das ist beim
+        # Bauen passiert, und ein Bestandstest hat es gefangen: ein ungueltig
+        # angelegter Mitarbeiter blieb ploetzlich stehen.
+        #
+        # Die naheliegende Alternative war eine eigene Verbindung je Anfrage.
+        # Sie ist entkoppelter, verdoppelte aber die Laufzeit der Testsuite
+        # (68 auf 134 Sekunden) - und in Produktion waere es eine zusaetzliche
+        # Postgres-Verbindung pro schreibender Anfrage, auf einer Instanz mit
+        # begrenztem Vorrat. Der Preis stand in keinem Verhaeltnis.
+        connection.rollback()
+        cursor = connection.cursor()
+        cursor.execute(
+            'INSERT INTO audit_log (at, user_id, username, method, path, status) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(sep=' ', timespec='seconds'),
+             user['id'] if user else None,
+             user['username'] if user else None,
+             request.method, request.path, response.status_code),
+        )
+        connection.commit()
+    except Exception:
+        # app.logger, wie der globale Fehlerhandler weiter unten - app.py hat
+        # keinen eigenen Modul-Logger.
+        app.logger.exception('Audit-Eintrag konnte nicht geschrieben werden')
+
+    return response
+
+
 def get_db():
     """This request's database connection, opened on first use and reused after.
 
@@ -1146,6 +1214,29 @@ def cancel_absence(employee_id, iso_date):
 
     connection.commit()
     return jsonify({'message': t(g.lang, 'absence_removed')}), 200
+
+
+@app.route('/audit-log', methods=['GET'])
+@hr_required
+def get_audit_log():
+    """The most recent entries, newest first.
+
+    Read-only on purpose: there is no route to clear it. Something that empties
+    at the press of a button is not a log. Retention comes with the GDPR work,
+    and then as a period rather than a button.
+    """
+    try:
+        limit = min(int(request.args.get('limit', AUDIT_LIMIT_DEFAULT)), AUDIT_LIMIT_MAX)
+    except (TypeError, ValueError):
+        return jsonify({'message': t(g.lang, 'limit_must_be_int')}), 400
+    if limit < 1:
+        return jsonify({'message': t(g.lang, 'limit_must_be_int')}), 400
+
+    cursor = get_db().cursor()
+    cursor.execute(
+        'SELECT at, user_id, username, method, path, status FROM audit_log '
+        'ORDER BY at DESC, id DESC LIMIT ?', (limit,))
+    return jsonify([dict(row) for row in cursor.fetchall()])
 
 
 # ---------- accounts ----------
