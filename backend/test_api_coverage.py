@@ -930,3 +930,49 @@ def test_die_ruhepause_erzeugt_keine_deckungsluecke(hr_client):
 
     luecken = [g for g in antwort.json['coverage_gaps'] if g['date'] == '2026-09-01']
     assert luecken == []
+
+
+# ---------- Etappe 5e: die alte Bedarfsquelle ist weg ----------
+
+
+def test_schichtart_traegt_keine_bedarfszahlen_mehr(hr_client):
+    """Die Schichtart ist nur noch Vorlage: Name, Zeiten, Farbe."""
+    antwort = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    })
+
+    assert antwort.status_code == 201, antwort.json
+    assert 'requirements' not in antwort.json
+    assert set(antwort.json) == {'id', 'name', 'start_time', 'end_time', 'color'}
+
+
+def test_requirements_im_rumpf_wird_ignoriert_statt_abgelehnt(hr_client):
+    """Ein 400 waere die strengere Lesart, braeche aber jeden Aufrufer, der noch
+    die alte Form schickt, ohne dass er etwas falsch macht.
+
+    Auch Unsinn kommt durch - der Wert wird gar nicht erst angesehen. Frueher
+    haetten [1,2] (falsche Laenge) und ['viel'] je einen 400 ergeben.
+    """
+    for unsinn in ([1] * 7, [1, 2], ['viel'], None, 'quatsch'):
+        antwort = hr_client.post('/shift-types', json={
+            'name': f'Tag {unsinn}', 'start_time': '08:00', 'end_time': '16:00',
+            'requirements': unsinn,
+        })
+        assert antwort.status_code == 201, (unsinn, antwort.json)
+        assert 'requirements' not in antwort.json
+
+
+def test_der_generator_laeuft_ohne_die_alte_tabelle(hr_client):
+    """Die Gegenprobe, die zeigt, dass nichts Wesentliches mitgegangen ist."""
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    })
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    assert antwort.status_code == 201, antwort.json
+    assert antwort.json['assignments']

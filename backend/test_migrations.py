@@ -63,9 +63,14 @@ BASELINE_TABELLEN = {
 # unten, dem Gegenstueck zu test_baseline_erzeugt_genau_die_erwarteten_tabellen...
 # fuer den vollstaendigen, echten Migrationsordner statt nur fuer 0001_baseline
 # isoliert.
-ALLE_MIGRATIONEN_TABELLEN = BASELINE_TABELLEN | {
+ALLE_MIGRATIONEN_TABELLEN = (BASELINE_TABELLEN | {
     'login_attempts', 'employee_availability',
     'business_hours', 'business_hours_exceptions', 'coverage_requirements',
+}) - {
+    # 0010 entfernt sie wieder. Nach 0001 gibt es sie, am Ende nicht mehr -
+    # deshalb steht sie oben in BASELINE_TABELLEN und hier in der Gegenmenge,
+    # von Hand wie alles in dieser Liste (Fallstrick 5).
+    'shift_requirements',
 }
 
 
@@ -815,6 +820,13 @@ def test_ableitung_laesst_bestehende_baender_unangetastet(fresh_db):
     """
     migrations, db_file = fresh_db
     migrations.apply_pending()
+    assert '0007_derive_coverage' in migrations.applied_versions()
+
+    # Erst zurueckrollen, dann die Testdaten anlegen. Seit 0010 gibt es
+    # shift_requirements am Ende der Migrationskette nicht mehr - und die
+    # Aussage dieses Tests ist ohnehin "Altbestand liegt vor, WENN 0007
+    # laeuft", also gehoeren die Daten an genau diese Stelle.
+    zurueck_bis(migrations, '0007_derive_coverage')
 
     connection = sqlite3.connect(db_file)
     try:
@@ -825,9 +837,6 @@ def test_ableitung_laesst_bestehende_baender_unangetastet(fresh_db):
         connection.commit()
     finally:
         connection.close()
-
-    assert '0007_derive_coverage' in migrations.applied_versions()
-    zurueck_bis(migrations, '0007_derive_coverage')
     assert '0007_derive_coverage' not in migrations.applied_versions()
 
     connection = sqlite3.connect(db_file)
@@ -1125,3 +1134,62 @@ def test_0009_laesst_bestandszeilen_auf_null(fresh_db):
         connection.close()
 
     assert zeile['break_minutes'] is None
+
+
+# ---------- 0010_drop_shift_requirements ----------
+
+
+def test_0010_entfernt_die_alte_bedarfstabelle(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        tabellen = {zeile[0] for zeile in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        connection.close()
+
+    assert 'shift_requirements' not in tabellen
+
+
+def test_0010_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    """Rundlauf up -> down -> up.
+
+    Bei einer Migration, die etwas ENTFERNT, laeuft er andersherum als sonst:
+    down() legt die Tabelle wieder an, der zweite Vorwaertslauf entfernt sie
+    erneut. Ohne den Waechter in up() scheiterte er am fehlenden Objekt.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    zurueck_bis(migrations, '0010_drop_shift_requirements')
+
+    connection = sqlite3.connect(db_file)
+    try:
+        tabellen = {zeile[0] for zeile in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        connection.close()
+    assert 'shift_requirements' in tabellen
+
+    assert '0010_drop_shift_requirements' in migrations.apply_pending()
+
+
+def test_0010_stellt_beim_rollback_eine_leere_tabelle_her(fresh_db):
+    """Die Daten sind fort - bei einem DROP nicht anders zu haben.
+
+    Der Test haelt es fest, damit niemand die zurueckgerollte Tabelle fuer
+    vollstaendig haelt.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    zurueck_bis(migrations, '0010_drop_shift_requirements')
+
+    connection = sqlite3.connect(db_file)
+    try:
+        anzahl = connection.execute('SELECT COUNT(*) FROM shift_requirements').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert anzahl == 0

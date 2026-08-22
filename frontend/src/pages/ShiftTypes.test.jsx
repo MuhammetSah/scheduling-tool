@@ -20,7 +20,6 @@ const SCHICHTART = {
   start_time: '06:00',
   end_time: '14:00',
   color: '#3366cc',
-  requirements: [3, 3, 3, 3, 3, 0, 0],
 }
 
 async function zeigen() {

@@ -780,39 +780,21 @@ def replace_employee_availability(cursor, employee_id, entries):
 
 
 def serialize_shift_type(cursor, row):
-    shift_type_id = row['id']
-    cursor.execute('SELECT weekday, required_count FROM shift_requirements WHERE shift_type_id = ?', (shift_type_id,))
-    by_weekday = {r['weekday']: r['required_count'] for r in cursor.fetchall()}
-    requirements = [by_weekday.get(wd, 0) for wd in range(7)]
+    """A shift type is a template and nothing more: name, hours, colour.
 
+    The per-weekday head counts it used to carry moved to
+    coverage_requirements in Etappe 3 and stopped being read by the planner in
+    Etappe 4; the table behind them is gone since 0010. The cursor argument
+    stays for the sake of every caller's signature - and because a shift type
+    may well grow something worth a second query again.
+    """
     return {
-        'id': shift_type_id,
+        'id': row['id'],
         'name': row['name'],
         'start_time': row['start_time'],
         'end_time': row['end_time'],
         'color': row['color'],
-        'requirements': requirements,
     }
-
-
-def replace_shift_requirements(connection, shift_type_id, requirements):
-    if requirements is None:
-        requirements = [0] * 7
-    if len(requirements) != 7:
-        raise ValueError(t(g.lang, 'requirements_length'))
-
-    cursor = connection.cursor()
-    cursor.execute('DELETE FROM shift_requirements WHERE shift_type_id = ?', (shift_type_id,))
-    for weekday, count in enumerate(requirements):
-        try:
-            count = int(count)
-        except (TypeError, ValueError):
-            # Same normalisation as parse_int_list: a null or other non-number
-            # in the list must be a 400, not an unhandled 500.
-            raise ValueError(t(g.lang, 'requirements_must_be_int'))
-        if count < 0:
-            raise ValueError(t(g.lang, 'requirements_must_not_be_negative'))
-        cursor.execute('INSERT INTO shift_requirements (shift_type_id, weekday, required_count) VALUES (?, ?, ?)', (shift_type_id, weekday, count))
 
 
 # ---------- employees ----------
@@ -1277,7 +1259,6 @@ def create_shift_type():
             (name, start_time, end_time, data.get('color') or '#0d9488'),
         )
         shift_type_id = cursor.lastrowid
-        replace_shift_requirements(connection, shift_type_id, data.get('requirements'))
         connection.commit()
         cursor.execute('SELECT * FROM shift_types WHERE id = ?', (shift_type_id,))
         shift_type = serialize_shift_type(cursor, cursor.fetchone())
@@ -1307,7 +1288,6 @@ def update_shift_type(shift_type_id):
             'UPDATE shift_types SET name = ?, start_time = ?, end_time = ?, color = ? WHERE id = ?',
             (name, start_time, end_time, data.get('color') or '#0d9488', shift_type_id),
         )
-        replace_shift_requirements(connection, shift_type_id, data.get('requirements'))
         connection.commit()
         cursor.execute('SELECT * FROM shift_types WHERE id = ?', (shift_type_id,))
         shift_type = serialize_shift_type(cursor, cursor.fetchone())
@@ -1504,11 +1484,8 @@ def load_shift_types_for_scheduling(cursor):
     cursor.execute('SELECT * FROM shift_types')
     shift_types = []
     for row in cursor.fetchall():
-        cursor.execute('SELECT weekday, required_count FROM shift_requirements WHERE shift_type_id = ?', (row['id'],))
-        requirements = {r['weekday']: r['required_count'] for r in cursor.fetchall()}
         shift_types.append({
             'id': row['id'],
-            'requirements': requirements,
             'start_time': row['start_time'],
             'end_time': row['end_time'],
         })

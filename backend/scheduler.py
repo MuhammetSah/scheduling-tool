@@ -229,7 +229,23 @@ def rest_gap_hours(earlier, later):
 
 
 def build_slots(year, month, shift_types):
-    """Expand shift requirements into one entry per person-shift that must be staffed."""
+    """Expand per-weekday head counts into one entry per person-shift to staff.
+
+    **Not on any production path any more.** The application plans through
+    block_planner.build_month_blocks() since Etappe 4, and the table these
+    counts used to come from is gone since migration 0010 - the counts have to
+    be handed in through `shift_types` now. Two callers remain and both are
+    deliberate:
+
+      * benchmark.py, where this is the comparison basis the Etappe-4 switch
+        was measured against - it is how "the new path plans the same month the
+        same way" stays checkable;
+      * the 23 tests in test_scheduler.py, the project's backward-compatibility
+        guarantee, which deal in shift counts and no hours at all.
+
+    Worth saying out loud, because otherwise the next reader goes looking for
+    the caller that plans with it, and there isn't one.
+    """
     days_in_month = calendar.monthrange(year, month)[1]
     slots = []
     for day in range(1, days_in_month + 1):
