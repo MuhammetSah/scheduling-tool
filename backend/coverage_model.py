@@ -10,7 +10,7 @@ Die Minutenachse und ihre Mitternachtsregel kommen aus scheduler.py und
 werden hier nur wiederverwendet, nicht zweites Mal implementiert.
 """
 
-from scheduler import time_to_minutes, window_contains_shift
+from scheduler import time_to_minutes
 
 
 def _band_range(start_time, end_time):
@@ -46,6 +46,15 @@ def coverage_curve(shift_types):
     der required_count aller Schichtarten, die es vollstaendig ueberdecken.
     Benachbarte Intervalle mit gleicher Summe werden anschliessend zu einem
     Band verschmolzen, Intervalle mit Summe 0 fallen weg.
+
+    Mitternacht: die Grenzen werden ueber _band_range() gebildet und liegen
+    deshalb auf einer Achse, die ueber 1440 hinausreicht - eine Nachtschicht
+    22:00-06:00 wird zu [1320, 1800). Die Funktion erzeugt also nachweislich
+    Baender, die ueber Mitternacht gehen, und gibt sie als "22:00"/"06:00"
+    zurueck (_minutes_to_time() rechnet modulo 1440). Jede Weiterverarbeitung
+    muss ein solches Band vertragen: band_within() prueft die Enthaltung
+    deshalb auf dem Ring, nicht auf einer geraden Achse. Ein Band ist nie
+    laenger als 1440 Minuten, weil keine einzelne Schichtart es sein kann.
     """
     if not shift_types:
         return []
@@ -81,6 +90,27 @@ def coverage_curve(shift_types):
     ]
 
 
+def _ranges_overlap(range_a, range_b):
+    """Ueberschneiden sich zwei Minutenbereiche - auch ueber Mitternacht hinweg?
+
+    Halboffene Grenzen [start, end): zwei Bereiche, die sich nur beruehren
+    (Ende des einen = Start des anderen), ueberlappen NICHT. Der zweite Bereich
+    wird zusaetzlich einen Zyklus frueher und spaeter geprueft (+-1440 Minuten),
+    weil die Minutenachse in Wahrheit ein Ring ist: die Minute 1800 einer
+    Nachtschicht ist derselbe Zeitpunkt wie die Minute 360 des Folgetags.
+
+    Die eine Stelle, an der diese Verschiebung ausgerechnet wird -
+    first_overlapping_pair() und band_within() benutzen beide sie, damit es
+    nicht zwei aehnliche Fassungen derselben Ringlogik gibt.
+    """
+    start_a, end_a = range_a
+    start_b, end_b = range_b
+    return any(
+        start_a < end_b + shift and start_b + shift < end_a
+        for shift in (-24 * 60, 0, 24 * 60)
+    )
+
+
 def first_overlapping_pair(bands):
     """Erstes ueberlappende Bandpaar der Liste, oder None wenn keines ueberlappt.
 
@@ -93,12 +123,9 @@ def first_overlapping_pair(bands):
     ranges = [_band_range(band['start_time'], band['end_time']) for band in bands]
 
     for i in range(len(ranges)):
-        start_i, end_i = ranges[i]
         for j in range(i + 1, len(ranges)):
-            start_j, end_j = ranges[j]
-            for shift in (-24 * 60, 0, 24 * 60):
-                if start_i < end_j + shift and start_j + shift < end_i:
-                    return bands[i], bands[j]
+            if _ranges_overlap(ranges[i], ranges[j]):
+                return bands[i], bands[j]
 
     return None
 
@@ -115,15 +142,102 @@ def bands_overlap(bands):
     return first_overlapping_pair(bands) is not None
 
 
+def _closed_range(open_time, close_time):
+    """Die Schliesszeit als Minutenbereich: von close_time bis zum naechsten open_time.
+
+    Leer (Ende <= Start), wenn der Betrieb rund um die Uhr offen ist - genau der
+    Fall der Standard-Oeffnungszeit 00:00-00:00 aus Migration 0006, die
+    _band_range() zu [0, 1440) macht und deren Schliesszeit damit auf
+    [1440, 1440) zusammenfaellt.
+    """
+    open_min, close_min = _band_range(open_time, close_time)
+    return close_min, open_min + 24 * 60
+
+
 def band_within(band, open_time, close_time):
     """Liegt das Band vollstaendig innerhalb von open_time bis close_time?
 
-    Dieselbe Enthaltensein-Regel wie scheduler.window_contains_shift() - hier
-    direkt wiederverwendet, damit es nur eine Mitternachtsregel im Projekt
-    gibt statt einer zweiten Kopie fuer Baender.
+    Geprueft ueber die Gegenmenge: das Band liegt genau dann innerhalb der
+    Oeffnungszeit, wenn es die SCHLIESSZEIT nicht beruehrt. Der direkte
+    Vergleich "Fensterstart <= Bandstart und Bandende <= Fensterende" (so
+    macht es scheduler.window_contains_shift(), auf das diese Funktion frueher
+    zurueckgriff) kann das nicht leisten, sobald das Band ueber Mitternacht
+    geht: eine Nachtschicht 22:00-06:00 ist [1320, 1800), eine ganztaegige
+    Oeffnungszeit 00:00-00:00 ist [0, 1440), und 1800 <= 1440 ist falsch -
+    obwohl der Betrieb rund um die Uhr offen ist und das Band offensichtlich
+    hineinpasst. Ueber die Schliesszeit gelesen loest sich das auf: sie ist
+    dort leer, und ein leerer Bereich kann nichts schneiden.
+
+    Es reicht nicht, das Band um +-1440 zu verschieben und weiter gerade zu
+    vergleichen - keine der drei Lagen von [1320, 1800) liegt in [0, 1440),
+    weil das Band die Fensterkante ueberschreitet statt neben ihr zu liegen.
+    Die Ringnatur steckt im Fenster, nicht im Band.
+
+    Die Verschiebung selbst macht _ranges_overlap(), dieselbe Funktion, die
+    first_overlapping_pair() benutzt - keine zweite Fassung davon.
+
+    Erlaubt wird dadurch nichts, was vorher zu Recht verboten war: bei
+    Oeffnungszeit 08:00-18:00 reicht die Schliesszeit von 1080 bis 1920, und
+    ein Band 07:00-12:00 ([420, 720)) schneidet ihre um 1440 zurueckversetzte
+    Kopie [-360, 480) - es bleibt abgelehnt. Der Ring greift nur da, wo er
+    eine Mitternachtsueberschreitung aufloest.
     """
-    window = {'start_time': open_time, 'end_time': close_time}
-    return window_contains_shift(window, band['start_time'], band['end_time'])
+    closed_start, closed_end = _closed_range(open_time, close_time)
+    if closed_end <= closed_start:
+        return True
+
+    return not _ranges_overlap(
+        _band_range(band['start_time'], band['end_time']),
+        (closed_start, closed_end),
+    )
+
+
+def trim_band_to_hours(band, open_time, close_time):
+    """Das Band auf die Oeffnungszeit zugeschnitten, oder None wenn nichts uebrig bleibt.
+
+    Sicherheitsnetz fuer Altbestand: ein Band kann aelter sein als die
+    Oeffnungszeit, unter der es heute gelesen wird - Migration 0007 leitet
+    Baender aus den Schichtarten ab und schreibt sie an der API vorbei, und
+    jede Datenbank, die vor der Gegenpruefung in replace_business_hours()
+    bearbeitet wurde, kann ebenfalls Baender ausserhalb der Oeffnungszeit
+    enthalten. Solche Baender duerfen keine Deckungsluecke fuer einen
+    geschlossenen Betrieb melden.
+
+    Passt das Band ohnehin ganz hinein (band_within()), kommt es unveraendert
+    zurueck - insbesondere bleibt ein Nachtband unter einer ganztaegigen
+    Oeffnungszeit unangetastet. Sonst wird der Schnitt mit dem Fenster
+    gebildet, wieder mit denselben +-1440-Lagen wie ueberall sonst in dieser
+    Datei; von mehreren moeglichen Lagen gewinnt die mit dem groessten
+    Ueberlapp. Zerfaellt der Schnitt theoretisch in zwei Stuecke (nur bei
+    einem Fenster laenger als 22 Stunden zusammen mit einem langen Nachtband
+    ueberhaupt erreichbar), wird bewusst nur das groessere gemeldet: zu wenig
+    Bedarf zu melden ist die harmlose Richtung, zu viel waere genau der
+    Fehler, den diese Funktion behebt.
+
+    required_count und alles Weitere am Band bleiben erhalten, nur die Zeiten
+    werden ersetzt.
+    """
+    if band_within(band, open_time, close_time):
+        return band
+
+    start, end = _band_range(band['start_time'], band['end_time'])
+    open_min, close_min = _band_range(open_time, close_time)
+
+    best = None
+    for shift in (-24 * 60, 0, 24 * 60):
+        lo = max(start + shift, open_min)
+        hi = min(end + shift, close_min)
+        if hi > lo and (best is None or hi - lo > best[1] - best[0]):
+            best = (lo, hi)
+
+    if best is None:
+        return None
+
+    return {
+        **band,
+        'start_time': _minutes_to_time(best[0]),
+        'end_time': _minutes_to_time(best[1]),
+    }
 
 
 def coverage_gaps(bands, covered_intervals):

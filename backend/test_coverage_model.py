@@ -5,7 +5,10 @@ sind reine Funktionen ohne Datenbank und ohne Flask - reine Aufrufe, keine
 Fixtures noetig.
 """
 
-from coverage_model import band_within, bands_overlap, coverage_curve, coverage_gaps, first_overlapping_pair
+from coverage_model import (
+    band_within, bands_overlap, coverage_curve, coverage_gaps, first_overlapping_pair,
+    trim_band_to_hours,
+)
 
 
 def test_zwei_anschliessende_schichten_ergeben_zwei_baender():
@@ -127,6 +130,56 @@ def test_band_within_prueft_vollstaendige_enthaltung():
 
     band_ausserhalb = {'start_time': '07:00', 'end_time': '12:00'}
     assert band_within(band_ausserhalb, '08:00', '18:00') is False
+
+
+def test_band_within_erlaubt_nachtband_bei_ganztaegiger_oeffnung():
+    """22:00-06:00 passt in die Oeffnungszeit 00:00-00:00 (ganztags offen).
+
+    Das Band ist [1320, 1800), die Oeffnungszeit [0, 1440) - auf einer geraden
+    Achse verglichen faellt das Band hinten heraus, obwohl der Betrieb rund um
+    die Uhr offen ist. Genau diese Kombination setzt Migration 0006 (Standard-
+    Oeffnungszeit) mit den Baendern zusammen, die Migration 0007 aus
+    Nachtschichten ableitet.
+
+    Gegenprobe im selben Test, sonst belegt er nur, dass die Pruefung schwaecher
+    geworden ist: bei einer echten Oeffnungszeit 08:00-18:00 bleibt 07:00-12:00
+    abgelehnt, und ein Nachtband erst recht.
+    """
+    nachtband = {'start_time': '22:00', 'end_time': '06:00'}
+    assert band_within(nachtband, '00:00', '00:00') is True
+
+    assert band_within({'start_time': '07:00', 'end_time': '12:00'}, '08:00', '18:00') is False
+    assert band_within(nachtband, '08:00', '18:00') is False
+
+    # Der Ring loest nur die Mitternachtsueberschreitung auf, er dehnt das
+    # Fenster nicht: 20:00-02:00 liegt in 18:00-06:00, 17:00-02:00 nicht.
+    assert band_within({'start_time': '20:00', 'end_time': '02:00'}, '18:00', '06:00') is True
+    assert band_within({'start_time': '17:00', 'end_time': '02:00'}, '18:00', '06:00') is False
+
+
+def test_trim_band_to_hours_schneidet_auf_das_oeffnungsfenster_zu():
+    """Ein Band ausserhalb der Oeffnungszeit wird beschnitten, nicht gemeldet wie es ist.
+
+    Drei Faelle, weil nur ihre Kombination die Funktion festlegt: teilweise
+    ausserhalb -> beschnitten, vollstaendig ausserhalb -> None, vollstaendig
+    innerhalb -> unveraendert (dasselbe Objekt, kein neu gebautes mit denselben
+    Zeiten). required_count muss den Schnitt ueberleben, sonst waere die
+    zugeschnittene Luecke betragsmaessig falsch.
+    """
+    band = {'start_time': '06:00', 'end_time': '18:00', 'required_count': 3}
+
+    assert trim_band_to_hours(band, '09:00', '12:00') == {
+        'start_time': '09:00', 'end_time': '12:00', 'required_count': 3,
+    }
+    assert trim_band_to_hours(band, '19:00', '23:00') is None
+    assert trim_band_to_hours(band, '00:00', '00:00') is band
+
+    # Ueber Mitternacht: das Nachtband ragt in den geschlossenen Teil des Tages,
+    # uebrig bleibt sein Stueck innerhalb der Oeffnungszeit - hier der Morgen.
+    nachtband = {'start_time': '22:00', 'end_time': '06:00', 'required_count': 2}
+    assert trim_band_to_hours(nachtband, '00:00', '12:00') == {
+        'start_time': '00:00', 'end_time': '06:00', 'required_count': 2,
+    }
 
 
 # ---------- coverage_gaps(): Deckungsluecken als reine Funktion (Task 6) ----------

@@ -208,7 +208,8 @@ die sich gegenseitig überschreiben. `GET /schedules/<jahr>/<monat>` liefert zus
 unbesetzter Platz und ein durch Abwesenheit freigewordener decken nichts ab.
 
 **Bekannte, dokumentierte Grenze:** Überlappung über die Wochentagsgrenze hinweg wird nicht
-geprüft — ein Band Montag 22:00–06:00 und eines Dienstag 00:00–08:00 werden beide akzeptiert.
+geprüft — ein Band Montag 22:00–06:00 und eines Dienstag 00:00–08:00 werden beide akzeptiert
+(über die API nachgeprüft, nicht angenommen: `test_nachtband_wird_unter_ganztaegiger_oeffnung_akzeptiert`).
 Bei konsequent start-verankerter Lesart beschreiben sie auch nicht dieselbe Zeit; ein realer
 Konflikt entstünde erst über die Wochenwiederholung hinweg, und das zu erkennen hieße, die
 Woche als 10080-Minuten-Ring zu behandeln — bewusst nicht gebaut, siehe README.
@@ -365,14 +366,27 @@ Neu aus den Reviews von Etappe 2:
 - mehrere vorlagenlose Blöcke am selben Datum landen in derselben Zelle und nur der erste
   liefert die Zellenzeile — erst ab Etappe 4 erzeugbar
 
-Neu aus den Reviews von Etappe 3:
+Aus dem Abschluss-Review von Etappe 3 behoben (eine Fix-Runde, ein Commit):
+
+- `/business-hours` und `/coverage-requirements` prüfen einander in beide Richtungen; eine
+  Öffnungszeit, die ein gespeichertes Band ungültig machen würde, wird mit Nennung von
+  Wochentag und Band abgelehnt (`reject_hours_conflicting_with_bands()`)
+- `coverage_gaps_for_month()` schneidet jedes Band auf das **effektive** Öffnungsfenster des
+  Datums zu — Ausnahme schlägt Wochentag, und die Zeiten einer offenen Ausnahme wirken jetzt
+  wirklich, statt nur ihr `closed`-Flag
+- `band_within()` prüft die Enthaltung über die Schließzeit statt über eine gerade Achse; ein
+  Nachtband 22:00–06:00 passt damit in die ganztägige Standard-Öffnungszeit, ohne dass
+  07:00–12:00 bei 08:00–18:00 durchginge
+- `business_hours_for()` ist eine reine Funktion auf vorgeladenen Dicts und hat wieder echte
+  Aufrufer (`_closed_on()` und der Zuschnitt); `fetch_schedule()` macht unverändert acht
+  Abfragen
+
+Weiterhin offen aus den Reviews von Etappe 3:
 
 - der Rundlauftest von `0006_coverage.py` prüft nach `down()`+`up()` nur `business_hours`,
   nicht ob die beiden Nebentabellen (`business_hours_exceptions`, `coverage_requirements`)
   wirklich weg waren — ein vergessenes `DROP TABLE` bliebe wegen `CREATE TABLE IF NOT EXISTS`
   unbemerkt
-- der Docstring von `coverage_curve()` (`backend/coverage_model.py`) benennt den
-  Nachtschicht-Fall nicht
 - ein Docstring in `test_migrations_postgres.py` spricht von Einzelindex-Zugriff, der Test
   vergleicht aber ganze Tupel
 - für `0007_derive_coverage.py` gibt es nur einen Postgres-Test (die Ableitung selbst), keine
@@ -381,8 +395,6 @@ Neu aus den Reviews von Etappe 3:
   (`backend/app.py`) schluckt `True`/`False` als `1`/`0` und kürzt `3.9` zu `3`
 - die Datumsprüfung beim Anlegen einer `business_hours_exceptions`-Zeile
   (`create_business_hours_exception()`) ist check-then-act ohne Sperre
-- kein Test für "Wochentag über `business_hours` geschlossen, ohne Ausnahme" bei den
-  Deckungslücken
 - kein eigener HTTP-Test für den Abwesenheitsfall bei den Deckungslücken (code-seitig korrekt,
   über denselben `employee_id IS NULL`-Filter wie ein unbesetzter Platz)
 - der Entfernen-Button im Bedarfseditor (`frontend/src/pages/CoverageEditor.jsx`) hat nur

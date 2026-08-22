@@ -417,6 +417,18 @@ TRANSLATIONS = {
         'de': 'Ausnahme gelöscht',
         'en': 'Exception deleted',
     },
+    'business_hours_closed_with_band': {
+        'de': 'Am {weekday} ist das Bedarfsband {start}–{end} gespeichert; '
+              'der Tag kann nicht auf geschlossen gesetzt werden. Bitte zuerst das Band entfernen.',
+        'en': 'The coverage band {start}–{end} is saved for {weekday}; '
+              'that day cannot be set to closed. Please remove the band first.',
+    },
+    'business_hours_conflicts_band': {
+        'de': 'Die neue Öffnungszeit ({open}–{close}) am {weekday} passt nicht zum '
+              'gespeicherten Bedarfsband {start}–{end}. Bitte zuerst das Band anpassen.',
+        'en': 'The new opening hours ({open}–{close}) on {weekday} do not fit the '
+              'saved coverage band {start}–{end}. Please adjust the band first.',
+    },
 
     # ---- coverage requirement bands ----
     'coverage_requirement_entry_invalid': {
