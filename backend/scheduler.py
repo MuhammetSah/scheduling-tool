@@ -428,6 +428,13 @@ def _search(
 
     ideal_cost = ideal_sum_squares(total_slots, len(employees)) if employees else 0
 
+    # 52 or 53, depending on the year - computed rather than assumed, because
+    # the difference is exactly one Sunday of everyone's yearly budget.
+    sundays_in_year = sum(
+        1 for offset in range((date(year + 1, 1, 1) - date(year, 1, 1)).days)
+        if (date(year, 1, 1) + timedelta(days=offset)).weekday() == 6
+    )
+
     def check_budget():
         state['nodes'] += 1
         if state['nodes'] > node_budget:
@@ -495,6 +502,32 @@ def _search(
         """
         key = (eid, iso_date)
         return bool(day_hours.get(key)) or bool(day_untimed.get(key))
+
+    def sundays_worked_so_far(eid, except_date):
+        """Distinct Sundays this employee already works in this search run.
+
+        `except_date` is left out on purpose: a second block on a Sunday
+        someone already works does not make that Sunday any less worked, so it
+        must not cost a second slot of the yearly budget. Without that, a split
+        shift on a Sunday would be dearer than one on a weekday - and § 11
+        Abs. 1 gives no reason for it.
+        """
+        return sum(
+            1 for iso in worked_dates(eid)
+            if iso != except_date and date.fromisoformat(iso).weekday() == 6
+        )
+
+    def worked_dates(eid):
+        """Every calendar date this employee already holds a block on.
+
+        Both structures Etappe 4 introduced, unioned - day_hours for blocks
+        with known times, day_untimed for the ones without. Reading only the
+        first would undercount for callers that deal in shift counts alone.
+        """
+        return (
+            {iso for (other, iso) in day_hours if other == eid}
+            | {iso for (other, iso) in day_untimed if other == eid}
+        )
 
     def consecutive_days_with(emp, iso_date):
         """Length of the unbroken run of worked days this assignment would join.
@@ -581,6 +614,17 @@ def _search(
             # the 23 backward-compatibility tests in test_scheduler.py - which
             # deal in shift counts and nothing else - unchanged and green.
             # load_employees_for_scheduling() always supplies it.
+            # § 11 Abs. 1 ArbZG: at least 15 Sundays a year stay free of work.
+            # Gated on the key being present, same as the run length above.
+            # A budget that already went negative in the past is read as zero -
+            # the planner stops adding Sundays, but it does not raise over data
+            # it did not cause.
+            worked_sundays = emp.get('sundays_worked_in_year')
+            if worked_sundays is not None and slot['weekday'] == 6:
+                budget = max(0, sundays_in_year - MIN_FREE_SUNDAYS_PER_YEAR - worked_sundays)
+                if sundays_worked_so_far(eid, slot['date']) >= budget:
+                    continue
+
             consecutive_cap = emp.get('max_consecutive_days')
             if consecutive_cap is not None and                     consecutive_days_with(emp, slot['date']) > consecutive_cap:
                 continue

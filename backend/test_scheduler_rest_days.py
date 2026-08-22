@@ -140,3 +140,96 @@ def test_ohne_max_consecutive_days_wird_gar_nicht_geprueft():
     ergebnis = plan(tagesbloecke(range(1, 8)), [ohne_feld])
 
     assert ergebnis['unfilled_count'] == 0
+
+
+# ---------- Freie Sonntage ----------
+#
+# 2026 hat 52 Sonntage. 52 - 15 = 37 duerfen gearbeitet werden.
+
+
+def test_das_sonntagsbudget_bindet():
+    ergebnis = plan([block('2026-09-06', '08:00', '16:00', 0)],
+                    [person(1, sundays_worked_in_year=37)])
+
+    assert ergebnis['unfilled_count'] == 1
+
+
+def test_ein_sonntag_unter_dem_budget_geht():
+    """Gegenprobe: ohne sie waere eine Umsetzung gruen, die jeden Sonntag sperrt."""
+    ergebnis = plan([block('2026-09-06', '08:00', '16:00', 0)],
+                    [person(1, sundays_worked_in_year=36)])
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_ein_zweiter_block_am_selben_sonntag_kostet_kein_zweites_budget():
+    """Ein geteilter Dienst macht aus einem Sonntag keine zwei.
+
+    Beschaeftigungsfrei heisst: kein einziger Block an dem Tag. Ohne diese
+    Ausnahme waere ein geteilter Dienst am Sonntag teurer als einer unter der
+    Woche - wofuer es im Gesetz keinen Grund gibt, und was genau das Feature
+    aus Etappe 4 bestrafen wuerde.
+    """
+    ergebnis = plan(
+        [block('2026-09-06', '08:00', '12:00', 0),
+         block('2026-09-06', '16:00', '20:00', 1)],
+        [person(1, sundays_worked_in_year=36)],
+    )
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_zwei_verschiedene_sonntage_kosten_zwei():
+    """Gegenprobe zum Test darueber: verschiedene Daten zaehlen sehr wohl einzeln."""
+    ergebnis = plan(
+        [block('2026-09-06', '08:00', '16:00', 0),
+         block('2026-09-13', '08:00', '16:00', 0)],
+        [person(1, sundays_worked_in_year=36)],
+    )
+
+    assert ergebnis['unfilled_count'] == 1
+
+
+def test_ein_negatives_budget_sperrt_nur_und_wirft_nicht():
+    """Wer die Grenze in der Vergangenheit schon gerissen hat, wird nicht weiter
+    eingeplant - aber der Planer wirft keinen Fehler ueber Daten, die er nicht
+    verursacht hat."""
+    ergebnis = plan([block('2026-09-06', '08:00', '16:00', 0)],
+                    [person(1, sundays_worked_in_year=99)])
+
+    assert ergebnis['unfilled_count'] == 1
+
+
+def test_werktage_beruehrt_das_budget_nicht():
+    """Der 07.09.2026 ist ein Montag."""
+    ergebnis = plan([block('2026-09-07', '08:00', '16:00', 0)],
+                    [person(1, sundays_worked_in_year=99)])
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_ohne_sundays_worked_in_year_wird_gar_nicht_geprueft():
+    """Derselbe Kompatibilitaetszweig wie bei der Sechstageregel."""
+    ergebnis = plan([block('2026-09-06', '08:00', '16:00', 0)], [person(1)])
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_ein_jahr_mit_53_sonntagen_hat_ein_groesseres_budget():
+    """2028 hat 53 Sonntage, also 38 statt 37 erlaubte.
+
+    Ohne diesen Test waere eine fest verdrahtete 52 ebenfalls gruen. Der 03.09.
+    2028 ist ein Sonntag; mit 37 bereits gearbeiteten bleibt genau einer uebrig.
+    """
+    ergebnis = plan([block('2028-09-03', '08:00', '16:00', 0)],
+                    [person(1, sundays_worked_in_year=37)], jahr=2028)
+
+    assert ergebnis['unfilled_count'] == 0
+
+
+def test_dasselbe_jahr_mit_38_gearbeiteten_sonntagen_ist_ausgeschoepft():
+    """Gegenprobe: auch 53 Sonntage sind endlich."""
+    ergebnis = plan([block('2028-09-03', '08:00', '16:00', 0)],
+                    [person(1, sundays_worked_in_year=38)], jahr=2028)
+
+    assert ergebnis['unfilled_count'] == 1
