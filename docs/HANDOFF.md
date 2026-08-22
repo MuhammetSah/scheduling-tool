@@ -24,11 +24,11 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5c ist **fertig umgesetzt, aber noch nicht gemergt** — sie liegt auf dem Branch
-`etappe-5c-durchschnitt`.
+Es ist nichts halb fertig. Alles bis einschließlich 5c und 5e ist gemergt, deployt und
+dokumentiert; es gibt keine offenen Branches und keine offenen Pull Requests.
 
-Damit ist das Arbeitszeitrecht bis auf **5d** (Feiertagskalender) durch. Danach bleiben die
-vier nicht-rechtlichen Teile von Etappe 5: Veröffentlichen-Workflow, Audit-Log, Exporte, DSGVO.
+Vom Arbeitszeitrecht fehlt nur noch **5d** (Feiertagskalender). Danach bleiben die vier
+nicht-rechtlichen Teile von Etappe 5: Veröffentlichen-Workflow, Audit-Log, Exporte, DSGVO.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -40,9 +40,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `b4dcc21` — Etappen 0 bis 4, 5a, 5b und 5e gemergt und deployt (PR #16, #17, #18, #19); die API antwortet mit 200 |
-| Branch-Situation | **Ein offener Branch: `etappe-5c-durchschnitt`** |
-| Aktueller Branch | `etappe-5c-durchschnitt` |
+| `main` | Etappen 0 bis 4 sowie 5a, 5b, 5c und 5e gemergt und deployt (PR #16–#20); die API antwortet mit 200 |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
+| Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 327 passed / 32 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 22 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0010`. `0010_drop_shift_requirements` entfernt die alte Bedarfstabelle; ihr Inhalt lebt seit `0007` in `coverage_requirements` weiter |
@@ -517,7 +517,7 @@ Drei Dinge, die beim Umsetzen auffielen:
   Frage in einer zweiten Fassung, samt der Postgres-Eigenheit mit `current_schema()`, die dort
   schon gelöst ist.
 
-## Etappe 5c — der Achtstundenschnitt
+## Etappe 5c — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-22-etappe-5c-durchschnitt-design.md`](superpowers/specs/2026-08-22-etappe-5c-durchschnitt-design.md)
 
