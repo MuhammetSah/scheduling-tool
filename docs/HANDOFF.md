@@ -24,21 +24,16 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Alles bis einschließlich 5e ist gemergt, deployt und dokumentiert;
-es gibt keine offenen Branches und keine offenen Pull Requests.
+Etappe 5f ist **fertig umgesetzt, aber noch nicht gemergt** — Branch
+`etappe-5f-veroeffentlichen`.
 
-**Das Arbeitszeitrecht ist vollständig**, soweit dieses Tool es tragen kann — Arbeitszeitfenster,
-individuelle Zeiten, Zuschnitt, geteilter Dienst, Tagesgrenze, Ruhezeit, Ruhepausen,
-Sechstageregel, freie Sonntage, Achtstundenschnitt und Feiertagskalender. Was es *nicht* prüft,
-steht in den jeweiligen Etappenabschnitten und im README.
-
-Offen bleiben die vier nicht-rechtlichen Teile von Etappe 5:
+Das Arbeitszeitrecht ist vollständig, soweit dieses Tool es tragen kann. Offen bleiben drei
+Teile von Etappe 5:
 
 | Teil | Anmerkung |
 |---|---|
-| **Veröffentlichen-Workflow** | `schedules.status` existiert seit dem ersten Tag und wird nie benutzt. Keine Entscheidungen offen |
 | **Audit-Log** | `login_attempts` ist laut Design-Spec der erste Baustein |
-| **Exporte** | Hier stellt sich die Frage nach neuen Laufzeitabhängigkeiten. iCal und CSV gehen ohne, PDF und Excel nicht — das gehört entschieden, bevor jemand anfängt |
+| **Exporte** | Hier stellt sich die Frage nach neuen Laufzeitabhängigkeiten. iCal und CSV gehen ohne, PDF und Excel nicht — **das gehört entschieden, bevor jemand anfängt** |
 | **DSGVO** | Krankmeldungen sind Art.-9-Daten. **Aufbewahrungsfristen sind eine Entscheidung des Nutzers**, keine, die eine Sitzung treffen kann |
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
@@ -52,11 +47,11 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | | |
 |---|---|
 | `main` | Alles bis 5e gemergt und deployt (PR #16–#21); die API antwortet mit 200 |
-| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 372 passed / 33 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
+| Branch-Situation | **Ein offener Branch: `etappe-5f-veroeffentlichen`** |
+| Aktueller Branch | `etappe-5f-veroeffentlichen` |
+| Testsuite | 385 passed / 34 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0011`. `0011_settings` legt die erste Einstellungstabelle des Projekts an; erster Schlüssel ist `holiday_region` |
+| Migrationen | `0001`–`0012`. `0012_publish_state` macht aus `schedules.status` einen Zustand mit Bedeutung und setzt alle Bestandspläne auf `published` |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -586,6 +581,35 @@ Fallstrick 16 und hat einen eigenen Schreibtest gegen Postgres bekommen.
 
 Die regionalen Feiertage sind **paarweise** getestet — je ein Land mit und eines ohne. „Gilt in
 Bayern" allein wäre auch grün, wenn der Feiertag überall stünde.
+
+## Etappe 5f — Veröffentlichen-Workflow
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-5f-veroeffentlichen-design.md`](superpowers/specs/2026-08-23-etappe-5f-veroeffentlichen-design.md)
+
+`schedules.status` gab es seit dem ersten Commit und wurde von nichts gelesen — jeder Plan war
+sichtbar, sobald er erzeugt war. Jetzt ist er `draft` oder `published`, dazu `published_at`
+(Migration `0012`).
+
+**Die Migration setzt alle Bestandspläne auf `published`.** Das ist die Richtung, auf die es
+ankommt: eine Migration darf nicht ändern, was Leute gestern sehen konnten. Ein eigener Test
+hält es fest.
+
+Zwei Übergänge sind bewusst asymmetrisch und stehen so im README:
+
+- **Neuerzeugen** setzt einen veröffentlichten Plan zurück auf Entwurf — er verwirft ohnehin
+  jede Handkorrektur, und den Mitarbeitern stillschweigend einen anderen Plan unterzuschieben
+  wäre schlechter als ein sichtbares Zurücksetzen.
+- **Eine Handkorrektur** tut das nicht. Sonst wäre das Veröffentlichen unbenutzbar.
+
+Für Mitarbeiter ist ein Entwurf ein `404` — aber mit eigener Meldung. Dafür musste
+`fetchSchedule()` im Frontend umgebaut werden: es lieferte bisher nur `null` und verschluckte
+die Servermeldung. Es gibt jetzt `{data, message}` zurück, und die beiden Stellen, die den Plan
+auf `null` setzen, leeren die Meldung mit — sonst stünde nach dem Löschen noch „noch nicht
+veröffentlicht" für einen Plan, den es nicht mehr gibt.
+
+**Kein Frontend-Test für die Schaltfläche.** `SchedulePage.jsx` hat auch bisher keinen — die
+Komponente hängt an einem guten Dutzend API-Aufrufen, und der Aufwand für einen sinnvollen Test
+gehört in eine eigene Aufgabe. Die Logik ist backendseitig durch zehn Tests gedeckt.
 
 ## Arbeitsweise
 

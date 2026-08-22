@@ -241,6 +241,13 @@ const de = {
   },
 
   schedule: {
+    draftBadge: 'Entwurf',
+    publishedBadge: 'Veröffentlicht',
+    publishButton: 'Veröffentlichen',
+    withdrawButton: 'Zurückziehen',
+    withdrawConfirm: 'Zurückziehen? Die Mitarbeiter sehen ihren Plan dann nicht mehr.',
+    draftHint: 'Nur du siehst diesen Plan. Mitarbeiter sehen ihn erst nach dem Veröffentlichen.',
+    publishedHint: 'Mitarbeiter sehen ihre eigenen Schichten. Handkorrekturen bleiben sofort sichtbar; ein Neuerzeugen setzt den Plan wieder auf Entwurf.',
     title: 'Dienstplan',
     monthLabel: 'Monat',
     weekendEquityLabel: 'Wochenenden ausgleichen',
@@ -563,6 +570,13 @@ const en = {
   },
 
   schedule: {
+    draftBadge: 'Draft',
+    publishedBadge: 'Published',
+    publishButton: 'Publish',
+    withdrawButton: 'Withdraw',
+    withdrawConfirm: 'Withdraw? Employees will no longer see their schedule.',
+    draftHint: 'Only you can see this schedule. Employees see it once it is published.',
+    publishedHint: 'Employees see their own shifts. Manual corrections show immediately; regenerating puts the schedule back to draft.',
     title: 'Schedule',
     monthLabel: 'Month',
     weekendEquityLabel: 'Even out weekends',
