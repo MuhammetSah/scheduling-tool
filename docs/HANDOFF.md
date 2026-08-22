@@ -24,17 +24,14 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5b ist **fertig umgesetzt, aber weder gepusht noch gemergt.** Sie liegt vollständig auf
-dem Branch `etappe-5b-sonntage`, sieben Commits ab `e61c96b`. Die Suite ist grün (316 passed,
-31 übersprungen — Postgres-only).
+Es ist nichts halb fertig. Etappen 0 bis 4, 5a und 5b sind gemergt, deployt und dokumentiert,
+es gibt keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün.
 
-**Der nächste Schritt ist ein Abschluss-Review dieser Etappe**, danach Push und Pull Request.
-Besonderes Augenmerk verdient `scheduling_history()` in `app.py`: der Generator liest damit
-erstmals Daten außerhalb seines Monats, und wenn die Abgrenzung falsch ist, bestraft der Planer
-Leute für Schichten, die er ihnen selbst gerade wegnimmt.
-
-Danach steht 5c an (Achtstundenschnitt, hängt an 5a), 5d (Feiertagskalender, siehe unten) oder
-einer der vier nicht-rechtlichen Teile von Etappe 5.
+Der nächste Schritt ist eines der offenen Teilstücke — siehe den Abschnitt „Etappe 5" weiter
+unten. **5c** (Achtstundenschnitt, hängt an 5a) und **5d** (Feiertagskalender) sind beide
+vorbereitet: die Entscheidungen dazu sind gefallen und stehen dort. Daneben liegen die vier
+nicht-rechtlichen Teile: `shift_requirements` entfernen, Veröffentlichen-Workflow, Audit-Log,
+Exporte, DSGVO.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -46,9 +43,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `e61c96b` — Etappen 0 bis 4 und 5a gemergt und deployt. Etappe 4 über PR #16, Etappe 5a über PR #17; Render-Deploy `dep-da4ukueq1p3s73ar5r60` ist `live` |
-| Branch-Situation | **Ein offener Branch: `etappe-5b-sonntage`**, sieben Commits ab `e61c96b`, lokal, nicht gepusht. Keine offenen Pull Requests |
-| Aktueller Branch | `etappe-5b-sonntage` |
+| `main` | `a6e06e2` — Etappen 0 bis 4, 5a und 5b gemergt und deployt (PR #16, #17, #18); Render-Deploy `dep-da5166ht0dsc73c3d1i0` ist `live`, die API antwortet mit 200 |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Die Etappen-Branches sind nach dem Merge lokal und remote gelöscht |
+| Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 316 passed / 31 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0009`, **alle in Produktion angewandt** — `0005` bis `0007` mit den Deploys von #13 und #14, `0008` mit #16, `0009` mit #17. Nach jedem Deploy antwortet die API mit 200, und da `app.py` die Migrationen beim Modulimport ausführt, wäre ein Fehlschlag mit einem laufenden Dienst nicht vereinbar |
@@ -434,11 +431,11 @@ Rundlauf von `0009` gegen Postgres läuft.
 
 **Kein Browser-Durchlauf gefahren.** Die Oberfläche ist nur über die 18 Vitest-Tests belegt.
 
-## Etappe 5b — abgeschlossen, noch nicht gemergt
+## Etappe 5b — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md`](superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md)
 Plan: [`docs/superpowers/plans/2026-08-22-etappe-5b-sonntage.md`](superpowers/plans/2026-08-22-etappe-5b-sonntage.md)
-Branch: `etappe-5b-sonntage`, **nicht gepusht und nicht gemergt**
+PR #18, acht Commits, gemergt am 22.08. 21:22 als `a6e06e2`, Deploy live
 
 | Task | Stand | Commit |
 |---|---|---|
@@ -446,7 +443,8 @@ Branch: `etappe-5b-sonntage`, **nicht gepusht und nicht gemergt**
 | 2 Sonntagsbudget im Suchkern | ✅ | `af2d4ee` |
 | 3 Vorgeschichte über den Monatsrand | ✅ | `6e4d2e0` |
 | 4 Warnungen auf dem Handkorrektur-Pfad | ✅ | `29029a1` |
-| 5 Dokumentation | ✅ | dieser Commit |
+| 5 Dokumentation | ✅ | `370d68f`, `63376be` |
+| Merge nach `main` | ✅ PR #18 | `a6e06e2` |
 
 **Kein Schemaeingriff** — die erste Etappe seit 0 ohne Migration. Beide Größen werden gerechnet.
 
@@ -482,10 +480,10 @@ Feiertage über die Osterrechnung, regionale Sonderfälle unterhalb der Bundesla
 bayerischen Gemeinden, das Augsburger Friedensfest) ausdrücklich nicht abgedeckt. Feiertage
 werden **nicht** automatisch geschlossen — das entscheiden weiterhin die Öffnungszeiten.
 
-### Was vor dem Merge noch fehlt
+### Zum Merge
 
-- Push, Pull Request, CI
-- Kein Browser-Durchlauf gefahren
+Alle vier CI-Jobs grün. **Kein Browser-Durchlauf gefahren** — diese Etappe hat allerdings
+keine Oberfläche berührt, die Warnungen kommen fertig übersetzt aus dem Backend.
 
 ## Arbeitsweise
 
@@ -499,6 +497,17 @@ Skripte: `scripts/sdd-workspace`, `scripts/task-brief`, `scripts/review-package`
 
 Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante Reviews
 (Migrations-Runner, Auth-Pfad, Gesamt-Review).
+
+**Merges brauchen keine Rückfrage.** Der Nutzer hat das am 22.08.2026 ausdrücklich gesagt,
+nachdem dreimal vor einem fertigen, CI-grünen PR angehalten worden war. Eine fertige Etappe
+läuft damit in einem Zug durch: pushen, PR, CI abwarten, mergen, Branch löschen, Deploy prüfen,
+Handoff nachziehen. Vorher selbst prüfen bleibt Pflicht — alle vier CI-Jobs grün, besonders
+`backend-postgres`, der die lokal übersprungenen Tests fährt. Und ein Merge löst einen Deploy
+aus, der ausstehende Migrationen auf die Produktionsdatenbank anwendet; das gehört erwähnt,
+nicht erfragt.
+
+Nicht übertragen auf das, was unter „Offen — liegt beim Nutzer" steht: Zugangsdaten,
+Passwortrotation, Entscheidungen über die Datenbankinstanz.
 
 ## Fallstricke dieses Projekts — das Wichtigste für eine neue Sitzung
 
