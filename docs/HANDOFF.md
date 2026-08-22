@@ -24,18 +24,21 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Etappen 0 bis 3 sind gemergt, deployt und dokumentiert, es gibt
-keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün, ein geprüftes
-Backup liegt.
+Etappe 4 ist **fertig umgesetzt, aber weder gepusht noch gemergt.** Sie liegt vollständig auf
+dem Branch `etappe-4-zuschnitt-im-planer`, zwölf Commits ab `fadf336`. Die Suite ist grün
+(255 passed, 30 übersprungen — Postgres-only), Frontend 15 Tests, Lint und Build sauber.
 
-Der nächste inhaltliche Schritt ist **Etappe 4 — Zuschnitt im Planer** (siehe Roadmap am Ende).
-Sie beginnt mit einem eigenen Umsetzungsplan auf einem neuen Branch ab `main`, nach dem Muster
-der drei vorherigen Etappen — siehe „Arbeitsweise“.
+**Der nächste Schritt ist deshalb kein neuer Code, sondern ein Abschluss-Review dieser Etappe**
+und danach Push und Pull Request. Nach dem Muster der drei vorherigen Etappen: ein unabhängiger
+Reviewer, der dem Bericht des Umsetzers ausdrücklich nicht glauben darf, dann Fix-Runden mit
+eng gefasstem Re-Review. Besonderes Augenmerk verdienen zwei Stellen — die probeweise
+Tagesbesetzung in `block_planner.plan_day()` (das komplexeste Stück der Etappe) und der
+Eingriff in den Suchkern, der vier Etappen lang unangetastet blieb.
 
-**Bevor du Etappe 4 planst, lies zwei Abschnitte:** „Fallstricke dieses Projekts“ und
-„Zurückgestellte Befunde“. Dort steht, was drei Etappen an Reviews gekostet hat und was
-bewusst liegen geblieben ist. Zwei davon gehören **vor** Etappe 4 angefasst, weil sie deren
-Grundlage betreffen — sie sind dort so markiert.
+Was danach kommt, ist **Etappe 5 — restliche Produktionsreife** (siehe Roadmap am Ende).
+
+**Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde. Dort
+steht, was vier Etappen an Reviews gekostet hat und was bewusst liegen geblieben ist.
 
 **Was beim Nutzer liegt und nicht bei dir:** der Umgang mit der ablaufenden Datenbank
 (07.09.2026), das Datenbankpasswort und die IP-Freigabe. Details unter „Offen — liegt beim
@@ -45,12 +48,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `f073d8f` — Etappen 0 bis 3 gemergt und deployt, dazu der Nachtschicht-Fix in `window_contains_shift()` (PR #15) |
-| Branch-Situation | Keine offenen Branches. Beide gestapelten PRs sind gemergt: #13 (Etappe 2) am 22.08. 12:15, #14 (Etappe 3) am 22.08. 12:16. Etappe 4 beginnt frisch ab `main` |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 198 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 5 Frontend-Tests (Vitest + Testing Library) |
+| `main` | `fadf336` — Etappen 0 bis 3 gemergt und deployt, dazu der Nachtschicht-Fix in `window_contains_shift()` (PR #15) |
+| Branch-Situation | **Ein offener Branch: `etappe-4-zuschnitt-im-planer`**, zwölf Commits ab `fadf336`, lokal, nicht gepusht. Keine offenen Pull Requests. Beide gestapelten PRs der Vorgänger sind gemergt: #13 am 22.08. 12:15, #14 am 22.08. 12:16 |
+| Aktueller Branch | `etappe-4-zuschnitt-im-planer` |
+| Testsuite | 255 passed / 30 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 15 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0007`, **alle in Produktion angewandt**. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
+| Migrationen | `0001`–`0007` **in Produktion angewandt**, `0008_max_daily_hours` liegt auf dem Branch und ist noch nicht deployt. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -240,6 +243,98 @@ die acht Einzel-Task-Reviews gelaufen, keine Gesamtdurchsicht), dann beide PRs (
 danach #14) nach `main` mergen — in dieser Reihenfolge, weil #14 auf #13 aufbaut. Danach
 Etappe 4 (Zuschnitt im Planer) auf einem neuen Branch ab `main` beginnen.
 
+## Etappe 4 — abgeschlossen, noch nicht gemergt
+
+Spec: [`docs/superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md`](superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md)
+Plan: [`docs/superpowers/plans/2026-08-22-etappe-4-zuschnitt.md`](superpowers/plans/2026-08-22-etappe-4-zuschnitt.md)
+Branch: `etappe-4-zuschnitt-im-planer`, zwölf Commits, **nicht gepusht und nicht gemergt**
+
+Ziel erreicht: der Planer baut aus `coverage_requirements` statt aus `shift_requirements`,
+schneidet Blöcke auf die Arbeitszeitfenster zu, und der geteilte Dienst ist innerhalb der
+Grenzen des Arbeitszeitgesetzes plan bar.
+
+| Task | Stand | Commit |
+|---|---|---|
+| 1 Route für eigene Arbeitszeitfenster (Vorarbeit) | ✅ | `bb74f35` |
+| 2 Zellenkollision bei gleichzeitigen Blöcken (Vorarbeit) | ✅ | `a758d63` |
+| 3 Tägliche Höchstarbeitszeit, Migration `0008` | ✅ | `537e287` |
+| 4 Stufe 1: Bedarf mit Vorlagen decken | ✅ | `19a290c` |
+| 5 Stufe 1: Zuschnitt auf Arbeitszeitfenster | ✅ | `4ea6ed2` |
+| 6 Anschluss an den Generator | ✅ | `4ef8a22` |
+| 7 Geteilter Dienst im Suchkern | ✅ | `53f185f` |
+| 8 Warnungen auf dem Handkorrektur-Pfad | ✅ | `135cb0b` |
+| 9 Bedarfszahlen aus dem Schichtart-Editor | ✅ | `171e4e1` |
+| 10 Benchmark-Gegenprobe | ✅ | `a330c27` |
+| 11 Dokumentation | ✅ | dieser Commit |
+
+### Was der Benchmark sagt
+
+Die beiden Zahlen, die diese Etappe rechtfertigen — `python benchmark.py`, letzter Abschnitt:
+
+| Szenario | Pfad | Blöcke | unbesetzt |
+|---|---|---|---|
+| unveränderter Bestand | alt | 166 | 0 |
+| | Stufe 1 | 166 | 0 — **identische Blöcke** |
+| Arbeitszeitfenster | alt | 93 | 31 |
+| | Stufe 1 | 93 | **0** |
+
+Oben: die Umstellung ändert auf unverändertem Bestand nichts. Unten: der Zuschnitt schließt
+jede Lücke, die die Fenster sonst offen ließen — eine pro Tag.
+
+### Die Architektur in drei Sätzen
+
+`block_planner.py` ist Stufe 1: aus Bedarfsbändern, Vorlagen und Fenstern wird die Blockliste
+eines Monats, reine Rechenlogik ohne Datenbank. `scheduler.py` ist Stufe 2 und bekommt die
+Blöcke über den neuen Parameter `slots=` fertig übergeben — Fairness, Branch-and-Bound und
+Notbremse sind unverändert. Der Monatsaufbau liegt in `block_planner`, **nicht** in
+`scheduler`, weil `block_planner` aus `scheduler` importiert und der umgekehrte Import ein
+Zirkel wäre.
+
+### Was beim Umsetzen anders entschieden wurde als im Plan
+
+- **`MIN_BLOCK_MINUTES` gilt nur für den Zuschnitt**, nicht für bedarfsgetriebene Blöcke. Ein
+  bewusst gepflegtes Zwei-Stunden-Band still zu verwerfen wäre genau das Muster „Eingabe
+  annehmen und wegwerfen". Neu dazu kam `MAX_BLOCK_MINUTES` (600): ein selbst gebildeter Block
+  über zehn Stunden wäre nach § 3 ArbZG von niemandem zu besetzen.
+- **Das Auswahlverfahren in Stufe 1 wurde ersetzt.** Der Plan sah „Vorlage mit dem größten
+  Produkt aus Anzahl und Dauer" vor. Das deckt die Spitze zuerst und hängt die Schulter ab:
+  bei Bedarf 06:00–08:00 für zwei und 08:00–14:00 für drei ergab es fünf Blöcke statt drei,
+  darunter zwei unarbeitbare Zwei-Stunden-Reste. Gebaut ist jetzt „von links": am frühesten
+  offenen Punkt ansetzen. Aufgefallen ist es beim Nachrechnen von Hand — der Determinismustest
+  war grün, weil beide Reihenfolgen dasselbe schlechte Ergebnis lieferten.
+- **Die Zellenkollision war breiter als notiert.** Nicht nur vorlagenlose Blöcke kollidieren,
+  sondern auch zugeschnittene Blöcke derselben Vorlage: gleiche `shift_type_id`, andere
+  Zeiten. Gruppiert wird jetzt nach (Vorlage, Start, Ende).
+
+### Was dabei gefunden wurde
+
+- **Eine zweite Landmine**, die im Plan fehlte: nicht nur die Ergebnissortierung in `_search()`
+  vergleicht `shift_type_id` und fällt bei `None` über `TypeError`, sondern auch
+  `order_slots()`. Gefunden von einem Bestandstest, der die zweite Suchrunde auslöst.
+- **Ein Test, der bestand, obwohl das Feature fehlte.** `requirements` ist eine Liste von
+  sieben Werten; ein übergebenes Dict mit den Schlüsseln `'0'`–`'6'` wurde zu `[0,1,2,3,4,5,6]`
+  statt zu lauter Nullen. Fünfter Fall dieser Art im Projekt — die Frage aus Fallstrick 4 vor
+  jedem Commit zu stellen lohnt sich weiterhin.
+- **Vier Bestandstests mussten nachziehen**, drei davon, weil sie ihren Plan allein über
+  `shift_requirements` aufbauten und nun keinen mehr bekamen.
+
+### Arbeitszeitrecht: was das Tool prüft und was nicht
+
+Geprüft: Überschneidungsverbot, tägliche Höchstarbeitszeit als **Summe der Blockdauern**
+(§ 2 Abs. 1, § 3), Ruhezeit gemessen vom letzten Block eines Tages zum ersten des nächsten
+(§ 5 Abs. 1). Beides sowohl im Generator als auch — warnend — auf dem Handkorrektur-Pfad.
+
+**Nicht geprüft, bewusst und schriftlich:** der Achtstundendurchschnitt aus § 3 Satz 2 (der
+Planer arbeitet monatsweise und kann ein 24-Wochen-Fenster strukturell nicht sehen — eine
+`max_daily_hours` über 8 ist damit rechtlich nicht selbsttragend, der Hinweis steht am Feld),
+die Ruhepausen aus § 4, und die Sonntagsregeln aus § 11. Alles drei ist Etappe 5.
+
+### Was vor dem Merge noch fehlt
+
+- Push und Pull Request; die Postgres-Tests (`0008`, zwei Stück) sind lokal übersprungen und
+  laufen erst im CI-Job `backend-postgres`
+- Kein Browser-Durchlauf gefahren
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -418,10 +513,8 @@ Neu aus dem Abschluss-Review von Etappe 1:
 - der `Project Structure`-Block im README listet seit Etappe 3 zwar `migrations/` und
   `coverage_model.py`, weiterhin aber nicht `security.py`, `timeutil.py` oder die seit
   Etappe 0 hinzugekommenen Testdateien
-- Spec §6 sah eine eigene Route `GET/PUT /employees/<id>/availability` mit `require_self_or_hr`
-  vor; gebaut wurde sie nicht, die Fenster hängen an `/employees/<id>` (`@hr_required`).
-  Sicherheitsseitig die konservative Richtung, aber ein Mitarbeiter sieht seine eigenen
-  Arbeitszeiten nicht. **Etappe 2 und 3 dürfen die Route nicht als vorhanden annehmen**
+- ~~Spec §6 sah eine eigene Route `GET/PUT /employees/<id>/availability` vor~~ — **erledigt in
+  Etappe 4** (Vorarbeit 1). Lesen darf man sich selbst, schreiben bleibt HR
 
 Neu aus den Reviews von Etappe 2:
 
@@ -444,9 +537,11 @@ Neu aus den Reviews von Etappe 2:
   behoben wurde (vorbestehend)
 - der i18n-Schlüssel `availability_time_invalid` wird jetzt auch für Zuweisungen benutzt,
   obwohl sein Name nach Etappe 1 klingt
-- ein unübersetztes `OK`-Literal in `ShiftCell.jsx` (aus dem Bestandsmuster übernommen)
-- mehrere vorlagenlose Blöcke am selben Datum landen in derselben Zelle und nur der erste
-  liefert die Zellenzeile — erst ab Etappe 4 erzeugbar
+- ~~ein unübersetztes `OK`-Literal in `ShiftCell.jsx`~~ — **erledigt in Etappe 4**, es lag in
+  derselben Zeile wie die Zellenkollision
+- ~~mehrere vorlagenlose Blöcke am selben Datum landen in derselben Zelle~~ — **erledigt in
+  Etappe 4** (Vorarbeit 2). Der Befund war breiter als hier notiert: auch zugeschnittene
+  Blöcke derselben Vorlage kollidierten. Gruppiert wird jetzt nach (Vorlage, Start, Ende)
 
 Aus dem Abschluss-Review von Etappe 3 behoben (eine Fix-Runde, ein Commit):
 
@@ -484,16 +579,37 @@ Weiterhin offen aus den Reviews von Etappe 3:
 - die Datumsformatierung steht jetzt in dritter Kopie im Frontend — folgt aber bereits
   etablierter Projektkonvention, keine neu eingeführte Dublette
 
+Neu aus Etappe 4:
+
+- `plan_day()` läuft die probeweise Tagesbesetzung nach jedem einzelnen Zuschnitt komplett neu,
+  statt sie fortzuschreiben. Bei wenigen Blöcken pro Tag ist das billig, bei vielen quadratisch.
+  Erst angehen, wenn der Benchmark es zeigt
+- der Zuschnitt greift nur bei Mitarbeitern im `windows`-Modus. Jemand mit
+  `availability_mode = 'anytime'`, dem nur die Tagesgrenze im Weg steht, bekommt kein gekürztes
+  Stück angeboten — denkbar, aber nicht das, was die Spec unter Zuschnitt versteht
+- `day_envelope()` gibt es zweimal: einmal in `scheduler._search()` über den Suchzustand,
+  einmal als `app.day_envelope_from_hours()` über gespeicherte Zeilen. Die gemeinsame Rechnung
+  steckt in `shift_datetimes()` und wird importiert, die Hülle ist doppelt
+- `MAX_BLOCK_MINUTES` ist als 600 fest verdrahtet, obwohl `max_daily_hours` je Mitarbeiter
+  einstellbar ist. Wer die Tagesgrenze auf 12 setzt, bekommt trotzdem keinen Block über zehn
+  Stunden
+- die Bedarfszahlen der Schichtart werden vom Frontend weiterhin mitgeschickt, damit der
+  Bestand nicht still auf 0 fällt. Mit dem Entfernen von `shift_requirements` in Etappe 5 fällt
+  das weg
+- für `0008_max_daily_hours` gibt es zwei Postgres-Tests, die lokal übersprungen werden; sie
+  sind bislang nur im CI gelaufen — **beim Abschluss-Review prüfen, dass `backend-postgres`
+  wirklich grün war**
+
 ## Roadmap
 
 Design: [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md)
 
-- **Etappe 4** — Zuschnitt im Planer: Blockplanung aus Bedarf und Fenstern, automatisches
-  Kürzen auf das Mitarbeiterfenster, benannte Restlücken. **Das ist der Punkt, an dem der
-  Planer auf `coverage_requirements` umgestellt wird** — `build_slots()` baut bis dahin
-  weiterhin aus `shift_requirements` (siehe Etappe 3 oben), das erst nach dieser Etappe
-  entfernt wird. Das Tool geht damit auch über Papershift und Deputy hinaus — dort wird nicht
-  automatisch zugeschnitten.
-- **Etappe 5** — restliche Produktionsreife: Veröffentlichen-Workflow (`schedules.status` wird
-  bis heute nicht genutzt), Audit-Log, Exporte, DSGVO (Krankmeldungen sind Art.-9-Daten),
-  ArbZG-Prüfungen (max. 8/10 h, Pausen, max. 6 Tage in Folge)
+- ~~**Etappe 4** — Zuschnitt im Planer~~ — **umgesetzt**, siehe oben. Der Planer baut aus
+  `coverage_requirements`, schneidet auf die Arbeitszeitfenster zu und kann den geteilten
+  Dienst. `shift_requirements` wird nicht mehr gelesen und in Etappe 5 entfernt. Damit geht das
+  Tool über Papershift und Deputy hinaus — dort wird nicht automatisch zugeschnitten.
+- **Etappe 5** — restliche Produktionsreife: `shift_requirements` entfernen,
+  Veröffentlichen-Workflow (`schedules.status` wird bis heute nicht genutzt), Audit-Log,
+  Exporte, DSGVO (Krankmeldungen sind Art.-9-Daten) und die ArbZG-Regeln, die Etappe 4 bewusst
+  offengelassen hat: der Achtstundendurchschnitt aus § 3 Satz 2, die Ruhepausen aus § 4 und die
+  Sonntagsregeln aus § 11 samt der Folge „höchstens sechs Tage in Folge"
