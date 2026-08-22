@@ -164,13 +164,18 @@ function SchedulePage({ setFlash, user }) {
   // purpose: a future two-argument call (`reassign(id, employeeId)`) would
   // silently wipe individual times instead of failing loudly, so
   // startTime/endTime are required - every call site must decide.
-  async function reassign(assignmentId, employeeIdRaw, startTime, endTime) {
+  async function reassign(assignmentId, employeeIdRaw, startTime, endTime, breakMinutes = null) {
     const employeeId = employeeIdRaw === '' ? null : Number(employeeIdRaw)
     try {
+      // break_minutes travels with every call for the same reason the times
+      // do: PUT /assignments/<id> writes the whole row, so leaving it out
+      // clears it. null is not a loss here - it means "the legal minimum
+      // again" - but it is still a silent change to what was stored.
       const result = await api.put(`/assignments/${assignmentId}`, {
         employee_id: employeeId,
         start_time: startTime,
         end_time: endTime,
+        break_minutes: breakMinutes,
       })
       setWarnings(result.warnings || [])
       await refreshSchedule()
