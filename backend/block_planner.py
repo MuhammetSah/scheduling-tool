@@ -184,6 +184,14 @@ def cover_demand(bands, templates):
     stammt, und es entstehen wieder exakt die Bloecke, die build_slots()
     bisher gebaut hat.
     """
+    # Eine Vorlage ohne Zeiten hat auf der Minutenachse nichts zu suchen, und
+    # _time_range_minutes() wuerde an ihr abstuerzen. Ueber die Anwendung kann
+    # das nicht vorkommen - shift_types.start_time/end_time sind NOT NULL -,
+    # aber generate_schedule() sagt in seiner eigenen Beschreibung ausdruecklich
+    # "HH:MM or None" zu, und ein Aufrufer, der sich daran haelt, darf keinen
+    # 500er bekommen. Fuer die Blockplanung ist so eine Vorlage schlicht keine.
+    templates = [tpl for tpl in templates if tpl.get('start_time') and tpl.get('end_time')]
+
     boundaries = set()
     for template in templates:
         boundaries.update(_time_range_minutes(template['start_time'], template['end_time']))

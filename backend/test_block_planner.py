@@ -358,3 +358,20 @@ def test_ohne_kandidaten_bleiben_die_bloecke_wie_sie_sind():
                        [], EIN_DIENSTAG, DIENSTAG)
 
     assert zeiten(bloecke) == [('06:00', '14:00')] * 2
+
+
+def test_vorlage_ohne_zeiten_wird_uebergangen():
+    """generate_schedule() sagt "HH:MM or None" fuer Schichtarten zu.
+
+    Ueber die Anwendung kommt so eine Vorlage nie an - die Spalten sind
+    NOT NULL -, aber ein Aufrufer, der sich an die zugesagte Schnittstelle
+    haelt, darf keinen Absturz bekommen. Fuer die Blockplanung ist eine
+    Vorlage ohne Zeiten schlicht keine.
+    """
+    bloecke = cover_demand(
+        [band('08:00', '16:00', 1)],
+        [{'id': 1, 'start_time': None, 'end_time': None},
+         vorlage(2, '08:00', '16:00')],
+    )
+
+    assert bloecke == [{'shift_type_id': 2, 'start_time': '08:00', 'end_time': '16:00'}]
