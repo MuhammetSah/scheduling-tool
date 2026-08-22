@@ -22,11 +22,30 @@ Etappe 3 (Öffnungszeiten und Bedarf) pflegt und wertet `coverage_requirements` 
 der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 `shift_requirements`. Die Umstellung ist Etappe 4.
 
+## Erster Schritt einer neuen Sitzung
+
+Es ist nichts halb fertig. Etappen 0 bis 3 sind gemergt, deployt und dokumentiert, es gibt
+keine offenen Branches und keine offenen Pull Requests. Die Suite ist grün, ein geprüftes
+Backup liegt.
+
+Der nächste inhaltliche Schritt ist **Etappe 4 — Zuschnitt im Planer** (siehe Roadmap am Ende).
+Sie beginnt mit einem eigenen Umsetzungsplan auf einem neuen Branch ab `main`, nach dem Muster
+der drei vorherigen Etappen — siehe „Arbeitsweise“.
+
+**Bevor du Etappe 4 planst, lies zwei Abschnitte:** „Fallstricke dieses Projekts“ und
+„Zurückgestellte Befunde“. Dort steht, was drei Etappen an Reviews gekostet hat und was
+bewusst liegen geblieben ist. Zwei davon gehören **vor** Etappe 4 angefasst, weil sie deren
+Grundlage betreffen — sie sind dort so markiert.
+
+**Was beim Nutzer liegt und nicht bei dir:** der Umgang mit der ablaufenden Datenbank
+(07.09.2026), das Datenbankpasswort und die IP-Freigabe. Details unter „Offen — liegt beim
+Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
+
 ## Aktueller Stand
 
 | | |
 |---|---|
-| `main` | `d03729f` — Etappen 0 bis 3 gemergt und deployt, dazu der Nachtschicht-Fix in `window_contains_shift()` (PR #15) |
+| `main` | `f073d8f` — Etappen 0 bis 3 gemergt und deployt, dazu der Nachtschicht-Fix in `window_contains_shift()` (PR #15) |
 | Branch-Situation | Keine offenen Branches. Beide gestapelten PRs sind gemergt: #13 (Etappe 2) am 22.08. 12:15, #14 (Etappe 3) am 22.08. 12:16. Etappe 4 beginnt frisch ab `main` |
 | Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 198 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 5 Frontend-Tests (Vitest + Testing Library) |
@@ -70,11 +89,8 @@ Bedingung respektiert und ist über das Mitarbeiterformular pflegbar.
 | Abschluss-Review + Fix-Welle | ✅ Re-Review sauber | `7524e83` |
 | Merge nach `main` | ✅ PR #11 | `b65db6e` |
 
-**Erster Schritt einer neuen Sitzung:** Etappe 2 planen und auf einem neuen Branch ab `main`
-beginnen. Aus Etappe 1 ist nichts offen.
-
-**Beim nächsten Deploy:** Migration `0004` ist noch nicht in Produktion angewandt — sie läuft
-beim ersten Start nach dem Deploy. Danach `python migrations.py status` gegenprüfen.
+*(Historisch: Migration `0004` war zu diesem Zeitpunkt noch nicht in Produktion. Sie ist
+seit dem Deploy vom 22.08.2026 angewandt, zusammen mit `0005`–`0007`.)*
 
 ### Was das Abschluss-Review gefunden hat — die Lehre daraus
 
@@ -289,25 +305,82 @@ Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante
 
 ## Offen — liegt beim Nutzer
 
-**Erledigt am 22.08.2026:** Etappe 2 und 3 sind gemergt und deployt, alle Migrationen
-sind in Produktion angewandt. Was hier steht, ist der verbliebene Rest.
+**Erledigt am 22.08.2026:** Etappe 2 und 3 gemergt und deployt (PR #13, #14), alle Migrationen
+`0001`–`0007` in Produktion angewandt, der Nachtschicht-Fehler in `window_contains_shift()`
+behoben und gemergt (PR #15), und ein vollständiges Backup gezogen und geprüft. Was hier steht,
+ist der verbliebene Rest.
 
-- **Postgres läuft am 07.09.2026 ab.** Kostenloser Plan. Entscheidung nötig: bezahlter Plan,
-  Umzug, oder bewusster Datenverlust. Datenbestand ist klein (3 Mitarbeiter, 62 Zuweisungen),
-  also kein Notfall, aber ein Termin.
-- **IP-Freigabe an der Datenbank entfernen.** Wurde für eine einmalige Prüfung gesetzt.
+### Der Termin
+
+- **Die Postgres-Instanz läuft am 07.09.2026 ab** (`expiresAt`, per Render-API bestätigt).
+  Kostenloser Plan, Region Frankfurt, Version 18. Entscheidung nötig: bezahlter Plan, Umzug zu
+  einem anderen Anbieter, oder bewusster Datenverlust. **Ein geprüftes Backup existiert**
+  (siehe unten), der Verlust wäre also nicht endgültig — aber die laufende Anwendung verliert
+  ihre Datenbank und braucht dann eine neue.
+
+### Das Backup — vorhanden und geprüft
+
+`C:\Users\muham\schichtplan-2026-08-22.dump`, 59,9 KB, Format `custom`, gezogen am 22.08.2026
+um 15:02 mit `pg_dump 18.6` gegen den Server 18.
+
+Am selben Tag per `pg_restore --list` und Auszählung der COPY-Blöcke verifiziert — 18 Tabellen,
+alle mit Daten wie erwartet:
+
+| Tabelle | Zeilen |
+|---|---|
+| `employees` | 3 |
+| `shift_assignments` | 62 |
+| `shift_types` | 2 |
+| `coverage_requirements` | 21 (aus `0007` abgeleitet) |
+| `business_hours` | 7 (genau eine je Wochentag) |
+| `business_hours_exceptions` | 0 |
+| `employee_availability` | 0 |
+| `schema_migrations` | 7 |
+
+Nebenbefund, der für Etappe 4 zählt: **`employee_availability` ist leer** — niemand nutzt
+bisher den Fenster-Modus. Der am 22.08. behobene Nachtschicht-Fehler hatte im Betrieb also noch
+keine Auswirkung.
+
+**Die Datei enthält Betriebsdaten im Klartext.** Sie liegt bewusst in `$HOME` und nicht im
+Repo-Verzeichnis — beachte, dass `C:\Users\muham` selbst ein Git-Repository ist und ein
+unbedachtes `git add -A` sie einsammeln würde.
+
+Zurückspielen in eine neue Postgres-18-Datenbank:
+
+```
+pg_restore --clean --no-owner --dbname="$NEUE_DBURL" schichtplan-2026-08-22.dump
+```
+
+Danach findet die Anwendung `0001`–`0007` bereits als angewandt vor — `schema_migrations` ist
+Teil des Dumps.
+
+### Zugangsdaten und Zugriff
+
 - **Datenbankpasswort wurde in einem Chatverlauf offengelegt** und sollte getauscht werden.
-  Entschärft dadurch, dass externer Zugriff nur von einer IP erlaubt ist und die Instanz
-  ohnehin am 07.09. verschwindet.
-- **Render-Startbefehl angleichen** (optional, aber besser begründet als bisher): die Logs vom
-  22.08. zeigen, was tatsächlich läuft — `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT`,
-  ohne `--preload`, ohne `--threads`. Render setzt zusätzlich `WEB_CONCURRENCY=1`. Der Dienst
-  läuft also mit **einem** Worker; das ist der Grund, warum das Migrations-Rennen bisher nie
-  auftrat, und zugleich der Grund, warum `--preload` derzeit nichts schützt. Solange es bei
-  einem Worker bleibt, ist das harmlos. Wird je auf mehrere erhöht, **muss** `--preload` in den
-  Dashboard-Befehl, sonst greift genau die Race, gegen die `render.yaml` es vorsieht:
+  Entschärft dadurch, dass externer Zugriff nur von freigegebenen IPs erlaubt ist und die
+  Instanz ohnehin am 07.09. verschwindet. **Bei einem Umzug oder einem bezahlten Plan gehört es
+  rotiert.**
+- **IP-Freigabe an der Datenbank aufräumen.** Am 22.08. wurde eine aktuelle IP ergänzt, damit
+  der Dump laufen konnte — der alte Eintrag `88.130.158.137/32` vom 08.08. war durch die
+  Zwangstrennung des Anschlusses veraltet. Erst entfernen, wenn kein Dump mehr nötig ist.
+  **Merkposten für künftige Fehlersuche:** der Fehler `SSL-Verbindung wurde unerwartet
+  geschlossen` bedeutet bei Render fast immer eine nicht freigegebene IP, kein TLS-Problem. Die
+  Anwendung selbst ist davon nie betroffen, sie verbindet sich über die interne URL.
+
+### Betrieb
+
+- **Render-Startbefehl angleichen** (optional): die Logs vom 22.08. zeigen, was tatsächlich
+  läuft — `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT`, ohne `--preload`, ohne
+  `--threads`. Render setzt zusätzlich `WEB_CONCURRENCY=1`. Der Dienst läuft also mit **einem**
+  Worker; das ist der Grund, warum das Migrations-Rennen bisher nie auftrat, und zugleich der
+  Grund, warum `--preload` derzeit nichts schützt. Solange es bei einem Worker bleibt, ist das
+  harmlos. Wird je auf mehrere erhöht, **muss** `--preload` in den Dashboard-Befehl, sonst
+  greift genau die Race, gegen die `render.yaml` es vorsieht:
   `cd backend && gunicorn app:app --bind 0.0.0.0:$PORT --preload --threads 4 --timeout 60`
-- **`pg_dump` fehlt**: `winget install --id PostgreSQL.PostgreSQL.18` (Version 18, passend zum Server)
+- `pg_dump`/`pg_restore` 18.6 sind installiert unter `C:\Program Files\PostgreSQL\18\bin`, aber
+  **nicht im `PATH`**. Entweder mit vollem Pfad aufrufen oder dauerhaft ergänzen. Die
+  PowerShell dieses Rechners ist 5.1 — dort gibt es kein `&&`, und Bash-Syntax wie `read -p`
+  oder `export` funktioniert nicht.
 
 ## Zurückgestellte Befunde
 
