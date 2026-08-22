@@ -1094,3 +1094,121 @@ def test_ruhezeit_misst_ab_dem_letzten_block_des_vortags(hr_client):
     warnungen = _warnungen(hr_client, person, schicht, plan, '06:00', '10:00')
 
     assert any('Ruhezeit' in w for w in warnungen), warnungen
+
+
+# ---------- Etappe 5a: Ruhepause je Zuweisung ----------
+
+
+def _plan_mit_block(hr_client, start='08:00', ende='16:00'):
+    """Ein Mitarbeiter, eine Schichtart, ein Platz am 01.09.2026, besetzt."""
+    anna = hr_client.post('/employees', json={'name': 'Anna', 'unavailable_weekdays': [1]}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': start, 'end_time': ende,
+    }).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    return anna, schicht, platz
+
+
+def _zuweisung(hr_client, platz_id):
+    plan = hr_client.get('/schedules/2026/9').json
+    return next(a for a in plan['assignments'] if a['id'] == platz_id)
+
+
+def test_pause_ohne_angabe_ist_die_gesetzliche(hr_client):
+    """Ein Achtstundenblock laeuft auf 30 Minuten, ohne dass jemand etwas eintraegt.
+
+    Das ist der Regelfall und der Grund fuer die Nullbarkeit: gespeichert wird
+    nichts, gerechnet wird trotzdem mit dem, was Paragraph 4 verlangt.
+    """
+    anna, _schicht, platz = _plan_mit_block(hr_client)
+    hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': anna['id']})
+
+    zuweisung = _zuweisung(hr_client, platz['id'])
+
+    assert zuweisung['break_minutes'] is None
+    assert zuweisung['effective_break_minutes'] == 30
+
+
+def test_kurzer_block_bekommt_keine_pause(hr_client):
+    """Gegenprobe: fuenf Stunden sind nicht mehr als sechs."""
+    anna, _schicht, platz = _plan_mit_block(hr_client, start='08:00', ende='13:00')
+    hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': anna['id']})
+
+    assert _zuweisung(hr_client, platz['id'])['effective_break_minutes'] == 0
+
+
+def test_gesetzte_pause_schlaegt_die_gesetzliche(hr_client):
+    anna, _schicht, platz = _plan_mit_block(hr_client)
+    hr_client.put(f'/assignments/{platz["id"]}',
+                  json={'employee_id': anna['id'], 'break_minutes': 60})
+
+    zuweisung = _zuweisung(hr_client, platz['id'])
+
+    assert zuweisung['break_minutes'] == 60
+    assert zuweisung['effective_break_minutes'] == 60
+
+
+def test_ausdrueckliche_null_ist_etwas_anderes_als_keine_angabe(hr_client):
+    """Der Unterschied, um dessentwillen die Spalte nullbar ist.
+
+    Eine gespeicherte 0 heisst "dieser Block laeuft ohne Pause" - eine Aussage,
+    die HR treffen darf. Kein Wert heisst "nicht abweichend geregelt" und wird
+    als gesetzliche Mindestpause gelesen. Waere die Spalte NOT NULL DEFAULT 0,
+    liessen sich die beiden nicht unterscheiden.
+    """
+    anna, _schicht, platz = _plan_mit_block(hr_client)
+    hr_client.put(f'/assignments/{platz["id"]}',
+                  json={'employee_id': anna['id'], 'break_minutes': 0})
+
+    zuweisung = _zuweisung(hr_client, platz['id'])
+
+    assert zuweisung['break_minutes'] == 0
+    assert zuweisung['effective_break_minutes'] == 0
+
+
+def test_pause_faellt_weg_wenn_der_put_sie_nicht_mitschickt(hr_client):
+    """Fallstrick 14: PUT /assignments/<id> schreibt vollstaendig.
+
+    Kein Schoenheitsfehler, sondern die dokumentierte Semantik, die schon fuer
+    start_time und end_time gilt. Der Test haelt sie fest, damit sie nicht
+    unbemerkt kippt - und damit ein kuenftiger Aufrufer sie nachlesen kann.
+    """
+    anna, _schicht, platz = _plan_mit_block(hr_client)
+    hr_client.put(f'/assignments/{platz["id"]}',
+                  json={'employee_id': anna['id'], 'break_minutes': 60})
+    assert _zuweisung(hr_client, platz['id'])['break_minutes'] == 60
+
+    hr_client.put(f'/assignments/{platz["id"]}', json={'employee_id': anna['id']})
+
+    assert _zuweisung(hr_client, platz['id'])['break_minutes'] is None
+
+
+def test_unsinnige_pause_ist_400(hr_client):
+    anna, _schicht, platz = _plan_mit_block(hr_client)
+
+    for unsinn in (-1, 'viel', 12.5, True):
+        antwort = hr_client.put(f'/assignments/{platz["id"]}',
+                                json={'employee_id': anna['id'], 'break_minutes': unsinn})
+        assert antwort.status_code == 400, (unsinn, antwort.json)
+
+
+def test_generator_setzt_keine_pause(hr_client):
+    """Die Bloecke des Generators bekommen die Mindestpause ueber den
+    NULL-Standard - er schreibt nichts, und das ist die richtige Annahme."""
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00', 'requirements': [0] * 7,
+    })
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    zuweisungen = antwort.json['assignments']
+    assert zuweisungen
+    assert all(z['break_minutes'] is None for z in zuweisungen)
+    assert all(z['effective_break_minutes'] == 30 for z in zuweisungen)

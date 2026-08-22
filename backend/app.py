@@ -22,8 +22,9 @@ from coverage_model import band_within, coverage_gaps, first_overlapping_pair, t
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
-    _ranges_overlap, _time_range_minutes, generate_schedule, rest_gap_hours,
-    shift_datetimes, shift_duration_minutes, window_contains_shift, window_is_valid_on,
+    _ranges_overlap, _time_range_minutes, generate_schedule, legal_break_minutes,
+    net_working_minutes, rest_gap_hours, shift_datetimes, shift_duration_minutes,
+    window_contains_shift, window_is_valid_on,
 )
 
 # Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
@@ -670,6 +671,28 @@ def parse_assignment_times(data):
     if start_time is not None and start_time == end_time:
         raise ValueError(t(g.lang, 'assignment_times_must_differ'))
     return start_time, end_time
+
+
+def parse_break_minutes(value):
+    """A whole number of minutes, or None for "not separately agreed".
+
+    None is not "no break": it reads as the legal minimum for the block's span
+    (see scheduler.net_working_minutes). A stored 0 is the different, explicit
+    statement that this block runs without one - that is HR's call to make, and
+    constraint_warnings() is where it gets questioned.
+    """
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool):
+        # bool is an int in Python, and True would silently become one minute.
+        raise ValueError(t(g.lang, 'break_minutes_invalid'))
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(t(g.lang, 'break_minutes_invalid'))
+    if minutes != float(value) or minutes < 0:
+        raise ValueError(t(g.lang, 'break_minutes_invalid'))
+    return minutes
 
 
 def replace_employee_constraints(connection, employee_id, data):
@@ -1390,6 +1413,7 @@ def fetch_schedule(year, month):
     cursor.execute('''
         SELECT sa.id, sa.date, sa.shift_type_id, sa.slot_index, sa.employee_id, sa.manually_edited,
                sa.absence_type, sa.absent_employee_id, sa.start_time, sa.end_time,
+               sa.break_minutes,
                st.name AS shift_type_name, st.color AS shift_type_color,
                st.start_time AS type_start_time, st.end_time AS type_end_time,
                e.name AS employee_name, ae.name AS absent_employee_name
@@ -1421,6 +1445,17 @@ def fetch_schedule(year, month):
             else:
                 a['start_time'] = a['type_start_time']
                 a['end_time'] = a['type_end_time']
+        # The break this block actually runs on: whatever someone entered, or
+        # the legal minimum for the hours the three layers above settled on.
+        # Resolved after them on purpose - the minimum depends on the span they
+        # produce. Same shape as assignment_time_set/time_overridden: the
+        # browser is told which layer won instead of re-deriving the rule.
+        a['effective_break_minutes'] = (
+            a['break_minutes'] if a['break_minutes'] is not None
+            else legal_break_minutes(shift_duration_minutes(a['start_time'], a['end_time']))
+            if a['start_time'] and a['end_time']
+            else None
+        )
         del a['type_start_time'], a['type_end_time']
         assignments.append(a)
 
@@ -2112,20 +2147,28 @@ def update_assignment(assignment_id):
     if assignment['shift_type_id'] is None and start_time is None:
         return jsonify({'message': t(g.lang, 'assignment_without_shift_type_needs_times')}), 400
 
+    try:
+        break_minutes = parse_break_minutes(data.get('break_minutes'))
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
     warnings = constraint_warnings(
         cursor, employee_id, assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
         exclude_assignment_id=assignment_id, start_time=start_time, end_time=end_time,
     )
 
-    # start_time/end_time are written on every PUT, same "absent means empty"
-    # semantics as employee_id above: leaving them out of the body clears them
-    # to NULL rather than keeping whatever was there before. Consequence: a
-    # caller that only wants to swap the employee must resend the current
-    # times, or they get wiped. The frontend does this (Task 6).
+    # start_time/end_time and break_minutes are written on every PUT, same
+    # "absent means empty" semantics as employee_id above: leaving them out of
+    # the body clears them to NULL rather than keeping whatever was there
+    # before. Consequence: a caller that only wants to swap the employee must
+    # resend the current times and break, or they get wiped. The frontend does
+    # this. For the break, NULL is not a loss of information the way it is for
+    # the times - it simply means "the legal minimum again" - but it is still a
+    # silent change to what was stored, so the same rule applies.
     cursor.execute(
-        'UPDATE shift_assignments SET employee_id = ?, start_time = ?, end_time = ?, manually_edited = 1 '
-        'WHERE id = ?',
-        (employee_id, start_time, end_time, assignment_id))
+        'UPDATE shift_assignments SET employee_id = ?, start_time = ?, end_time = ?, '
+        'break_minutes = ?, manually_edited = 1 WHERE id = ?',
+        (employee_id, start_time, end_time, break_minutes, assignment_id))
     refresh_unfilled_count(cursor, assignment['schedule_id'])
 
     connection.commit()

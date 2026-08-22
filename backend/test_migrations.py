@@ -17,6 +17,21 @@ ASSIGNMENT_TIMES_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '000
 COVERAGE_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0006_coverage.py'
 DERIVE_COVERAGE_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0007_derive_coverage.py'
 
+
+def zurueck_bis(migrations, version):
+    """Rollt zurueck, bis `version` an der Reihe war.
+
+    Nicht rollback_last() einmal aufrufen: "die letzte ist meine" ist eine
+    Annahme, die jede kuenftige Migration erneut bricht. Genau daran sind die
+    Rundlauftests von 0007 und 0008 nacheinander gescheitert, als 0008 bzw.
+    0009 dazukamen.
+    """
+    while True:
+        zurueckgerollt = migrations.rollback_last()
+        assert zurueckgerollt is not None, f'ohne {version} zurueckgerollt'
+        if zurueckgerollt == version:
+            return zurueckgerollt
+
 # Die von 0001_baseline.py angelegten Tabellen, als Literal statt aus der
 # Datei abgeleitet. 0001_baseline aendert sich per Konvention nie wieder
 # (siehe dessen eigenes down(), das eine Ruecknahme verweigert) - jede
@@ -812,15 +827,7 @@ def test_ableitung_laesst_bestehende_baender_unangetastet(fresh_db):
         connection.close()
 
     assert '0007_derive_coverage' in migrations.applied_versions()
-    # Zurueckrollen, bis 0007 an der Reihe war - nicht ein einzelnes
-    # rollback_last(). Dieser Test laeuft gegen das echte
-    # Migrationsverzeichnis, in dem seit 0008_max_daily_hours weitere
-    # Revisionen ueber 0007 liegen; "die letzte ist 0007" waere eine Annahme,
-    # die jede kuenftige Migration erneut brechen wuerde.
-    zurueckgerollt = None
-    while zurueckgerollt != '0007_derive_coverage':
-        zurueckgerollt = migrations.rollback_last()
-        assert zurueckgerollt is not None, 'ohne 0007 zurueckgerollt'
+    zurueck_bis(migrations, '0007_derive_coverage')
     assert '0007_derive_coverage' not in migrations.applied_versions()
 
     connection = sqlite3.connect(db_file)
@@ -1017,14 +1024,10 @@ def test_0008_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
     migrations.apply_pending()
     assert '0008_max_daily_hours' in migrations.applied_versions()
 
-    zurueckgerollt = migrations.rollback_last()
+    zurueck_bis(migrations, '0008_max_daily_hours')
 
-    assert zurueckgerollt == '0008_max_daily_hours'
     assert '0008_max_daily_hours' not in migrations.applied_versions()
-
-    erneut = migrations.apply_pending()
-
-    assert '0008_max_daily_hours' in erneut
+    assert '0008_max_daily_hours' in migrations.apply_pending()
 
 
 def test_0008_setzt_bestandszeilen_auf_zehn_stunden(fresh_db):
@@ -1035,7 +1038,7 @@ def test_0008_setzt_bestandszeilen_auf_zehn_stunden(fresh_db):
     """
     migrations, db_file = fresh_db
     migrations.apply_pending()
-    migrations.rollback_last()
+    zurueck_bis(migrations, '0008_max_daily_hours')
 
     connection = sqlite3.connect(db_file)
     connection.row_factory = sqlite3.Row
@@ -1056,3 +1059,69 @@ def test_0008_setzt_bestandszeilen_auf_zehn_stunden(fresh_db):
         connection.close()
 
     assert zeile['max_daily_hours'] == 10
+
+
+# ---------- 0009_break_minutes ----------
+
+
+def test_0009_ergaenzt_die_ruhepause(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        spalten = {zeile[1] for zeile in connection.execute('PRAGMA table_info(shift_assignments)')}
+    finally:
+        connection.close()
+
+    assert 'break_minutes' in spalten
+
+
+def test_0009_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    migrations, _db_file = fresh_db
+    migrations.apply_pending()
+    assert '0009_break_minutes' in migrations.applied_versions()
+
+    zurueck_bis(migrations, '0009_break_minutes')
+
+    assert '0009_break_minutes' not in migrations.applied_versions()
+    assert '0009_break_minutes' in migrations.apply_pending()
+
+
+def test_0009_laesst_bestandszeilen_auf_null(fresh_db):
+    """Der ganze Punkt der Nullbarkeit.
+
+    NULL heisst "nicht abweichend geregelt" und wird als gesetzliche
+    Mindestpause gelesen. Ein DEFAULT 0 wuerde daraus die Aussage "keine
+    Pause" machen - und damit jede Bestandszeile ruecckwirkend auf einen Plan
+    festlegen, den Paragraph 4 so nicht zulaesst.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    zurueck_bis(migrations, '0009_break_minutes')
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 9, 'generated')")
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Tag', '08:00', '16:00')")
+        connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index) '
+            "VALUES (1, '2026-09-01', 1, 0)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        zeile = connection.execute(
+            'SELECT break_minutes FROM shift_assignments').fetchone()
+    finally:
+        connection.close()
+
+    assert zeile['break_minutes'] is None

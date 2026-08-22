@@ -1070,3 +1070,22 @@ def test_bestandsmitarbeiter_bekommt_die_tagesgrenze_zehn(pg_db):
         verbindung.close()
 
     assert wert == 10
+
+
+def test_ruhepause_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0009_break_minutes.
+
+    Derselbe Grund wie bei 0004 und 0008: der table_columns()-Waechter laeuft
+    hier gegen information_schema statt gegen PRAGMA table_info.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    while '0009_break_minutes' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    # Die Spalte ueberlebt die Ruecknahme absichtlich - siehe down().
+    assert 'break_minutes' in spalten(schema_url, schema, 'shift_assignments')
+
+    assert '0009_break_minutes' in migrations.apply_pending()
+    assert 'break_minutes' in spalten(schema_url, schema, 'shift_assignments')

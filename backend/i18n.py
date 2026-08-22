@@ -143,6 +143,10 @@ TRANSLATIONS = {
         'de': 'Ungültiges Datum: {date}',
         'en': 'Invalid date: {date}',
     },
+    'break_minutes_invalid': {
+        'de': 'Die Pause muss eine ganze Zahl von Minuten sein und darf nicht negativ sein',
+        'en': 'The break must be a whole, non-negative number of minutes',
+    },
     'availability_mode_invalid': {
         'de': 'Unbekannter Verfügbarkeitsmodus. Erlaubt sind "anytime" und "windows".',
         'en': 'Unknown availability mode. Allowed values are "anytime" and "windows".',
