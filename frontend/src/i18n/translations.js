@@ -54,6 +54,8 @@ const de = {
     schedule: 'Dienstplan',
     employees: 'Mitarbeiter',
     shiftTypes: 'Schichtarten',
+    businessHours: 'Öffnungszeiten',
+    coverageRequirements: 'Bedarf',
     accounts: 'Konten',
     login: 'Anmelden',
     logout: 'Abmelden ({username})',
@@ -190,6 +192,41 @@ const de = {
     flashCreated: 'Schichtart angelegt.',
   },
 
+  businessHours: {
+    title: 'Öffnungszeiten',
+    openLabel: 'Öffnet',
+    closeLabel: 'Schließt',
+    closedLabel: 'Geschlossen',
+    flashSaved: 'Öffnungszeiten gespeichert.',
+    exceptionsTitle: 'Sonderöffnungszeiten',
+    exceptionsHint: 'Ausnahmen für einzelne Tage, z. B. Feiertage oder Sonderöffnungen. Sie überschreiben die üblichen Öffnungszeiten dieses Wochentags.',
+    exceptionsEmpty: 'Noch keine Ausnahmen angelegt.',
+    labelLabel: 'Bezeichnung (optional)',
+    labelPlaceholder: 'z. B. Feiertag',
+    closedBadge: 'geschlossen',
+    confirmDeleteException: 'Diese Ausnahme wirklich entfernen?',
+    flashExceptionCreated: 'Ausnahme angelegt.',
+  },
+
+  coverageEditor: {
+    title: 'Bedarfsbänder',
+    hint: 'Pro Wochentag die Zeiträume mit dem jeweils benötigten Personal, als Balken über den Tag. Bänder desselben Wochentags dürfen sich nicht überschneiden.',
+    addBandButton: '+ Band hinzufügen',
+    startAria: 'Von',
+    endAria: 'Bis',
+    countAria: 'Benötigte Anzahl',
+    removeBandTitle: 'Dieses Band entfernen',
+    overlapWarning: 'Diese Bänder überschneiden sich — bitte anpassen, bevor gespeichert werden kann.',
+    flashSaved: 'Bedarfsbänder gespeichert.',
+    tooltip: '{start}–{end}: {n} benötigt',
+  },
+
+  coverageGaps: {
+    title: 'Offene Deckungslücken',
+    entrySingular: '{date}, {start}–{end}: 1 Person fehlt',
+    entryPlural: '{date}, {start}–{end}: {n} Personen fehlen',
+  },
+
   schedule: {
     title: 'Dienstplan',
     monthLabel: 'Monat',
@@ -320,6 +357,8 @@ const en = {
     schedule: 'Schedule',
     employees: 'Employees',
     shiftTypes: 'Shift Types',
+    businessHours: 'Business Hours',
+    coverageRequirements: 'Coverage',
     accounts: 'Accounts',
     login: 'Sign in',
     logout: 'Sign out ({username})',
@@ -454,6 +493,41 @@ const en = {
     confirmDelete: 'Really delete this shift type?',
     flashUpdated: 'Shift type updated.',
     flashCreated: 'Shift type created.',
+  },
+
+  businessHours: {
+    title: 'Business Hours',
+    openLabel: 'Opens',
+    closeLabel: 'Closes',
+    closedLabel: 'Closed',
+    flashSaved: 'Business hours saved.',
+    exceptionsTitle: 'Special Hours',
+    exceptionsHint: 'Exceptions for individual dates, e.g. holidays or special openings. They override that weekday\'s usual hours.',
+    exceptionsEmpty: 'No exceptions created yet.',
+    labelLabel: 'Label (optional)',
+    labelPlaceholder: 'e.g. holiday',
+    closedBadge: 'closed',
+    confirmDeleteException: 'Really remove this exception?',
+    flashExceptionCreated: 'Exception created.',
+  },
+
+  coverageEditor: {
+    title: 'Coverage Requirements',
+    hint: 'Per weekday, the time ranges with the staff required, drawn as bars across the day. Bands on the same weekday must not overlap.',
+    addBandButton: '+ Add band',
+    startAria: 'From',
+    endAria: 'To',
+    countAria: 'Required count',
+    removeBandTitle: 'Remove this band',
+    overlapWarning: 'These bands overlap — please adjust before this can be saved.',
+    flashSaved: 'Coverage requirements saved.',
+    tooltip: '{start}–{end}: {n} required',
+  },
+
+  coverageGaps: {
+    title: 'Open Coverage Gaps',
+    entrySingular: '{date}, {start}–{end}: 1 person missing',
+    entryPlural: '{date}, {start}–{end}: {n} people missing',
   },
 
   schedule: {

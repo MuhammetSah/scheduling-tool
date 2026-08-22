@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 're
 import SchedulePage from './pages/SchedulePage'
 import Employees from './pages/Employees'
 import ShiftTypes from './pages/ShiftTypes'
+import BusinessHours from './pages/BusinessHours'
+import CoverageEditor from './pages/CoverageEditor'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Accounts from './pages/Accounts'
@@ -128,6 +130,8 @@ function App() {
                   <>
                     <NavLink to="/employees" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.employees')}</NavLink>
                     <NavLink to="/shift-types" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.shiftTypes')}</NavLink>
+                    <NavLink to="/business-hours" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.businessHours')}</NavLink>
+                    <NavLink to="/coverage-requirements" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.coverageRequirements')}</NavLink>
                     <NavLink to="/register" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.accounts')}</NavLink>
                   </>
                 )}
@@ -160,6 +164,16 @@ function App() {
               <Route path="/shift-types" element={
                 <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
                   <ShiftTypes setFlash={setFlash} />
+                </RequireAuth>
+              } />
+              <Route path="/business-hours" element={
+                <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
+                  <BusinessHours setFlash={setFlash} />
+                </RequireAuth>
+              } />
+              <Route path="/coverage-requirements" element={
+                <RequireAuth user={user} setupRequired={setupRequired} hrOnly>
+                  <CoverageEditor setFlash={setFlash} />
                 </RequireAuth>
               } />
               {/* Public: the token from the invitation email is the credential. */}
