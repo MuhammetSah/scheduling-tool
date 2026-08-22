@@ -383,6 +383,17 @@ Aus dem Abschluss-Review von Etappe 3 behoben (eine Fix-Runde, ein Commit):
 
 Weiterhin offen aus den Reviews von Etappe 3:
 
+- **`scheduler.window_contains_shift()` hat denselben Mitternachtsfehler, den die
+  Bandprüfung in Etappe 3 behoben hat — eine Ebene tiefer.** Ein Arbeitszeitfenster
+  `00:00–00:00` ist als „ganztags verfügbar" gemeint, enthält aber keine Nachtschicht:
+  `window_contains_shift({'start_time': '00:00', 'end_time': '00:00'}, '22:00', '06:00')`
+  liefert `False`. Vom Abschluss-Review der Etappe 3 gefunden und von dessen Re-Review
+  eigenständig nachgerechnet und bestätigt. **Es ist ein Befund gegen Etappe 1**, nicht gegen
+  Etappe 3 — `scheduler.py` war für die Fix-Welle gesperrt und wurde nachweislich nicht
+  angefasst. `coverage_model.band_within()` zeigt die Lösung: die Schließzeit als Gegenmenge
+  prüfen statt das Band zu verschieben, weil die Ringnatur im Fenster steckt, nicht im Band.
+  **Vor Etappe 4 angehen** — dort wird auf Mitarbeiterfenster zugeschnitten, und die Etappe
+  hätte den Fehler sonst als Grundlage.
 - der Rundlauftest von `0006_coverage.py` prüft nach `down()`+`up()` nur `business_hours`,
   nicht ob die beiden Nebentabellen (`business_hours_exceptions`, `coverage_requirements`)
   wirklich weg waren — ein vergessenes `DROP TABLE` bliebe wegen `CREATE TABLE IF NOT EXISTS`
