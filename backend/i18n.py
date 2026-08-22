@@ -383,6 +383,14 @@ TRANSLATIONS = {
         'de': '{name} hat am {date} bereits einen Block von {start}–{end}, der sich damit überschneidet',
         'en': '{name} already has a block from {start}–{end} on {date} that overlaps this one',
     },
+    'warn_seventh_consecutive_day': {
+        'de': '{name} käme damit auf {days} Tage in Folge; nach § 11 Abs. 3 ArbZG ist spätestens nach sechs ein Ersatzruhetag fällig',
+        'en': '{name} would then work {days} days in a row; § 11 Abs. 3 ArbZG calls for a rest day after six at the latest',
+    },
+    'warn_sunday_budget_exhausted': {
+        'de': '{name} hätte damit nur noch {free} freie Sonntage in {year}; § 11 Abs. 1 ArbZG verlangt mindestens 15',
+        'en': '{name} would be left with only {free} free Sundays in {year}; § 11 Abs. 1 ArbZG requires at least 15',
+    },
     'warn_break_below_minimum': {
         'de': '{name} hätte bei {hours:.1f} Std. nur {minutes} Min. Pause; nach § 4 ArbZG sind mindestens {required} Min. vorgeschrieben',
         'en': '{name} would get only {minutes} min of break for {hours:.1f}h; § 4 ArbZG requires at least {required} min',

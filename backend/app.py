@@ -1379,6 +1379,71 @@ def scheduling_history(cursor, employee_id, year, month):
     return run, sundays
 
 
+def sundays_in_year(year):
+    """52 or 53 - computed rather than assumed; the difference is one Sunday of
+    everyone's yearly budget."""
+    return sum(
+        1 for offset in range((date(year + 1, 1, 1) - date(year, 1, 1)).days)
+        if (date(year, 1, 1) + timedelta(days=offset)).weekday() == 6
+    )
+
+
+def worked_dates_for(cursor, employee_id, first_date, last_date, exclude_assignment_id):
+    """Distinct calendar dates this employee holds a block on, within a range.
+
+    Distinct dates rather than assignments: a split shift with two blocks does
+    not make a day into two days.
+    """
+    query = ('SELECT DISTINCT date FROM shift_assignments '
+             'WHERE employee_id = ? AND date BETWEEN ? AND ?')
+    params = [employee_id, first_date, last_date]
+    if exclude_assignment_id is not None:
+        query += ' AND id != ?'
+        params.append(exclude_assignment_id)
+    cursor.execute(query, params)
+    return {row['date'] for row in cursor.fetchall()}
+
+
+def consecutive_days_around(cursor, employee_id, assignment_date, exclude_assignment_id):
+    """Length of the run of worked days this assignment would sit in.
+
+    Counted in both directions over saved data, so unlike the generator this
+    sees past the end of the month as well - which is exactly why the manual
+    path is the stricter of the two. Bounded to a fortnight either side: a run
+    longer than that is already far past the point where the warning fires.
+    """
+    d = date.fromisoformat(assignment_date)
+    worked = worked_dates_for(
+        cursor, employee_id,
+        (d - timedelta(days=14)).isoformat(), (d + timedelta(days=14)).isoformat(),
+        exclude_assignment_id,
+    )
+
+    run = 1
+    for direction in (-1, 1):
+        cursor_date = d + timedelta(days=direction)
+        while cursor_date.isoformat() in worked:
+            run += 1
+            cursor_date += timedelta(days=direction)
+    return run
+
+
+def sundays_worked_in_year(cursor, employee_id, year, except_date, exclude_assignment_id):
+    """Distinct Sundays already worked this year, leaving out one date.
+
+    `except_date` is the one being decided: a second block on a Sunday someone
+    already works must not count twice (§ 11 Abs. 1 asks whether the day is
+    free, not how many blocks are on it).
+    """
+    worked = worked_dates_for(
+        cursor, employee_id,
+        date(year, 1, 1).isoformat(), date(year, 12, 31).isoformat(),
+        exclude_assignment_id,
+    )
+    return sum(1 for iso in worked
+               if iso != except_date and date.fromisoformat(iso).weekday() == 6)
+
+
 def load_employees_for_scheduling(cursor, year=None, month=None):
     cursor.execute('SELECT * FROM employees WHERE active = 1')
     employees = []
@@ -2083,6 +2148,26 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             warnings.append(t(g.lang, 'warn_daily_hours_exceeded', name=employee['name'],
                               date=assignment_date, hours=total_minutes / 60,
                               cap=employee['max_daily_hours']))
+
+    # § 11 Abs. 3 ArbZG via the six-day rule (see MAX_CONSECUTIVE_DAYS in
+    # scheduler.py). Unlike the generator, this path reads saved data and
+    # therefore also sees *forward* across the month boundary: the run is
+    # counted in both directions over whatever is stored. Stricter than the
+    # generator, not laxer.
+    run = consecutive_days_around(cursor, employee_id, assignment_date, exclude_assignment_id)
+    if run > MAX_CONSECUTIVE_DAYS:
+        warnings.append(t(g.lang, 'warn_seventh_consecutive_day',
+                          name=employee['name'], days=run))
+
+    # § 11 Abs. 1 ArbZG: at least 15 Sundays a year stay free of work.
+    if date.fromisoformat(assignment_date).weekday() == 6:
+        year = date.fromisoformat(assignment_date).year
+        worked = sundays_worked_in_year(cursor, employee_id, year, assignment_date,
+                                        exclude_assignment_id) + 1
+        free = sundays_in_year(year) - worked
+        if free < MIN_FREE_SUNDAYS_PER_YEAR:
+            warnings.append(t(g.lang, 'warn_sunday_budget_exhausted',
+                              name=employee['name'], free=max(0, free), year=year))
 
     # § 4 ArbZG. This is the only place the rule can be broken at all: left
     # alone, break_minutes is NULL and reads as the legal minimum, so every
