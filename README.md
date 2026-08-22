@@ -153,7 +153,7 @@ Both the generator and the manual-correction path apply these, and as everywhere
 
 **What this tool deliberately does not check**, so that it is written down rather than silently assumed:
 
-- **The eight-hour average of § 3 Satz 2.** Ten hours a day are only lawful if six calendar months (or 24 weeks) average out at eight. The planner works one month at a time and structurally cannot see that window — the same boundary at which `max_shifts_per_month` and the rest-period check at the month's edge already stop. A `max_daily_hours` above 8 is therefore **not self-supporting in law**; the employee form says so at the field, and the compensation remains HR's responsibility.
+- ~~The eight-hour average of § 3 Satz 2~~ — reported since, see [The eight-hour average](#the-eight-hour-average). The planner still does not *enforce* it, deliberately: whether ten hours today are lawful is settled by the months that follow.
 - **The position of a break within a block, and with it § 4 Satz 3** (no more than six hours' work at a stretch). Breaks themselves are modelled since the following stage — see [Breaks and net working time](#breaks-and-net-working-time) — but as a duration, not a position. Worth noting in the other direction: an interruption of at least 30 minutes between two blocks *satisfies* § 4 in form, which makes a split shift the cleaner arrangement of the two.
 - ~~Sunday rules (§ 11 ArbZG)~~ — implemented since, see [Rest days and free Sundays](#rest-days-and-free-sundays). What remains open there is § 9 and § 10, which the tool cannot decide, and the holiday calendar.
 
@@ -206,6 +206,21 @@ Both rules are read from the employee dict (`max_consecutive_days`, `sundays_wor
 **And still not known: which dates are public holidays.** A holiday calendar with per-state selection is its own stage; it changes nothing about the rules above, since the six-day rule covers the eight-week window regardless. What it would add is awareness — HR seeing that a date is a holiday before publishing.
 
 **The manual-correction path is the stricter of the two.** It runs against saved data, so it also sees *forward* past the end of the month; the generator cannot, because next month's blocks do not exist yet when it runs.
+
+### The eight-hour average
+
+The last of the three rules stage 4 left open. § 3 Satz 2 allows ten-hour days **only** if the average over six calendar months or 24 weeks stays within eight hours per working day. Stage 4 introduced `max_daily_hours` with a default of 10 and said outright that the limit is not self-supporting without that proof; this is the proof.
+
+**Reported, not enforced**, and that is the whole point: whether ten hours today are lawful is settled by the months that follow. Insisting on it while generating would mean either miscounting or restricting for no reason. `GET /schedules/<year>/<month>` returns `average_hours` beside `coverage_gaps` — only the employees over the line, the way the gap list reports only gaps.
+
+Two things about the calculation are easy to get wrong:
+
+- **The employer picks the reference period** — six calendar months *or* 24 weeks — and may lay it rolling; the law prescribes no calendar half-years. This computes 24 weeks, ending on the last day of the month being viewed. Six months would be just as lawful, and a setting for it would be surface nobody has asked for yet.
+- **The average is per *working day*, not per day worked and not per calendar day.** Working days are Monday through Saturday. That makes for a generous denominator: five eight-hour days a week average about 6.2 hours per working day, so the limit only bites on many long days. That is the norm, not a softness here.
+
+Working time is counted net of breaks, as everywhere since [Breaks and net working time](#breaks-and-net-working-time).
+
+**Known gap: public holidays are counted as working days**, because the tool has no holiday calendar yet. They should shrink the denominator — over 24 weeks the count runs roughly three percent high, which makes the check too *lenient*: it can miss an excess, never invent one. Worth naming, because that is the more uncomfortable direction of the two.
 
 ### Fairness (v1.3)
 
@@ -273,7 +288,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
 - A public-holiday calendar with per-state selection: it changes none of the rules above, but it would let HR see that a date is a holiday before publishing
-- Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the eight-hour average behind a ten-hour day, the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
+- Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
@@ -340,6 +355,8 @@ schichtplan-tool/
             ├── CalendarView.jsx    # Read-only wall-planner view
             ├── CalendarView.test.jsx
             ├── CoverageGaps.jsx    # Renders coverage_gaps against a fetched schedule
+            ├── AverageHours.jsx    # Renders average_hours: who breaks § 3's average
+            ├── AverageHours.test.jsx
             ├── Distribution.jsx    # Shifts-per-employee balance panel
             └── AbsenceManager.jsx  # Employee self-service: report/cancel sick & vacation
 ```
@@ -510,7 +527,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (322 tests at the time of writing — `cd backend && pytest` prints the current number; 32 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (327 tests at the time of writing — `cd backend && pytest` prints the current number; 32 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

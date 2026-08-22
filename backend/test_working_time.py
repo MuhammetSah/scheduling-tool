@@ -98,3 +98,53 @@ def test_netto_wird_nicht_negativ():
     """Eine Pause laenger als der Block ist Unsinn, darf aber keine negative
     Arbeitszeit erzeugen - die wuerde sich durch die Wochensumme fressen."""
     assert net_working_minutes(2 * STUNDE, 180) == 0
+
+
+# ---------- Der Achtstundenschnitt (Paragraph 3 Satz 2 ArbZG, Etappe 5c) ----------
+
+
+from datetime import date
+
+from scheduler import (
+    AVERAGE_REFERENCE_DAYS, MAX_AVERAGE_DAILY_HOURS,
+    average_window, working_days_in, exceeds_average,
+)
+
+
+def test_das_fenster_umfasst_24_wochen_und_endet_am_letzten_des_monats():
+    beginn, ende = average_window(2026, 9)
+
+    assert ende == date(2026, 9, 30)
+    assert (ende - beginn).days + 1 == AVERAGE_REFERENCE_DAYS
+    assert AVERAGE_REFERENCE_DAYS == 24 * 7
+
+
+def test_werktage_sind_montag_bis_samstag():
+    """Paragraph 3 rechnet je Werktag. Sonntage sind keine.
+
+    Eine volle Woche hat sechs Werktage, 24 Wochen also genau 144.
+    """
+    assert working_days_in(date(2026, 9, 7), date(2026, 9, 13)) == 6
+    assert working_days_in(*average_window(2026, 9)) == 144
+
+
+def test_ein_einzelner_sonntag_zaehlt_nicht():
+    """Der 06.09.2026 ist ein Sonntag."""
+    assert working_days_in(date(2026, 9, 6), date(2026, 9, 6)) == 0
+    assert working_days_in(date(2026, 9, 7), date(2026, 9, 7)) == 1
+
+
+def test_genau_an_der_grenze_wird_nicht_gemeldet():
+    """144 Werktage mal acht Stunden sind 69120 Minuten - und "nicht
+    ueberschreiten" heisst, dass genau dieser Wert noch geht."""
+    grenze = 144 * MAX_AVERAGE_DAILY_HOURS * 60
+
+    assert exceeds_average(grenze, 144) is False
+    assert exceeds_average(grenze + 1, 144) is True
+
+
+def test_ohne_werktage_wird_nichts_gemeldet():
+    """Ein leeres Fenster kann nichts ueberschreiten - und eine Division durch
+    null darf es hier auch nicht geben."""
+    assert exceeds_average(0, 0) is False
+    assert exceeds_average(600, 0) is False

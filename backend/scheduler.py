@@ -185,6 +185,54 @@ def net_working_minutes(duration_minutes, break_minutes):
     return max(0, duration_minutes - taken)
 
 
+# § 3 Satz 2 ArbZG: ten hours a day are only lawful if the average over six
+# calendar months *or* 24 weeks stays within eight hours per working day. The
+# employer picks which of the two and may lay it rolling - the law prescribes
+# no calendar half-years. 24 weeks is what this tool computes: a fixed length,
+# with none of the variance months bring.
+#
+# "Per working day" means Monday to Saturday. Not per day actually worked, and
+# not per calendar day - which makes for a generous denominator: five eight-
+# hour days a week average about 6.2 hours per working day, so the limit only
+# bites on many long days. That is what the norm says, not a softness in the
+# implementation.
+AVERAGE_REFERENCE_DAYS = 24 * 7
+MAX_AVERAGE_DAILY_HOURS = 8
+
+
+def average_window(year, month):
+    """The 24-week window ending on the last day of that month, as (first, last)."""
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return last - timedelta(days=AVERAGE_REFERENCE_DAYS - 1), last
+
+
+def working_days_in(first, last):
+    """Working days in an inclusive date range: Monday through Saturday.
+
+    Public holidays are working days here, and they should not be - they would
+    shrink the denominator. Without a holiday calendar the count runs about
+    three percent high over 24 weeks, which makes any check built on it too
+    *lenient*: it can miss an excess, never invent one. Worth stating plainly,
+    because that is the more uncomfortable direction of the two.
+    """
+    return sum(
+        1 for offset in range((last - first).days + 1)
+        if (first + timedelta(days=offset)).weekday() != 6
+    )
+
+
+def exceeds_average(worked_minutes, working_days):
+    """Does this much work exceed § 3's eight-hour average over that many days?
+
+    "Nicht überschreiten" is the law's wording, so landing exactly on the limit
+    is still fine. A window with no working days at all cannot be exceeded -
+    and must not divide by zero on the way to saying so.
+    """
+    if working_days <= 0:
+        return False
+    return worked_minutes > working_days * MAX_AVERAGE_DAILY_HOURS * 60
+
+
 def slot_working_minutes(slot):
     """The working time a slot contributes to the daily and weekly caps.
 

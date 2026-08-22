@@ -224,6 +224,11 @@ const de = {
     tooltip: '{start}–{end}: {n} benötigt',
   },
 
+  averageHours: {
+    title: 'Achtstundenschnitt überschritten',
+    entry: '{name}: {average} Std. je Werktag im Schnitt — {worked} von {allowed} Std. in den letzten 24 Wochen',
+    hint: 'Zehn Stunden am Tag sind zulässig, solange der Schnitt über 24 Wochen bei acht Stunden je Werktag bleibt (§ 3 ArbZG). Feiertage sind dabei nicht berücksichtigt, die Rechnung ist also eher nachsichtig.',
+  },
   coverageGaps: {
     title: 'Offene Deckungslücken',
     entrySingular: '{date}, {start}–{end}: 1 Person fehlt',
@@ -536,6 +541,11 @@ const en = {
     tooltip: '{start}–{end}: {n} required',
   },
 
+  averageHours: {
+    title: 'Eight-hour average exceeded',
+    entry: '{name}: {average}h per working day on average — {worked} of {allowed}h over the last 24 weeks',
+    hint: 'Ten-hour days are lawful as long as the average over 24 weeks stays at eight hours per working day (§ 3 ArbZG). Public holidays are not accounted for, so this count errs on the lenient side.',
+  },
   coverageGaps: {
     title: 'Open Coverage Gaps',
     entrySingular: '{date}, {start}–{end}: 1 person missing',
