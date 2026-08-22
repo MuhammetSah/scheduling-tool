@@ -1128,3 +1128,27 @@ def test_einstellungstabelle_laesst_sich_zurueckrollen_und_erneut_anlegen(pg_db)
 
     assert '0011_settings' in migrations.apply_pending()
     assert 'settings' in tabellen(schema_url, schema)
+
+
+def test_in_die_einstellungstabelle_laesst_sich_schreiben(pg_db):
+    """Der Test, der den roten backend-postgres-Job von Etappe 5d verhindert haette.
+
+    db._PostgresCursor haengt an jedes INSERT ohne eigenes RETURNING ein
+    RETURNING id an, damit lastrowid auch hier funktioniert. Eine Tabelle ohne
+    id-Spalte ist damit auf Postgres nicht beschreibbar - auf SQLite sehr wohl,
+    weshalb die erste Fassung von 0011_settings lokal gruen war und erst im CI
+    aufflog.
+    """
+    migrations, schema_url, _schema = pg_db
+    migrations.apply_pending()
+
+    verbindung = psycopg2.connect(schema_url)
+    try:
+        with verbindung.cursor() as zeiger:
+            zeiger.execute("INSERT INTO settings (name, value) VALUES ('holiday_region', 'BY')")
+        verbindung.commit()
+        with verbindung.cursor() as zeiger:
+            zeiger.execute("SELECT value FROM settings WHERE name = 'holiday_region'")
+            assert zeiger.fetchone()[0] == 'BY'
+    finally:
+        verbindung.close()

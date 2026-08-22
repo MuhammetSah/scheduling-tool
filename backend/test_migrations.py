@@ -1209,7 +1209,11 @@ def test_0011_legt_die_einstellungstabelle_an(fresh_db):
     finally:
         connection.close()
 
-    assert spalten == {'name', 'value'}
+    # id ist Pflicht, nicht Zierde: die Dialektschicht haengt an jedes INSERT
+    # ein RETURNING id an, und eine Tabelle ohne die Spalte ist auf Postgres
+    # nicht beschreibbar. Auf SQLite faellt das nicht auf - deshalb steht es
+    # hier als Erwartung.
+    assert spalten == {'id', 'name', 'value'}
 
 
 def test_0011_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):

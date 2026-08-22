@@ -570,6 +570,11 @@ Gemeinden Sachsens und Thüringens, Mariä Himmelfahrt in Bayern, das Augsburger
 Er ist damit in der nachsichtigen Richtung unvollständig: einen Feiertag zu wenig, nie einen zu
 viel. Betroffene tragen den Tag als Öffnungszeit-Ausnahme ein.
 
+**Was einen roten CI-Lauf gekostet hat:** `0011_settings` hatte zuerst `name` als natürlichen
+Primärschlüssel und keine `id`-Spalte. Die Dialektschicht hängt an jedes `INSERT` ein
+`RETURNING id` an — auf SQLite unbemerkt, auf Postgres ein `UndefinedColumn`. Steht jetzt als
+Fallstrick 16 und hat einen eigenen Schreibtest gegen Postgres bekommen.
+
 Die regionalen Feiertage sind **paarweise** getestet — je ein Land mit und eines ohne. „Gilt in
 Bayern" allein wäre auch grün, wenn der Feiertag überall stünde.
 
@@ -642,7 +647,14 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     Der erste verschwindet lautlos aus der Suite, ohne dass irgendetwas fehlschlägt. In
     Etappe 3 gaben zwei Task-Briefs (4 und 5) denselben Testnamen vor; der Implementer von
     Task 5 hat es bemerkt und beide eindeutig umbenannt. `pytest --collect-only` zeigt es.
-16. **Ein Modulname im Backend darf kein installiertes Paket verdecken.** `backend/coverage.py`
+16. **Jede Tabelle, in die eingefügt wird, braucht eine `id`-Spalte.** `_PostgresCursor.execute()`
+    hängt an jedes `INSERT` ohne eigenes `RETURNING` ein `RETURNING id` an, damit `lastrowid`
+    auch dort funktioniert. Eine Tabelle ohne `id` ist auf Postgres nicht beschreibbar — auf
+    SQLite dagegen schon, weshalb es lokal nicht auffällt. Die erste Fassung von
+    `0011_settings` hatte `name` als natürlichen Primärschlüssel und keine `id`; gekostet hat
+    das einen roten `backend-postgres`-Job. Ein Schreibtest in `test_migrations_postgres.py`
+    hält es jetzt fest.
+17. **Ein Modulname im Backend darf kein installiertes Paket verdecken.** `backend/coverage.py`
     hätte das PyPI-Paket `coverage` (Abhängigkeit von `pytest-cov`) verdeckt, sobald jemand das
     ergänzt — auch wenn `coverage` zum Entscheidungszeitpunkt nicht installiert war. Deshalb
     heißt die Datei `coverage_model.py`.
