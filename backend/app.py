@@ -22,9 +22,10 @@ from coverage_model import band_within, coverage_gaps, first_overlapping_pair, t
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
-    MAX_CONSECUTIVE_DAYS, MIN_FREE_SUNDAYS_PER_YEAR, _ranges_overlap, _time_range_minutes,
-    generate_schedule, legal_break_minutes, net_working_minutes, rest_gap_hours,
-    shift_datetimes, shift_duration_minutes, window_contains_shift, window_is_valid_on,
+    MAX_AVERAGE_DAILY_HOURS, MAX_CONSECUTIVE_DAYS, MIN_FREE_SUNDAYS_PER_YEAR, _ranges_overlap,
+    _time_range_minutes, average_window, exceeds_average, generate_schedule,
+    legal_break_minutes, net_working_minutes, rest_gap_hours, shift_datetimes,
+    shift_duration_minutes, window_contains_shift, window_is_valid_on, working_days_in,
 )
 
 # Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
@@ -1582,6 +1583,7 @@ def fetch_schedule(year, month):
         'absences': absences,
         'distribution': build_distribution(assignments, active_employees),
         'coverage_gaps': coverage_gaps_for_month(cursor, year, month, assignments),
+        'average_hours': average_hours_exceeded(cursor, year, month),
     }
 
 
@@ -2955,6 +2957,66 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
             gaps.append({'date': iso_date, **gap})
 
     return gaps
+
+
+def average_hours_exceeded(cursor, year, month):
+    """Employees whose working time breaks § 3's eight-hour average.
+
+    Only the ones over the line, the way coverage_gaps_for_month() reports only
+    gaps - listing everyone would put the whole roster under every month.
+
+    Reported rather than enforced, and that is the whole point: whether ten
+    hours today are lawful is settled by the months that follow, so insisting
+    on it while generating would mean either miscounting or restricting for no
+    reason. Etappe 4 introduced max_daily_hours with a default of 10 and said
+    outright that the limit is not self-supporting without this proof. This is
+    the proof.
+
+    One query for the whole window and every employee, not one per person -
+    the same care coverage_gaps_for_month() takes with its three.
+    """
+    first, last = average_window(year, month)
+    working_days = working_days_in(first, last)
+
+    cursor.execute(
+        'SELECT sa.employee_id, sa.schedule_id, sa.date, sa.shift_type_id, '
+        '       sa.start_time, sa.end_time, sa.break_minutes, e.name AS employee_name '
+        'FROM shift_assignments sa '
+        'JOIN employees e ON e.id = sa.employee_id '
+        'WHERE sa.date BETWEEN ? AND ? '
+        'ORDER BY e.name, sa.date',
+        (first.isoformat(), last.isoformat()),
+    )
+
+    minutes_by_employee = {}
+    names = {}
+    for row in cursor.fetchall():
+        start, end = assignment_hours(cursor, row)
+        if not start or not end:
+            continue
+        names[row['employee_id']] = row['employee_name']
+        minutes_by_employee[row['employee_id']] = (
+            minutes_by_employee.get(row['employee_id'], 0)
+            # Net of the break, as everywhere since Etappe 5a: § 2 Abs. 1 does
+            # not count rest breaks as working time.
+            + net_working_minutes(shift_duration_minutes(start, end), row['break_minutes'])
+        )
+
+    over = []
+    for employee_id, minutes in sorted(minutes_by_employee.items(), key=lambda kv: names[kv[0]]):
+        if not exceeds_average(minutes, working_days):
+            continue
+        over.append({
+            'employee_id': employee_id,
+            'employee_name': names[employee_id],
+            'hours_worked': round(minutes / 60, 1),
+            'hours_allowed': working_days * MAX_AVERAGE_DAILY_HOURS,
+            # Handed over because "38 hours too many" says nothing without a
+            # yardstick, while "8.4 hours on average instead of 8" says it at
+            # a glance.
+            'average_per_working_day': round(minutes / 60 / working_days, 1),
+        })
+    return over
 
 
 def effective_bands_by_date(cursor, year, month):

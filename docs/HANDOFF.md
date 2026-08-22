@@ -24,13 +24,11 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Etappen 0 bis 4, 5a, 5b und 5e sind gemergt, deployt und
-dokumentiert, es gibt keine offenen Branches und keine offenen Pull Requests.
+Etappe 5c ist **fertig umgesetzt, aber noch nicht gemergt** — sie liegt auf dem Branch
+`etappe-5c-durchschnitt`.
 
-Der nächste Schritt ist eines der offenen Teilstücke — siehe den Abschnitt „Etappe 5" weiter
-unten. **5c** (Achtstundenschnitt) und **5d** (Feiertagskalender) sind beide vorbereitet: die
-Entscheidungen dazu sind gefallen und stehen dort. Daneben liegen Veröffentlichen-Workflow,
-Audit-Log, Exporte und DSGVO.
+Damit ist das Arbeitszeitrecht bis auf **5d** (Feiertagskalender) durch. Danach bleiben die
+vier nicht-rechtlichen Teile von Etappe 5: Veröffentlichen-Workflow, Audit-Log, Exporte, DSGVO.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -43,9 +41,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | | |
 |---|---|
 | `main` | `b4dcc21` — Etappen 0 bis 4, 5a, 5b und 5e gemergt und deployt (PR #16, #17, #18, #19); die API antwortet mit 200 |
-| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Die Etappen-Branches sind nach dem Merge lokal und remote gelöscht |
-| Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 322 passed / 32 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
+| Branch-Situation | **Ein offener Branch: `etappe-5c-durchschnitt`** |
+| Aktueller Branch | `etappe-5c-durchschnitt` |
+| Testsuite | 327 passed / 32 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 22 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0010`. `0010_drop_shift_requirements` entfernt die alte Bedarfstabelle; ihr Inhalt lebt seit `0007` in `coverage_requirements` weiter |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
@@ -351,7 +349,7 @@ Auch das Arbeitszeitrecht allein zerfällt in drei:
 |---|---|---|
 | **5a** | Ruhepausen nach § 4, Arbeitszeit netto statt brutto | ✅ umgesetzt, siehe unten |
 | **5b** | Höchstens sechs Tage in Folge, 15 freie Sonntage im Jahr | ✅ umgesetzt, siehe unten |
-| **5c** | Achtstundenschnitt nach § 3 Satz 2, rollierend über 24 Wochen, **gemeldet statt erzwungen** | offen, hängt an 5a |
+| **5c** | Achtstundenschnitt nach § 3 Satz 2, rollierend über 24 Wochen, gemeldet statt erzwungen | ✅ umgesetzt, siehe unten |
 | **5d** | Feiertagskalender mit Bundeslandauswahl — beim Ausarbeiten von 5b herausgelöst, weil er keine Regel durchsetzt | offen |
 | **5e** | `shift_requirements` entfernen — das lose Ende aus Etappe 4 | ✅ umgesetzt, siehe unten |
 
@@ -518,6 +516,29 @@ Drei Dinge, die beim Umsetzen auffielen:
   leere Menge, und eine Tabelle ohne Spalten gibt es nicht. Ein zweiter Helfer wäre dieselbe
   Frage in einer zweiten Fassung, samt der Postgres-Eigenheit mit `current_schema()`, die dort
   schon gelöst ist.
+
+## Etappe 5c — der Achtstundenschnitt
+
+Spec: [`docs/superpowers/specs/2026-08-22-etappe-5c-durchschnitt-design.md`](superpowers/specs/2026-08-22-etappe-5c-durchschnitt-design.md)
+
+Die letzte offene Regel aus Etappe 4. `GET /schedules/<year>/<month>` liefert neben
+`coverage_gaps` jetzt `average_hours` — die Mitarbeiter, deren Arbeitszeit über 24 Wochen den
+Achtstundenschnitt aus § 3 Satz 2 reißt. **Gemeldet, nicht erzwungen**: ob zehn Stunden heute
+zulässig sind, entscheidet sich erst in den kommenden Monaten.
+
+Zwei Dinge aus der Recherche, die man leicht falsch macht:
+
+- **Der Arbeitgeber wählt den Bezugszeitraum** — sechs Kalendermonate *oder* 24 Wochen — und
+  darf ihn rollierend legen. Gebaut sind 24 Wochen, endend am Letzten des angezeigten Monats.
+- **Gerechnet wird je Werktag**, nicht je gearbeitetem Tag und nicht je Kalendertag. Montag bis
+  Samstag, also 144 in 24 Wochen. Ein großzügiger Nenner: fünf Achtstundentage die Woche
+  ergeben rund 6,2 Stunden je Werktag. Das ist die Norm, keine Nachlässigkeit.
+
+**Die bekannte Lücke, und sie zeigt in die unangenehme Richtung:** Feiertage zählen mangels
+Kalender als Werktage und blähen den Nenner um rund drei Prozent. Die Meldung ist dadurch zu
+nachsichtig — sie kann eine Überschreitung übersehen, nie eine erfinden. Löst sich mit 5d.
+
+Kein Schemaeingriff.
 
 ## Arbeitsweise
 

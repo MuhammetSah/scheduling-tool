@@ -976,3 +976,98 @@ def test_der_generator_laeuft_ohne_die_alte_tabelle(hr_client):
 
     assert antwort.status_code == 201, antwort.json
     assert antwort.json['assignments']
+
+
+# ---------- Etappe 5c: der Achtstundenschnitt ----------
+#
+# Paragraph 3 Satz 2 ArbZG. 24 Wochen enthalten 144 Werktage, erlaubt sind
+# damit 1152 Stunden. Gemeldet wird nur, wer darueber liegt.
+
+
+def _lange_schichten(hr_client, anzahl, start='06:00', ende='20:00', pause=None):
+    """Legt `anzahl` Zuweisungen in aufeinanderfolgenden Wochen an.
+
+    Direkt in der Datenbank: ueber die API waeren es ebenso viele Plaene und
+    Plaetze, und geprueft wird die Meldung, nicht der Weg dorthin.
+    """
+    from datetime import date, timedelta
+
+    from app import get_db
+
+    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Lang', 'start_time': start, 'end_time': ende,
+    }).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 8, 'generated')")
+        schedule_id = cursor.lastrowid
+        tag = date(2026, 9, 30)
+        for index in range(anzahl):
+            tag -= timedelta(days=1)
+            if tag.weekday() == 6:          # Sonntage auslassen
+                tag -= timedelta(days=1)
+            cursor.execute(
+                'INSERT INTO shift_assignments '
+                '(schedule_id, date, shift_type_id, slot_index, employee_id, '
+                ' start_time, end_time, break_minutes) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (schedule_id, tag.isoformat(), schicht['id'], index, anna['id'],
+                 start, ende, pause))
+        connection.commit()
+
+    return anna
+
+
+def test_ueberschrittener_durchschnitt_wird_gemeldet(hr_client):
+    """120 Schichten von 14 Stunden brutto, davon 45 Minuten gesetzliche Pause -
+    das sind 1590 Stunden Arbeitszeit gegen 1152 erlaubte."""
+    anna = _lange_schichten(hr_client, 120)
+
+    antwort = hr_client.get('/schedules/2026/9')
+
+    gemeldet = antwort.json['average_hours']
+    assert [e['employee_id'] for e in gemeldet] == [anna['id']]
+    assert gemeldet[0]['hours_allowed'] == 144 * 8
+    assert gemeldet[0]['average_per_working_day'] > 8
+
+
+def test_wer_unter_der_grenze_bleibt_wird_nicht_gemeldet(hr_client):
+    """Gegenprobe: dieselbe Person mit zehn statt 120 Schichten."""
+    _lange_schichten(hr_client, 10)
+
+    antwort = hr_client.get('/schedules/2026/9')
+
+    assert antwort.json['average_hours'] == []
+
+
+def test_der_durchschnitt_rechnet_netto(hr_client):
+    """Die Gegenprobe, die zeigt, dass Paragraph 2 Abs. 1 auch hier gilt.
+
+    83 Schichten von 14 Stunden Spanne: mit der gesetzlichen Pause von 45
+    Minuten sind das 1097 Stunden Arbeitszeit und damit unter der Grenze, mit
+    ausdruecklicher Pause 0 sind es 1162 und damit darueber. Dieselben
+    Bloecke, verschiedene Antwort - genau das unterscheidet netto von brutto.
+    """
+    _lange_schichten(hr_client, 83, pause=None)
+    assert hr_client.get('/schedules/2026/9').json['average_hours'] == []
+
+
+def test_ohne_pause_kippt_derselbe_monat_ueber_die_grenze(hr_client):
+    _lange_schichten(hr_client, 83, pause=0)
+
+    assert hr_client.get('/schedules/2026/9').json['average_hours'] != []
+
+
+def test_wer_gar_nicht_arbeitet_taucht_nicht_auf(hr_client):
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+    })
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    assert hr_client.get('/schedules/2026/9').json['average_hours'] == []

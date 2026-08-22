@@ -4,6 +4,7 @@ import ScheduleGrid from '../components/ScheduleGrid'
 import CalendarView from '../components/CalendarView'
 import Distribution from '../components/Distribution'
 import CoverageGaps from '../components/CoverageGaps'
+import AverageHours from '../components/AverageHours'
 import AbsenceManager from '../components/AbsenceManager'
 import { useTranslation } from '../i18n/context'
 
@@ -348,6 +349,7 @@ function SchedulePage({ setFlash, user }) {
             {schedule.distribution && <Distribution distribution={schedule.distribution} />}
 
             {schedule.coverage_gaps && <CoverageGaps gaps={schedule.coverage_gaps} />}
+            {schedule.average_hours && <AverageHours entries={schedule.average_hours} />}
 
             {warnings.length > 0 && (
               <div className="warning-list">
