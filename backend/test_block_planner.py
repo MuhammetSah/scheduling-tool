@@ -7,7 +7,7 @@ arbeitet; das entscheidet der Suchkern in scheduler.py.
 
 from collections import Counter
 
-from block_planner import cover_demand
+from block_planner import cover_demand, plan_day
 from coverage_model import coverage_curve
 
 
@@ -178,3 +178,183 @@ def test_block_ohne_vorlage_bleibt_arbeitbar_lang():
 
     assert len(bloecke) == 2
     assert zeiten(bloecke) == [('06:00', '16:00'), ('16:00', '20:00')]
+
+
+# ---------- Zuschnitt auf Arbeitszeitfenster ----------
+
+
+def mitarbeiter(employee_id, fenster=None, max_daily_hours=10):
+    """Ein Kandidat, wie plan_day() ihn erwartet.
+
+    Ohne Fenster gilt 'anytime' - das Bestandsverhalten, keine
+    Uhrzeit-Einschraenkung.
+    """
+    return {
+        'id': employee_id,
+        'availability_mode': 'windows' if fenster else 'anytime',
+        'availability': fenster or [],
+        'max_daily_hours': max_daily_hours,
+        'unavailable_weekdays': set(),
+        'unavailable_dates': set(),
+        'allowed_shift_types': None,
+    }
+
+
+def fenster(weekday, start_time, end_time, valid_from=None, valid_until=None):
+    return {
+        'weekday': weekday, 'start_time': start_time, 'end_time': end_time,
+        'valid_from': valid_from, 'valid_until': valid_until,
+    }
+
+
+DIENSTAG = 1
+EIN_DIENSTAG = '2026-09-01'
+
+
+def test_block_wird_auf_das_einzige_passende_fenster_gekuerzt():
+    """Der Kern der Etappe.
+
+    Drei Plaetze 06:00-14:00, zwei uneingeschraenkte Leute und eine Person mit
+    Fenster 08:00-14:00. Ohne Zuschnitt bliebe der dritte Platz unbesetzt,
+    obwohl sechs der acht Stunden zu decken waeren.
+    """
+    bloecke = plan_day(
+        [band('06:00', '14:00', 3)],
+        [vorlage(1, '06:00', '14:00')],
+        [mitarbeiter(1), mitarbeiter(2),
+         mitarbeiter(3, [fenster(DIENSTAG, '08:00', '14:00')])],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('06:00', '14:00'), ('06:00', '14:00'), ('08:00', '14:00')]
+
+
+def test_ohne_fenster_wird_nichts_gekuerzt():
+    """Die Gegenprobe, die den Test darueber erst aussagekraeftig macht.
+
+    Dieselben Baender, aber drei uneingeschraenkte Leute: es darf kein
+    Zuschnitt entstehen. Ohne diesen Test waere eine Umsetzung gruen, die
+    immer kuerzt.
+    """
+    bloecke = plan_day(
+        [band('06:00', '14:00', 3)],
+        [vorlage(1, '06:00', '14:00')],
+        [mitarbeiter(1), mitarbeiter(2), mitarbeiter(3)],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('06:00', '14:00')] * 3
+
+
+def test_zugeschnittener_block_behaelt_seine_vorlage():
+    """Name und Farbe der Schichtart bleiben - gekuerzt ist nicht namenlos."""
+    bloecke = plan_day(
+        [band('06:00', '14:00', 2)],
+        [vorlage(1, '06:00', '14:00')],
+        [mitarbeiter(1), mitarbeiter(2, [fenster(DIENSTAG, '08:00', '14:00')])],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert all(b['shift_type_id'] == 1 for b in bloecke)
+
+
+def test_zuschnitt_unter_mindestlaenge_entsteht_nicht():
+    """Ein Fenster von 13:00-14:00 ergaebe einen Einstundenblock.
+
+    Der bleibt aus; der Bedarf wird stattdessen als Deckungsluecke gemeldet.
+    Sonst entstuenden Schnipsel, die niemand arbeiten will.
+    """
+    bloecke = plan_day(
+        [band('06:00', '14:00', 2)],
+        [vorlage(1, '06:00', '14:00')],
+        [mitarbeiter(1), mitarbeiter(2, [fenster(DIENSTAG, '13:00', '14:00')])],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('06:00', '14:00')] * 2
+
+
+def test_abgelaufenes_fenster_loest_keinen_zuschnitt_aus():
+    bloecke = plan_day(
+        [band('06:00', '14:00', 1)],
+        [vorlage(1, '06:00', '14:00')],
+        [mitarbeiter(1, [fenster(DIENSTAG, '08:00', '14:00', valid_until='2026-08-01')])],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('06:00', '14:00')]
+
+
+def test_fenster_an_einem_anderen_wochentag_loest_keinen_zuschnitt_aus():
+    bloecke = plan_day(
+        [band('06:00', '14:00', 1)],
+        [vorlage(1, '06:00', '14:00')],
+        [mitarbeiter(1, [fenster(DIENSTAG + 1, '08:00', '14:00')])],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('06:00', '14:00')]
+
+
+def test_langer_rest_bleibt_als_eigener_block_stehen():
+    """Wird ein Block gekuerzt, faellt der ungedeckte Teil nicht einfach weg.
+
+    Bedarf 06:00-16:00 fuer eine Person, deren einziges Fenster 06:00-12:00
+    ist: der Block wird auf das Fenster gekuerzt, und die vier Stunden danach
+    bleiben als eigener Block bestehen - lang genug, dass jemand anderes sie
+    uebernehmen koennte, und andernfalls als Luecke sichtbar.
+
+    Die zehn Stunden sind bewusst gewaehlt: mehr, und MAX_BLOCK_MINUTES teilte
+    den Ausgangsblock schon vor dem Zuschnitt, womit der Test zwei Dinge auf
+    einmal pruefte.
+    """
+    bloecke = plan_day(
+        [band('06:00', '16:00', 1)],
+        [],
+        [mitarbeiter(1, [fenster(DIENSTAG, '06:00', '12:00')])],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('06:00', '12:00'), ('12:00', '16:00')]
+
+
+def test_geteilter_dienst_wird_nicht_wegen_der_tagesgrenze_zugeschnitten():
+    """max_daily_hours bindet schon in Stufe 1.
+
+    Eine Person mit zwei Fenstern und einer Tagesgrenze von 6 Stunden kann
+    nicht beide Vier-Stunden-Bloecke tragen. Stufe 1 darf daraus trotzdem
+    keinen Zuschnitt machen - die Bloecke sind bereits fensterkonform, es
+    fehlt schlicht eine zweite Person.
+    """
+    bloecke = plan_day(
+        [band('08:00', '12:00', 1), band('16:00', '20:00', 1)],
+        [vorlage(1, '08:00', '12:00'), vorlage(2, '16:00', '20:00')],
+        [mitarbeiter(1, [fenster(DIENSTAG, '08:00', '12:00'),
+                         fenster(DIENSTAG, '16:00', '20:00')], max_daily_hours=6)],
+        EIN_DIENSTAG, DIENSTAG,
+    )
+
+    assert zeiten(bloecke) == [('08:00', '12:00'), ('16:00', '20:00')]
+
+
+def test_plan_day_ist_deterministisch():
+    def lauf(kandidaten):
+        return zeiten(plan_day(
+            [band('06:00', '14:00', 3)],
+            [vorlage(1, '06:00', '14:00')],
+            kandidaten, EIN_DIENSTAG, DIENSTAG,
+        ))
+
+    kandidaten = [mitarbeiter(1), mitarbeiter(2),
+                  mitarbeiter(3, [fenster(DIENSTAG, '08:00', '14:00')])]
+
+    assert lauf(kandidaten) == lauf(list(reversed(kandidaten)))
+
+
+def test_ohne_kandidaten_bleiben_die_bloecke_wie_sie_sind():
+    """Kein Kandidat heisst nicht: kein Block. Die Bloecke stehen und werden
+    als Luecke gemeldet."""
+    bloecke = plan_day([band('06:00', '14:00', 2)], [vorlage(1, '06:00', '14:00')],
+                       [], EIN_DIENSTAG, DIENSTAG)
+
+    assert zeiten(bloecke) == [('06:00', '14:00')] * 2

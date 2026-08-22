@@ -14,7 +14,9 @@ kann.
 """
 
 from coverage_model import _minutes_to_time
-from scheduler import _time_range_minutes
+from scheduler import (
+    _ranges_overlap, _time_range_minutes, structurally_eligible, window_is_valid_on,
+)
 
 # Kuerzer als das schneidet Stufe 1 nichts zu - sonst entstehen Schnipsel, die
 # niemand arbeiten will. Gilt ausdruecklich NUR fuer den Zuschnitt auf ein
@@ -213,5 +215,217 @@ def cover_demand(bands, templates):
 
         blocks.append(_block(template_id, start, end))
         _subtract(profile, start, end, 1)
+
+    return blocks
+
+
+def _slot_for(block, iso_date, weekday):
+    """Den Block so beschreiben, wie structurally_eligible() ihn erwartet."""
+    return {
+        'date': iso_date,
+        'weekday': weekday,
+        'shift_type_id': block['shift_type_id'],
+        'start_time': block['start_time'],
+        'end_time': block['end_time'],
+    }
+
+
+def _duration(block):
+    start, end = _time_range_minutes(block['start_time'], block['end_time'])
+    return end - start
+
+
+def _valid_windows(candidate, iso_date, weekday):
+    """Die an diesem Datum geltenden Fenster des Kandidaten fuer diesen Wochentag.
+
+    'anytime' liefert nichts: wer keine Uhrzeit-Einschraenkung hat, braucht
+    auch keinen Zuschnitt. Er koennte den ganzen Block ohnehin arbeiten, und
+    bekommt er ihn trotzdem nicht, liegt es an Ueberschneidung oder
+    Tagesgrenze und nicht an der Lage der Stunden.
+    """
+    if candidate.get('availability_mode', 'anytime') != 'windows':
+        return []
+    return [
+        window for window in candidate.get('availability', ())
+        if window['weekday'] == weekday and window_is_valid_on(window, iso_date)
+    ]
+
+
+def _largest_overlap(block, window):
+    """Groesster Schnitt aus Block und Fenster, als (start, ende) in Minuten.
+
+    Dieselben drei Lagen (-1440, 0, +1440) wie in
+    coverage_model.trim_band_to_hours(): eines von beiden kann ueber
+    Mitternacht gehen, und dann liegen die Achsen um einen Zyklus versetzt.
+    Von mehreren moeglichen Lagen gewinnt die mit dem groessten Ueberlapp.
+    """
+    block_start, block_end = _time_range_minutes(block['start_time'], block['end_time'])
+    window_start, window_end = _time_range_minutes(window['start_time'], window['end_time'])
+
+    best = None
+    for shift in (-24 * 60, 0, 24 * 60):
+        lo = max(block_start, window_start + shift)
+        hi = min(block_end, window_end + shift)
+        if hi > lo and (best is None or hi - lo > best[1] - best[0]):
+            best = (lo, hi)
+    return best
+
+
+def _fits(candidate, block, used, minutes):
+    """Passt der Block noch in den Tag dieses Kandidaten?
+
+    Zwei Bedingungen, beide neu in Etappe 4: die Bloecke eines Tages duerfen
+    sich nicht ueberschneiden, und ihre Summe darf max_daily_hours nicht
+    ueberschreiten. Gezaehlt wird die Arbeitszeit, nicht die Spanne vom ersten
+    Beginn bis zum letzten Ende - Paragraph 2 Abs. 1 ArbZG rechnet die
+    Unterbrechung eines geteilten Dienstes nicht mit.
+    """
+    block_range = _time_range_minutes(block['start_time'], block['end_time'])
+    if any(_ranges_overlap(block_range, belegt) for belegt in used.get(candidate['id'], ())):
+        return False
+
+    cap = candidate.get('max_daily_hours')
+    if cap is not None and minutes.get(candidate['id'], 0) + _duration(block) > cap * 60:
+        return False
+    return True
+
+
+def _trial_assignment(blocks, candidates, iso_date, weekday):
+    """Probeweise besetzen, nur um zu erkennen, welche Bloecke niemand arbeiten kann.
+
+    Die Zuordnung selbst wird verworfen - wer welchen Block tatsaechlich
+    bekommt, entscheidet der Suchkern monatsweit und fair. Hier geht es allein
+    um die Frage, welche Bloecke in ihrer jetzigen Form ueberhaupt besetzbar
+    sind.
+
+    Vorgegangen wird nach Knappheit: die Bloecke mit den wenigsten moeglichen
+    Traegern zuerst, und darin die Person mit den wenigsten Alternativen. Das
+    ist dieselbe Minimum-Remaining-Values-Heuristik, die order_slots() im
+    Suchkern benutzt - wer nur einen einzigen Block tragen kann, soll ihn
+    nicht an jemanden verlieren, der auch anderswo einspringen koennte.
+
+    Rueckgabe: (unbesetzte Blockindizes, belegte Zeiten je Person, Minuten je
+    Person). Die beiden letzten braucht der Zuschnitt, um niemandem ein
+    Stueck anzubieten, das er gar nicht mehr nehmen koennte.
+    """
+    coverers = {
+        index: [c for c in candidates
+                if structurally_eligible(c, _slot_for(block, iso_date, weekday))]
+        for index, block in enumerate(blocks)
+    }
+    alternatives = {c['id']: 0 for c in candidates}
+    for able in coverers.values():
+        for candidate in able:
+            alternatives[candidate['id']] += 1
+
+    used = {}
+    minutes = {}
+    unstaffed = []
+
+    order = sorted(
+        range(len(blocks)),
+        key=lambda i: (len(coverers[i]), blocks[i]['start_time'], i),
+    )
+    for index in order:
+        block = blocks[index]
+        for candidate in sorted(coverers[index],
+                                key=lambda c: (alternatives[c['id']], c['id'])):
+            if not _fits(candidate, block, used, minutes):
+                continue
+            used.setdefault(candidate['id'], []).append(
+                _time_range_minutes(block['start_time'], block['end_time']))
+            minutes[candidate['id']] = minutes.get(candidate['id'], 0) + _duration(block)
+            break
+        else:
+            unstaffed.append(index)
+
+    return unstaffed, used, minutes
+
+
+def _best_trim(block, candidates, iso_date, weekday, used, minutes, min_block_minutes):
+    """Der groesste Zuschnitt, den ein Arbeitszeitfenster aus diesem Block macht.
+
+    Ueber alle Kandidaten und alle ihre an diesem Tag geltenden Fenster. Der
+    groesste Schnitt gewinnt, bei Gleichstand die kleinere Mitarbeiter-ID,
+    damit dasselbe Eingabebild zweimal denselben Plan ergibt. Ein Schnitt
+    kuerzer als min_block_minutes zaehlt nicht - lieber eine gemeldete Luecke
+    als ein Schnipsel, den niemand arbeiten will.
+
+    Angeboten wird ein Zuschnitt nur, wenn die Person das gekuerzte Stueck
+    auch wirklich noch nehmen koennte: ueberschneidungsfrei und innerhalb
+    ihrer Tagesgrenze.
+    """
+    best = None
+    for candidate in sorted(candidates, key=lambda c: c['id']):
+        for window in _valid_windows(candidate, iso_date, weekday):
+            overlap = _largest_overlap(block, window)
+            if overlap is None:
+                continue
+            lo, hi = overlap
+            if hi - lo < min_block_minutes:
+                continue
+            trimmed = {**block,
+                       'start_time': _minutes_to_time(lo),
+                       'end_time': _minutes_to_time(hi)}
+            if not _fits(candidate, trimmed, used, minutes):
+                continue
+            if best is None or (hi - lo) > (best[1] - best[0]):
+                best = (lo, hi)
+    return best
+
+
+def plan_day(bands, templates, candidates, iso_date, weekday,
+             min_block_minutes=MIN_BLOCK_MINUTES):
+    """Die Bloecke, die dieser Tag haben muss - inklusive Zuschnitt.
+
+    Erst deckt cover_demand() den Bedarf mit Vorlagen und Restbloecken. Dann
+    wird probeweise besetzt; jeder Block, den dabei niemand tragen kann, wird
+    auf das groesste passende Arbeitszeitfenster gekuerzt. Der ungedeckte Rest
+    geht als eigener Block zurueck in die Warteschlange und durchlaeuft
+    dasselbe erneut.
+
+    Personen ordnet diese Funktion nicht zu. Die probeweise Besetzung dient
+    allein dazu, die Blockformen zu bestimmen, und wird danach verworfen.
+    """
+    blocks = cover_demand(bands, templates)
+    if not blocks or not candidates:
+        return blocks
+
+    # Jeder Durchlauf kuerzt genau einen Block und kann hoechstens einen
+    # weiteren erzeugen. Die Schranke ist grosszuegig bemessen und dient nur
+    # dazu, dass ein Rest, der sich immer wieder nur um Minuten verkuerzt,
+    # nicht beliebig lange kreist. Wird sie erreicht, kommt zurueck, was bis
+    # dahin gebaut wurde, und der ungedeckte Rest erscheint als
+    # Deckungsluecke - dieselbe Haltung wie bei der Notbremse des Suchkerns:
+    # Luecken melden statt scheitern.
+    for _ in range(4 * len(blocks) + 8):
+        unstaffed, used, minutes = _trial_assignment(blocks, candidates, iso_date, weekday)
+        if not unstaffed:
+            break
+
+        for index in unstaffed:
+            block = blocks[index]
+            trim = _best_trim(block, candidates, iso_date, weekday,
+                              used, minutes, min_block_minutes)
+            if trim is None:
+                continue
+
+            lo, hi = trim
+            start, end = _time_range_minutes(block['start_time'], block['end_time'])
+            blocks[index] = {**block,
+                             'start_time': _minutes_to_time(lo),
+                             'end_time': _minutes_to_time(hi)}
+            # Der ungedeckte Rest links und rechts des Schnitts. Zu kurze
+            # Stuecke entstehen bewusst nicht und werden zur Luecke.
+            for rest_start, rest_end in ((start, lo), (hi, end)):
+                if rest_end - rest_start >= min_block_minutes:
+                    blocks.append({**block,
+                                   'start_time': _minutes_to_time(rest_start),
+                                   'end_time': _minutes_to_time(rest_end)})
+            break
+        else:
+            # Kein einziger unbesetzter Block liess sich kuerzen - weitere
+            # Durchlaeufe wuerden dasselbe Ergebnis liefern.
+            break
 
     return blocks
