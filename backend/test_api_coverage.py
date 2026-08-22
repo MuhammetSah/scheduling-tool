@@ -20,6 +20,8 @@ unter der Wochenwiederholung theoretisch ueberschneiden, das zu erkennen
 haette die Woche als 10080-Minuten-Ring zu behandeln, was bewusst nicht
 gebaut wurde.
 """
+import calendar
+from datetime import date
 
 
 def test_oeffnungszeiten_kommen_als_sieben_zeilen(hr_client):
@@ -490,24 +492,24 @@ def test_nicht_hr_konto_bekommt_403_coverage_requirements(hr_client):
 # test_api_assignment_times.py schon fuer aehnliche Zwecke benutzt.
 
 def test_plan_meldet_deckungsluecken(hr_client):
-    """Bedarf 2 am Dienstag 06:00-14:00, nur eine Person eingeplant -> eine Luecke."""
+    """Bedarf 2 am Dienstag 06:00-14:00, nur eine Person vorhanden -> eine Luecke.
+
+    Seit Etappe 4 baut der Generator die Bloecke selbst aus dem Band, statt
+    dass jemand sie von Hand anlegen muss: er erzeugt zwei, besetzt den einen
+    mit Anna und laesst den anderen offen. Die Luecke ist dieselbe wie zuvor,
+    sie entsteht nur einen Schritt frueher.
+    """
     gesetzt = hr_client.put('/coverage-requirements', json=[
         {'weekday': 1, 'start_time': '06:00', 'end_time': '14:00', 'required_count': 2},
     ])
     assert gesetzt.status_code == 200, gesetzt.json
 
-    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
-    schicht = hr_client.post('/shift-types', json={
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.post('/shift-types', json={
         'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
-    }).json
+    })
     plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
     assert 'id' in plan, plan
-
-    platz = hr_client.post('/schedules/2026/9/slots', json={
-        'date': '2026-09-01', 'shift_type_id': schicht['id'],
-    }).json
-    assert hr_client.put(f'/assignments/{platz["id"]}',
-                          json={'employee_id': anna['id']}).status_code == 200
 
     antwort = hr_client.get('/schedules/2026/9')
     assert antwort.status_code == 200, antwort.json
@@ -530,6 +532,11 @@ def test_individuelle_zeit_deckt_genau_ihre_zeit_ab(hr_client):
     ist 06:00-10:00 gedeckt und 14:00-16:00 die Luecke - genau umgekehrt zur
     tatsaechlichen Zeit, die 06:00-10:00 offen laesst und 14:00-16:00 deckt.
     Ein Aufbau, bei dem beides dieselbe Luecke ergibt, wuerde das nicht zeigen.
+
+    Ben arbeitet dienstags normalerweise nicht - seit Etappe 4 wuerde der
+    Generator die Bloecke des Tages sonst selbst besetzen, und die Handkorrektur
+    darunter haette nichts mehr zu zeigen. Genau so ist der Fall auch gemeint:
+    HR setzt jemanden ausserhalb seiner Regelzeiten mit eigenen Uhrzeiten ein.
     """
     gesetzt = hr_client.put('/coverage-requirements', json=[
         {'weekday': 1, 'start_time': '06:00', 'end_time': '10:00', 'required_count': 1},
@@ -537,7 +544,7 @@ def test_individuelle_zeit_deckt_genau_ihre_zeit_ab(hr_client):
     ])
     assert gesetzt.status_code == 200, gesetzt.json
 
-    ben = hr_client.post('/employees', json={'name': 'Ben'}).json
+    ben = hr_client.post('/employees', json={'name': 'Ben', 'unavailable_weekdays': [1]}).json
     schicht = hr_client.post('/shift-types', json={
         'name': 'Fruehschicht', 'start_time': '06:00', 'end_time': '14:00',
     }).json
@@ -752,3 +759,141 @@ def test_offene_ausnahme_schneidet_die_luecken_ihres_datums_zu(hr_client):
     assert [g for g in luecken if g['date'] == '2026-09-08'] == [
         {'date': '2026-09-08', 'start_time': '06:00', 'end_time': '14:00', 'missing': 1},
     ]
+
+
+# ---------- Etappe 4: der Generator plant aus den Bedarfsbaendern ----------
+
+
+def _montage(jahr, monat):
+    tage = calendar.monthrange(jahr, monat)[1]
+    return [date(jahr, monat, tag) for tag in range(1, tage + 1)
+            if date(jahr, monat, tag).weekday() == 0]
+
+
+def test_generator_folgt_den_baendern_und_nicht_mehr_dem_schichtbedarf(hr_client):
+    """Der Beweis der Umstellung.
+
+    shift_requirements steht ueberall auf 0 - der alte Pfad wuerde nichts
+    erzeugen. coverage_requirements verlangt montags zwei Personen, und genau
+    das muss herauskommen.
+    """
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+        'requirements': [0] * 7,
+    })
+    for name in ('Anna', 'Ben'):
+        hr_client.post('/employees', json={'name': name})
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 2},
+    ])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    assert antwort.status_code == 201, antwort.json
+    zuweisungen = antwort.json['assignments']
+    assert len(zuweisungen) == 2 * len(_montage(2026, 9))
+    assert all(date.fromisoformat(z['date']).weekday() == 0 for z in zuweisungen)
+
+
+def test_generator_schreibt_die_tatsaechlichen_zeiten(hr_client):
+    """Bis Etappe 4 blieben start_time und end_time auf dem Erzeugen-Pfad leer.
+
+    Die Spalten gibt es seit Etappe 2, gefuellt hat sie nur die Handkorrektur.
+    """
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+        'requirements': [0] * 7,
+    })
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    zuweisung = antwort.json['assignments'][0]
+    assert zuweisung['start_time'] == '08:00'
+    assert zuweisung['end_time'] == '16:00'
+
+
+def test_ohne_baender_entsteht_kein_plan(hr_client):
+    """Gegenprobe: ohne gepflegten Bedarf gibt es nichts zu planen.
+
+    Frueher haette derselbe Aufbau ueber shift_requirements Plaetze erzeugt.
+    """
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+        'requirements': [3] * 7,
+    })
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.put('/coverage-requirements', json=[])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    assert antwort.status_code == 201, antwort.json
+    assert antwort.json['assignments'] == []
+
+
+def test_generator_schneidet_auf_das_arbeitszeitfenster_zu(hr_client):
+    """Stufe 1 und Stufe 2 zusammen, ueber die echte HTTP-Schicht.
+
+    Zwei Plaetze 06:00-14:00, eine uneingeschraenkte Person und eine mit
+    Fenster 08:00-14:00. Ohne Zuschnitt bliebe der zweite Platz unbesetzt;
+    mit Zuschnitt arbeiten beide.
+    """
+    hr_client.post('/shift-types', json={
+        'name': 'Frueh', 'start_time': '06:00', 'end_time': '14:00',
+        'requirements': [0] * 7,
+    })
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.post('/employees', json={
+        'name': 'Ben',
+        'availability_mode': 'windows',
+        'availability': [{'weekday': 0, 'start_time': '08:00', 'end_time': '14:00',
+                          'valid_from': None, 'valid_until': None}],
+    })
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '06:00', 'end_time': '14:00', 'required_count': 2},
+    ])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    assert antwort.status_code == 201, antwort.json
+    erster_montag = _montage(2026, 9)[0].isoformat()
+    des_tages = [z for z in antwort.json['assignments'] if z['date'] == erster_montag]
+    assert sorted((z['start_time'], z['end_time']) for z in des_tages) == [
+        ('06:00', '14:00'), ('08:00', '14:00'),
+    ]
+    assert all(z['employee_id'] is not None for z in des_tages)
+
+
+def test_geschlossener_feiertag_bekommt_keine_bloecke(hr_client):
+    """Die Oeffnungszeiten rahmen jetzt auch den Generator, nicht nur die
+    Lueckenmeldung.
+
+    Ueber eine Datums-Ausnahme, nicht ueber den Wochentag: seit Etappe 3 lehnt
+    /business-hours es ab, einen Wochentag zu schliessen, fuer den ein
+    Bedarfsband gepflegt ist. Ein geschlossener Tag kann damit nur noch so
+    entstehen - und der Test ist dadurch schaerfer, weil die uebrigen Montage
+    ihre Bloecke behalten und belegen, dass nicht einfach alles wegfaellt.
+    """
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
+        'requirements': [0] * 7,
+    })
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+    erster_montag = _montage(2026, 9)[0].isoformat()
+    ausnahme = hr_client.post('/business-hours/exceptions', json={
+        'date': erster_montag, 'closed': True, 'label': 'Feiertag',
+    })
+    assert ausnahme.status_code == 201, ausnahme.json
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    assert antwort.status_code == 201, antwort.json
+    daten = {z['date'] for z in antwort.json['assignments']}
+    assert erster_montag not in daten
+    assert daten == {tag.isoformat() for tag in _montage(2026, 9)[1:]}

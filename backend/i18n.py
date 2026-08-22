@@ -119,6 +119,10 @@ TRANSLATIONS = {
         'de': 'Die Mindestruhezeit',
         'en': 'The minimum rest period',
     },
+    'max_daily_hours_label': {
+        'de': 'Die tägliche Höchstarbeitszeit',
+        'en': 'The maximum daily working hours',
+    },
     'field_must_be_number': {
         'de': '{field} muss eine Zahl sein',
         'en': '{field} must be a number',
@@ -370,6 +374,14 @@ TRANSLATIONS = {
     'warn_already_assigned_that_day': {
         'de': '{name} ist an diesem Tag bereits einer anderen Schicht zugeteilt',
         'en': '{name} is already assigned to another shift that day',
+    },
+    'warn_overlapping_blocks': {
+        'de': '{name} hat am {date} bereits einen Block von {start}–{end}, der sich damit überschneidet',
+        'en': '{name} already has a block from {start}–{end} on {date} that overlaps this one',
+    },
+    'warn_daily_hours_exceeded': {
+        'de': '{name} käme am {date} auf {hours:.1f} Std.; die tägliche Höchstarbeitszeit liegt bei {cap:g} Std.',
+        'en': '{name} would work {hours:.1f}h on {date}; the maximum daily working time is {cap:g}h',
     },
     'warn_monthly_cap_reached': {
         'de': '{name} hat das monatliche Limit von {limit} Schichten bereits erreicht',

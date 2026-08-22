@@ -17,12 +17,13 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import mailer
 import security
 import timeutil
+from block_planner import build_month_blocks
 from coverage_model import band_within, coverage_gaps, first_overlapping_pair, trim_band_to_hours
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
-    generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes,
-    window_contains_shift, window_is_valid_on,
+    _ranges_overlap, _time_range_minutes, generate_schedule, rest_gap_hours,
+    shift_datetimes, shift_duration_minutes, window_contains_shift, window_is_valid_on,
 )
 
 # Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
@@ -618,6 +619,7 @@ def serialize_employee(cursor, row):
         'max_shifts_per_month': row['max_shifts_per_month'],
         'weekly_hours': row['weekly_hours'],
         'min_rest_hours': row['min_rest_hours'],
+        'max_daily_hours': row['max_daily_hours'],
         'unavailable_weekdays': unavailable_weekdays,
         'unavailable_dates': unavailable_dates,
         'allowed_shift_types': allowed_shift_types,
@@ -693,8 +695,21 @@ def replace_employee_constraints(connection, employee_id, data):
     for shift_type_id in parse_int_list(data.get('allowed_shift_types')):
         cursor.execute('INSERT INTO employee_allowed_shift_types (employee_id, shift_type_id) VALUES (?, ?)', (employee_id, shift_type_id))
 
+    replace_employee_availability(cursor, employee_id, data.get('availability'))
+
+
+def replace_employee_availability(cursor, employee_id, entries):
+    """Replace one employee's working-time windows, and nothing else.
+
+    Split out of replace_employee_constraints() above so that
+    PUT /employees/<id>/availability can reuse the validation without
+    inheriting its neighbours: that function clears every constraint list
+    before rewriting it, so calling it with only an `availability` key would
+    silently drop the employee's free weekdays, blocked dates and allowed
+    shift types - a route that changes more than its name says.
+    """
     cursor.execute('DELETE FROM employee_availability WHERE employee_id = ?', (employee_id,))
-    for entry in data.get('availability') or []:
+    for entry in entries or []:
         if not isinstance(entry, dict):
             raise ValueError(t(g.lang, 'availability_entry_invalid'))
         try:
@@ -805,14 +820,16 @@ def create_employee():
         cursor = connection.cursor()
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
+        max_daily_hours = parse_optional_hours(data.get('max_daily_hours'), 'max_daily_hours_label')
         availability_mode = data.get('availability_mode') or 'anytime'
         if availability_mode not in ('anytime', 'windows'):
             raise ValueError(t(g.lang, 'availability_mode_invalid'))
         cursor.execute(
-            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours, availability_mode) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO employees (name, email, active, max_shifts_per_month, weekly_hours, min_rest_hours, max_daily_hours, availability_mode) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
-             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, availability_mode),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11,
+             max_daily_hours if max_daily_hours is not None else 10, availability_mode),
         )
         employee_id = cursor.lastrowid
         replace_employee_constraints(connection, employee_id, data)
@@ -854,14 +871,16 @@ def update_employee(employee_id):
     try:
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
+        max_daily_hours = parse_optional_hours(data.get('max_daily_hours'), 'max_daily_hours_label')
         availability_mode = data.get('availability_mode') or 'anytime'
         if availability_mode not in ('anytime', 'windows'):
             raise ValueError(t(g.lang, 'availability_mode_invalid'))
         cursor.execute(
             'UPDATE employees SET name = ?, email = ?, active = ?, max_shifts_per_month = ?, '
-            'weekly_hours = ?, min_rest_hours = ?, availability_mode = ? WHERE id = ?',
+            'weekly_hours = ?, min_rest_hours = ?, max_daily_hours = ?, availability_mode = ? WHERE id = ?',
             (name, data.get('email'), 1 if data.get('active', True) else 0, data.get('max_shifts_per_month'),
-             weekly_hours, min_rest_hours if min_rest_hours is not None else 11, availability_mode, employee_id),
+             weekly_hours, min_rest_hours if min_rest_hours is not None else 11,
+             max_daily_hours if max_daily_hours is not None else 10, availability_mode, employee_id),
         )
         replace_employee_constraints(connection, employee_id, data)
         connection.commit()
@@ -870,6 +889,75 @@ def update_employee(employee_id):
     except ValueError as e:
         return jsonify({'message': str(e)}), 400
     return jsonify(employee)
+
+
+@app.route('/employees/<int:employee_id>/availability', methods=['GET'])
+def get_employee_availability(employee_id):
+    """An employee's own working-time windows, readable by them and by HR.
+
+    Spec §6 asked for this route from the start; the windows ended up hanging
+    off PUT /employees/<id> (@hr_required) instead, which meant the one person
+    the windows are about could not see them. Etappe 4 turns the windows into
+    what the planner cuts blocks against, so that gap stops being cosmetic.
+
+    Writing stays HR-only (see the PUT below): an employee announcing their own
+    availability is a different feature - a request someone approves - not this
+    one.
+    """
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    cursor = get_db().cursor()
+    cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    employee = serialize_employee(cursor, row)
+    return jsonify({
+        'availability_mode': employee['availability_mode'],
+        'availability': employee['availability'],
+    })
+
+
+@app.route('/employees/<int:employee_id>/availability', methods=['PUT'])
+@hr_required
+def put_employee_availability(employee_id):
+    """Replace one employee's windows without touching the rest of their record.
+
+    Same replace-completely semantics as the constraint lists on
+    PUT /employees/<id>, and the same writer: replace_employee_availability()
+    is the only place that validates and stores windows, so this route hands
+    the payload straight to it rather than growing a second copy of that
+    validation.
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    data = request.get_json(silent=True) or {}
+    availability_mode = data.get('availability_mode') or 'anytime'
+    if availability_mode not in ('anytime', 'windows'):
+        return jsonify({'message': t(g.lang, 'availability_mode_invalid')}), 400
+
+    try:
+        replace_employee_availability(cursor, employee_id, data.get('availability'))
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+
+    cursor.execute('UPDATE employees SET availability_mode = ? WHERE id = ?',
+                   (availability_mode, employee_id))
+    connection.commit()
+
+    cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
+    employee = serialize_employee(cursor, cursor.fetchone())
+    return jsonify({
+        'availability_mode': employee['availability_mode'],
+        'availability': employee['availability'],
+    })
 
 
 @app.route('/employees/<int:employee_id>', methods=['DELETE'])
@@ -1260,6 +1348,7 @@ def load_employees_for_scheduling(cursor):
             'max_shifts_per_month': row['max_shifts_per_month'],
             'weekly_hours': row['weekly_hours'],
             'min_rest_hours': row['min_rest_hours'],
+            'max_daily_hours': row['max_daily_hours'],
             'unavailable_weekdays': unavailable_weekdays,
             'unavailable_dates': unavailable_dates,
             'allowed_shift_types': allowed if allowed else None,
@@ -1456,8 +1545,15 @@ def generate_schedule_route():
                 'manually_edited_count': manually_edited,
             }), 409
 
+    # Stage 1: the month's blocks come out of the demand bands now, not out of
+    # shift_requirements. The shift types still matter - stage 1 covers demand
+    # with them wherever it can, so a normal month still looks like "2 early,
+    # 3 midday, 2 late" - but their per-weekday counts are no longer read.
     try:
-        result = generate_schedule(year, month, employees, shift_types, weekend_weight=weekend_weight)
+        slots = build_month_blocks(
+            year, month, shift_types, effective_bands_by_date(cursor, year, month), employees)
+        result = generate_schedule(year, month, employees, shift_types,
+                                   weekend_weight=weekend_weight, slots=slots)
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_year_or_month')}), 400
 
@@ -1476,9 +1572,17 @@ def generate_schedule_route():
         schedule_id = cursor.lastrowid
 
     for a in result['assignments']:
+        # start_time/end_time have been on this table since Etappe 2 but only
+        # the manual-correction path ever filled them. Stage 1 decides a
+        # block's hours now - trimmed to demand and to availability windows -
+        # so they have to be stored, or the plan would read back at the shift
+        # type's nominal times and the trimming would be invisible.
         cursor.execute(
-            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, employee_id) VALUES (?, ?, ?, ?, ?)',
-            (schedule_id, a['date'], a['shift_type_id'], a['slot_index'], a['employee_id']),
+            'INSERT INTO shift_assignments '
+            '(schedule_id, date, shift_type_id, slot_index, employee_id, start_time, end_time) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (schedule_id, a['date'], a['shift_type_id'], a['slot_index'], a['employee_id'],
+             a['start_time'], a['end_time']),
         )
 
     connection.commit()
@@ -1829,14 +1933,58 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                     warnings.append(t(g.lang, 'warn_outside_availability_no_window', name=employee['name'],
                                      weekday=weekday_adverb(g.lang, weekday)))
 
-    query = 'SELECT 1 FROM shift_assignments WHERE date = ? AND employee_id = ?'
+    # Everything else this person already holds that day. Until Etappe 4 the
+    # mere existence of one was the warning ("already assigned that day"),
+    # because nobody could work twice in a day. A split shift is now a normal
+    # arrangement, so what remains worth warning about is an *overlap* - and,
+    # separately, the daily working time the blocks add up to.
+    query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time '
+             'FROM shift_assignments WHERE date = ? AND employee_id = ?')
     params = [assignment_date, employee_id]
     if exclude_assignment_id is not None:
         query += ' AND id != ?'
         params.append(exclude_assignment_id)
     cursor.execute(query, params)
-    if cursor.fetchone():
+    same_day = [dict(row) for row in cursor.fetchall()]
+
+    proposed = {
+        'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
+        'start_time': start_time, 'end_time': end_time,
+    }
+    proposed_start, proposed_end = assignment_hours(cursor, proposed)
+
+    same_day_hours = []
+    unknown_hours = False
+    for row in same_day:
+        row_start, row_end = assignment_hours(cursor, row)
+        if row_start and row_end:
+            same_day_hours.append((row_start, row_end))
+        else:
+            unknown_hours = True
+
+    if same_day and (unknown_hours or not (proposed_start and proposed_end)):
+        # No minute axis on at least one side - overlap cannot be decided, so
+        # fall back to the pre-Etappe-4 wording rather than stay silent.
         warnings.append(t(g.lang, 'warn_already_assigned_that_day', name=employee['name']))
+    elif proposed_start and proposed_end:
+        proposed_range = _time_range_minutes(proposed_start, proposed_end)
+        for row_start, row_end in same_day_hours:
+            if _ranges_overlap(proposed_range, _time_range_minutes(row_start, row_end)):
+                warnings.append(t(g.lang, 'warn_overlapping_blocks', name=employee['name'],
+                                  date=assignment_date, start=row_start, end=row_end))
+                break
+
+    # § 3 ArbZG caps the working time of one day, and § 2 Abs. 1 defines that
+    # as the sum of the blocks rather than the span from the first start to the
+    # last end - the interruption of a split shift is not working time.
+    if employee['max_daily_hours'] is not None and proposed_start and proposed_end:
+        total_minutes = shift_duration_minutes(proposed_start, proposed_end)
+        for row_start, row_end in same_day_hours:
+            total_minutes += shift_duration_minutes(row_start, row_end)
+        if total_minutes > employee['max_daily_hours'] * 60:
+            warnings.append(t(g.lang, 'warn_daily_hours_exceeded', name=employee['name'],
+                              date=assignment_date, hours=total_minutes / 60,
+                              cap=employee['max_daily_hours']))
 
     if employee['max_shifts_per_month'] is not None:
         cursor.execute(
@@ -1872,16 +2020,19 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             warnings.append(t(g.lang, 'warn_weekly_hours_exceeded', name=employee['name'],
                              hours=total_minutes / 60, target=employee['weekly_hours']))
 
-    cur_start, cur_end = assignment_hours(cursor, {
-        'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
-        'start_time': start_time, 'end_time': end_time,
-    })
-    if cur_start and cur_end:
-        this_shift = shift_datetimes(assignment_date, cur_start, cur_end)
+    if proposed_start and proposed_end:
+        # § 5 Abs. 1 ArbZG measures the rest period from the end of the *daily
+        # working time*, so both sides of the comparison are whole days, not
+        # single blocks: this date's envelope already includes whatever else
+        # the person holds that day, and the neighbouring date contributes its
+        # own envelope rather than one arbitrarily picked row. Before Etappe 4
+        # a fetchone() was enough, because a day never held more than one.
+        this_day = day_envelope_from_hours(
+            assignment_date, same_day_hours + [(proposed_start, proposed_end)])
         min_rest = employee['min_rest_hours']
         d = date.fromisoformat(assignment_date)
 
-        # (neighbouring date, is that neighbour the earlier of the two shifts?)
+        # (neighbouring date, is that neighbour the earlier of the two days?)
         neighbors = [((d - timedelta(days=1)).isoformat(), True), ((d + timedelta(days=1)).isoformat(), False)]
         for neighbor_date, neighbor_is_earlier in neighbors:
             query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time '
@@ -1891,21 +2042,36 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                 query += ' AND id != ?'
                 params.append(exclude_assignment_id)
             cursor.execute(query, params)
-            neighbor = cursor.fetchone()
-            if not neighbor:
+            neighbor_hours = []
+            for neighbor in cursor.fetchall():
+                n_start, n_end = assignment_hours(cursor, neighbor)
+                if n_start and n_end:
+                    neighbor_hours.append((n_start, n_end))
+            if not neighbor_hours:
                 continue
-            n_start, n_end = assignment_hours(cursor, neighbor)
-            if not n_start or not n_end:
-                continue
-            neighbor_shift = shift_datetimes(neighbor_date, n_start, n_end)
+            neighbor_day = day_envelope_from_hours(neighbor_date, neighbor_hours)
 
-            gap = (rest_gap_hours(neighbor_shift, this_shift) if neighbor_is_earlier
-                   else rest_gap_hours(this_shift, neighbor_shift))
+            gap = (rest_gap_hours(neighbor_day, this_day) if neighbor_is_earlier
+                   else rest_gap_hours(this_day, neighbor_day))
             if gap < min_rest:
                 warnings.append(t(g.lang, 'warn_rest_period_too_short', name=employee['name'],
                                  gap=gap, required=min_rest))
 
     return warnings
+
+
+def day_envelope_from_hours(iso_date, hours):
+    """The working-time envelope of one day: (earliest start, latest end).
+
+    The counterpart of day_envelope() inside scheduler._search(), for the
+    manual-correction path, which reads saved rows instead of a search state.
+    Two implementations of the same idea is one more than the project likes,
+    but the scheduler's closes over its own search state and this one takes a
+    list - the shared part is shift_datetimes(), and that is imported, not
+    copied.
+    """
+    pairs = [shift_datetimes(iso_date, start, end) for start, end in hours]
+    return min(start for start, _ in pairs), max(end for _, end in pairs)
 
 
 def refresh_unfilled_count(cursor, schedule_id):
@@ -2581,15 +2747,11 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
     database edited before /business-hours started cross-checking can hold the
     same thing. A band that is trimmed away entirely produces no gap.
     """
-    bands_by_weekday = coverage_requirements_by_weekday(cursor)
-    if not bands_by_weekday:
+    bands_by_date = effective_bands_by_date(cursor, year, month)
+    if not bands_by_date:
         return []
 
-    hours_by_weekday = load_business_hours_by_weekday(cursor)
     days_in_month = calendar.monthrange(year, month)[1]
-    exceptions_by_date = business_hours_exceptions_by_date(
-        cursor, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat(),
-    )
 
     intervals_by_date = {}
     for a in assignments:
@@ -2600,6 +2762,49 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
         )
 
     gaps = []
+    for day in range(1, days_in_month + 1):
+        iso_date = date(year, month, day).isoformat()
+        bands = bands_by_date.get(iso_date)
+        if not bands:
+            continue
+
+        for gap in coverage_gaps(bands, intervals_by_date.get(iso_date, [])):
+            gaps.append({'date': iso_date, **gap})
+
+    return gaps
+
+
+def effective_bands_by_date(cursor, year, month):
+    """Every date of the month mapped to the demand bands that actually apply.
+
+    Loaded once for the whole month rather than per day, and shared by the two
+    callers that need exactly this: coverage_gaps_for_month() above, which
+    compares the bands against what is staffed, and the generator, which builds
+    the month's blocks out of them. Keeping it in one place is what stops the
+    trimming rules below from drifting apart between "what we planned for" and
+    "what we report as missing" - Etappe 3 already had that happen once with
+    business_hours_for().
+
+    Effective means: a closed date contributes nothing, and every band is
+    trimmed to the opening window business_hours_for() resolves, so a special
+    opening on a single date narrows or widens that date's demand and not just
+    its open/closed state. Trimming is what keeps a band that predates the
+    current opening hours from demanding staff for a closed business - bands
+    derived by migration 0007 never passed the API's validation at all, and any
+    database edited before /business-hours started cross-checking can hold the
+    same thing. A date whose bands are all trimmed away is left out entirely.
+    """
+    bands_by_weekday = coverage_requirements_by_weekday(cursor)
+    if not bands_by_weekday:
+        return {}
+
+    hours_by_weekday = load_business_hours_by_weekday(cursor)
+    days_in_month = calendar.monthrange(year, month)[1]
+    exceptions_by_date = business_hours_exceptions_by_date(
+        cursor, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat(),
+    )
+
+    by_date = {}
     for day in range(1, days_in_month + 1):
         day_date = date(year, month, day)
         iso_date = day_date.isoformat()
@@ -2624,10 +2829,9 @@ def coverage_gaps_for_month(cursor, year, month, assignments):
             if not bands:
                 continue
 
-        for gap in coverage_gaps(bands, intervals_by_date.get(iso_date, [])):
-            gaps.append({'date': iso_date, **gap})
+        by_date[iso_date] = bands
 
-    return gaps
+    return by_date
 
 
 # ---------- error handling ----------

@@ -229,7 +229,18 @@ def order_slots(slots, employees, ordering):
     def sort_key(slot):
         eligible_count = sum(1 for e in employees if structurally_eligible(e, slot))
         # Date/shift tie-breakers only exist to keep the ordering deterministic.
-        return (eligible_count, slot['date'], slot['shift_type_id'], slot['slot_index'])
+        # shift_type_id is None for a block with no template, and None does not
+        # compare against int - the raw value would raise TypeError as soon as
+        # stage 1 emits one. Same shape as the result sort at the end of
+        # _search(): template-less last, then by the hours.
+        return (
+            eligible_count,
+            slot['date'],
+            slot['shift_type_id'] is None,
+            slot['shift_type_id'] or 0,
+            slot.get('start_time') or '',
+            slot['slot_index'],
+        )
 
     return sorted(slots, key=sort_key)
 
@@ -282,6 +293,7 @@ def _search(
     weekend_weight,
     node_budget,
     time_budget_seconds,
+    slots=None,
 ):
     """Run one backtracking search with a fixed slot ordering.
 
@@ -302,20 +314,32 @@ def _search(
     search goes deeper, so a branch whose partial cost already loses to the best
     complete plan can be pruned safely.
     """
-    raw_slots = build_slots(year, month, shift_types)
+    # Stage 1 (block_planner.build_month_blocks) hands its blocks in ready-made
+    # since Etappe 4; build_slots() below is the pre-Etappe-4 path, still used
+    # by benchmark.py as a comparison basis and by the 23 backward-compatibility
+    # tests in test_scheduler.py.
+    raw_slots = build_slots(year, month, shift_types) if slots is None else slots
     slots = order_slots(raw_slots, employees, ordering)
 
     total_slots = len(slots)
     assignment = [None] * total_slots
-    day_usage = {}
-    # (employee_id, date) -> (start_time, end_time) of the shift assigned there,
-    # only ever populated for slots with known hours. Backs the rest-period
-    # check below. Note this is *not* redundant with day_usage: day_usage only
-    # stops the same employee working twice on the same calendar date, but an
-    # overnight shift dated D (22:00-06:00) and a normal shift dated D+1
-    # (08:00-16:00) are on different dates and only 2h apart - exactly the gap
-    # this closes.
-    day_shift = {}
+    # (employee_id, date) -> the (start_time, end_time) pairs assigned there.
+    # Was a plain date -> set(employee_id) until Etappe 4, when "works today"
+    # was all anyone needed to know: nobody could work twice in a day. A split
+    # shift makes the question "does this block overlap one they already have"
+    # instead, and only an overlap is genuinely impossible - two blocks either
+    # side of a break are exactly what Spec §4.4 asks for.
+    day_hours = {}
+    # (employee_id, date) -> number of blocks assigned there whose hours are
+    # unknown. Those have no minute axis, so overlap cannot be checked and the
+    # old one-per-day rule keeps applying to them. This is the branch that
+    # keeps the 23 backward-compatibility tests in test_scheduler.py green.
+    day_untimed = {}
+    # (employee_id, date) -> minutes assigned there, mirroring week_minutes
+    # below. § 3 ArbZG caps the working time of a single day; § 2 Abs. 1 says
+    # that is the sum of the blocks, not the span from first start to last end,
+    # because the interruption of a split shift is not working time.
+    day_minutes = {}
     # (employee_id, week_start) -> minutes assigned so far that week, only
     # tracked where a weekly_hours target makes it relevant.
     week_minutes = {}
@@ -335,6 +359,19 @@ def _search(
         if state['nodes'] % 2000 == 0 and time.monotonic() - state['start'] > time_budget_seconds:
             raise _BudgetExceeded()
 
+    def day_envelope(iso_date, hours):
+        """The working-time envelope of one day: (earliest start, latest end).
+
+        § 5 Abs. 1 ArbZG measures the rest period from the end of the *daily
+        working time*, so with a split shift it is the last block's end that
+        counts, not the first's. The interruption in between is not rest - it
+        sits inside the working day, which only finishes when the last block
+        does. shift_datetimes() carries an overnight block past midnight, so an
+        envelope ending 06:00 the next morning stays comparable.
+        """
+        pairs = [shift_datetimes(iso_date, start, end) for start, end in hours]
+        return min(start for start, _ in pairs), max(end for _, end in pairs)
+
     def rest_period_ok(emp, slot):
         """Would assigning `emp` to `slot` leave enough rest either side of it?
 
@@ -345,33 +382,71 @@ def _search(
         day of the previous month, since that's a different generation run.
         constraint_warnings() in app.py covers that gap for manual edits, where
         the already-saved data spans month boundaries freely.
+
+        Compared day against day, never block against block: a person working
+        08:00-12:00 and 16:00-20:00 has four hours in between, and no rest
+        period is owed for them.
         """
         min_rest = emp.get('min_rest_hours')
         if not min_rest or not slot['start_time'] or not slot['end_time']:
             return True
         eid = emp['id']
-        this_shift = shift_datetimes(slot['date'], slot['start_time'], slot['end_time'])
         d = date.fromisoformat(slot['date'])
+        previous_day = (d - timedelta(days=1)).isoformat()
+        next_day = (d + timedelta(days=1)).isoformat()
 
-        prev = day_shift.get((eid, (d - timedelta(days=1)).isoformat()))
-        if prev and rest_gap_hours(shift_datetimes((d - timedelta(days=1)).isoformat(), *prev), this_shift) < min_rest:
+        this_day = day_envelope(
+            slot['date'],
+            list(day_hours.get((eid, slot['date']), ())) + [(slot['start_time'], slot['end_time'])],
+        )
+
+        prev = day_hours.get((eid, previous_day))
+        if prev and rest_gap_hours(day_envelope(previous_day, prev), this_day) < min_rest:
             return False
 
-        nxt = day_shift.get((eid, (d + timedelta(days=1)).isoformat()))
-        if nxt and rest_gap_hours(this_shift, shift_datetimes((d + timedelta(days=1)).isoformat(), *nxt)) < min_rest:
+        nxt = day_hours.get((eid, next_day))
+        if nxt and rest_gap_hours(this_day, day_envelope(next_day, nxt)) < min_rest:
             return False
 
         return True
 
+    def day_is_free(emp, slot):
+        """May `emp` take this block on top of what they already have that day?
+
+        A block with known hours may join others as long as it overlaps none of
+        them. A block without hours has no minute axis to compare, so the old
+        one-per-day rule still governs it - in both directions, so an untimed
+        block and a timed one never end up on the same person on the same day
+        either.
+        """
+        key = (emp['id'], slot['date'])
+        held = day_hours.get(key, ())
+        untimed = day_untimed.get(key, 0)
+
+        if not slot['start_time'] or not slot['end_time']:
+            return not held and not untimed
+        if untimed:
+            return False
+
+        this_range = _time_range_minutes(slot['start_time'], slot['end_time'])
+        return not any(
+            _ranges_overlap(this_range, _time_range_minutes(start, end))
+            for start, end in held
+        )
+
     def eligible_candidates(slot):
-        used_today = day_usage.get(slot['date'], ())
         candidates = []
         for emp in employees:
             eid = emp['id']
-            if eid in used_today:
+            if not day_is_free(emp, slot):
                 continue
             if not structurally_eligible(emp, slot):
                 continue
+            daily_cap = emp.get('max_daily_hours')
+            if daily_cap is not None and slot['duration_minutes'] is not None:
+                current = day_minutes.get((eid, slot['date']), 0)
+                if current + slot['duration_minutes'] > daily_cap * 60:
+                    continue
             cap = emp['max_shifts_per_month']
             if cap is not None and load[eid] >= cap:
                 continue
@@ -426,23 +501,36 @@ def _search(
             has_hours = bool(slot['start_time'] and slot['end_time'])
             week_key = (eid, slot['week_start'])
 
+            day_key = (eid, d)
+
             assignment[i] = eid
-            day_usage.setdefault(d, set()).add(eid)
             if has_hours:
-                day_shift[(eid, d)] = (slot['start_time'], slot['end_time'])
+                day_hours.setdefault(day_key, []).append(
+                    (slot['start_time'], slot['end_time']))
+            else:
+                day_untimed[day_key] = day_untimed.get(day_key, 0) + 1
             if slot['duration_minutes'] is not None:
                 week_minutes[week_key] = week_minutes.get(week_key, 0) + slot['duration_minutes']
+                day_minutes[day_key] = day_minutes.get(day_key, 0) + slot['duration_minutes']
             load[eid] += 1
             if slot['is_weekend']:
                 weekend_load[eid] += 1
 
             backtrack(i + 1, unfilled_so_far, cost_so_far + added)
 
-            day_usage[d].discard(eid)
             if has_hours:
-                del day_shift[(eid, d)]
+                # pop(), not del: the same person may hold several blocks that
+                # day now, and only this one is being taken back.
+                day_hours[day_key].pop()
+                if not day_hours[day_key]:
+                    del day_hours[day_key]
+            else:
+                day_untimed[day_key] -= 1
+                if not day_untimed[day_key]:
+                    del day_untimed[day_key]
             if slot['duration_minutes'] is not None:
                 week_minutes[week_key] -= slot['duration_minutes']
+                day_minutes[day_key] -= slot['duration_minutes']
             load[eid] -= 1
             if slot['is_weekend']:
                 weekend_load[eid] -= 1
@@ -481,11 +569,27 @@ def _search(
             'slot_index': slot['slot_index'],
             'employee_id': emp_id,
             'is_weekend': slot['is_weekend'],
+            # Carried through since Etappe 4: the generator now decides a
+            # block's hours (stage 1 cuts them to demand and to availability
+            # windows), so the caller has something to store. Still None for
+            # callers that only ever dealt in shift counts.
+            'start_time': slot.get('start_time'),
+            'end_time': slot.get('end_time'),
         }
         for slot, emp_id in zip(slots, result_assignment)
     ]
     # Emit in calendar order regardless of the order the search used internally.
-    assignments.sort(key=lambda a: (a['date'], a['shift_type_id'], a['slot_index']))
+    # shift_type_id is None for a block with no template, and None does not
+    # compare against int - sorting the raw value raises TypeError the moment
+    # stage 1 emits its first template-less block. Those sort last, then by
+    # the hours, so a date's blocks come out in a stable, readable order.
+    assignments.sort(key=lambda a: (
+        a['date'],
+        a['shift_type_id'] is None,
+        a['shift_type_id'] or 0,
+        a['start_time'] or '',
+        a['slot_index'],
+    ))
 
     hit_ideal = fairness and unfilled_count == 0 and best['cost'] <= ideal_cost
 
@@ -515,6 +619,7 @@ def generate_schedule(
     weekend_weight=0,
     node_budget=DEFAULT_NODE_BUDGET,
     time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
+    slots=None,
 ):
     """Build a month's schedule, choosing a search strategy to suit the month.
 
@@ -527,6 +632,14 @@ def generate_schedule(
                  optional, only consulted when availability_mode == 'windows'}]
     shift_types: [{id, requirements: {weekday(0-6): required_count},
                    start_time: "HH:MM" or None, end_time: "HH:MM" or None}]
+
+    slots: the month's blocks, ready-made. Since Etappe 4 this is how the
+    application plans: block_planner.build_month_blocks() builds the blocks out
+    of the demand bands, cutting them to demand and to availability windows,
+    and `requirements` above is no longer read at all. Left as None - the
+    default - build_slots() expands `requirements` the pre-Etappe-4 way, which
+    is what benchmark.py compares against and what the 23 backward-compatibility
+    tests in test_scheduler.py exercise.
 
     weekly_hours and min_rest_hours are both optional, hard, best-effort caps -
     same "no guarantee, reports gaps rather than failing" philosophy as
@@ -557,7 +670,7 @@ def generate_schedule(
     """
     def run(order):
         return _search(year, month, employees, shift_types, order, fairness,
-                       weekend_weight, node_budget, time_budget_seconds)
+                       weekend_weight, node_budget, time_budget_seconds, slots)
 
     if ordering != AUTO:
         result = run(ordering)

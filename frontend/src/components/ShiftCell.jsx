@@ -6,13 +6,23 @@ import { useTranslation } from '../i18n/context'
  * One shift on one date: the hours it runs that day, everyone working it, and
  * (for HR) the controls to change any of that.
  *
- * The cell's own time pair (top of the cell) is the shift's hours for this
- * date - editing it there still changes it for everyone on the shift that
- * day, exactly as before. Underneath, each person's row (AssignmentSlot) can
- * carry its own hours on top of that: it shows and edits them only when that
- * one assignment has an individual override (assignment_time_set), otherwise
- * it silently follows whatever the cell above resolves to, so the same time
+ * A cell is a list of time groups, one per distinct start/end pair it holds.
+ * Usually there is exactly one - three people in the same early shift share
+ * its hours - and the cell then looks and behaves as it always did: one time
+ * pair at the top, editable for HR, which writes a per-date override for the
+ * whole shift type. Underneath, each person's row (AssignmentSlot) can carry
+ * its own hours on top of that: it shows and edits them only when that one
+ * assignment has an individual override (assignment_time_set), otherwise it
+ * silently follows whatever the group above resolves to, so the same time
  * doesn't repeat pointlessly on every row.
+ *
+ * Several groups appear once a cell holds blocks that genuinely run at
+ * different times: the free-block column gathers every template-less block of
+ * the date, and since Etappe 4 a block trimmed to someone's availability
+ * window keeps its template's shift_type_id while running shorter hours. The
+ * cell-level time edit is hidden in that case - it takes shiftType.id rather
+ * than an assignment id, so it would rewrite blocks the user wasn't looking
+ * at. The per-person edit is the right tool there.
  *
  * `shiftType.id === null` marks the synthetic "free block" column that
  * ScheduleGrid adds for assignments with no shift type of their own - there's
@@ -57,7 +67,29 @@ function ShiftCell({
   }
 
   const sorted = slots.slice().sort((a, b) => a.slot_index - b.slot_index)
-  const sample = sorted[0]
+
+  // Slots sharing one cell no longer share one time pair. Two things broke
+  // that assumption in Etappe 4: the free-block column collects every
+  // template-less block of the date at once, and a block trimmed to someone's
+  // availability window keeps its template's shift_type_id while running
+  // different hours. Showing sorted[0]'s times for all of them silently
+  // mislabels everyone else, so each distinct pair gets its own heading and
+  // its own people underneath it.
+  const timeGroups = []
+  for (const slot of sorted) {
+    const key = `${slot.start_time}-${slot.end_time}`
+    const existing = timeGroups.find(group => group.key === key)
+    if (existing) existing.slots.push(slot)
+    else timeGroups.push({ key, slots: [slot] })
+  }
+
+  const sample = timeGroups[0].slots[0]
+  // The cell-level time edit writes a per-date override for the whole shift
+  // type (onSetTimes takes shiftType.id, not an assignment id), so it only
+  // has an unambiguous meaning while the cell shows a single pair. With
+  // several, the per-person edit inside AssignmentSlot is the right tool and
+  // this control would quietly rewrite blocks the user wasn't looking at.
+  const singleTimeGroup = timeGroups.length === 1
 
   function startEditing() {
     setStart(sample.start_time)
@@ -73,62 +105,69 @@ function ShiftCell({
 
   return (
     <div className="shift-cell">
-      {editingTimes ? (
-        <div className="cell-time-edit">
-          <input type="time" value={start} onChange={e => setStart(e.target.value)} aria-label={t('shiftCell.startAria')} />
-          <input type="time" value={end} onChange={e => setEnd(e.target.value)} aria-label={t('shiftCell.endAria')} />
-          <button
-            type="button"
-            className="btn-small"
-            onClick={() => { onSetTimes(date, shiftType.id, start, end); setEditingTimes(false) }}
-          >
-            OK
-          </button>
-          {sample.time_overridden && (
-            <button
-              type="button"
-              className="btn-secondary btn-small"
-              title={t('shiftCell.resetToDefaultTitle', { start: sample.default_start_time, end: sample.default_end_time })}
-              onClick={() => { onSetTimes(date, shiftType.id, null, null); setEditingTimes(false) }}
-            >
-              {t('shiftCell.defaultButton')}
-            </button>
-          )}
-          <button type="button" className="btn-secondary btn-small" onClick={() => setEditingTimes(false)}>
-            ✕
-          </button>
-        </div>
-      ) : (
-        <div className={`cell-times ${sample.time_overridden ? 'cell-times-overridden' : ''}`}>
-          <span title={sample.time_overridden
-            ? t('shiftCell.deviatesFromTitle', { start: sample.default_start_time, end: sample.default_end_time })
-            : undefined}>
-            {sample.start_time}–{sample.end_time}{sample.time_overridden ? ' *' : ''}
-          </span>
-          {!readOnly && !isFreeBlockColumn && (
-            <button type="button" className="cell-icon" title={t('shiftCell.editTimesTitle')} onClick={startEditing}>
-              ✎
-            </button>
-          )}
-        </div>
-      )}
+      {timeGroups.map(group => {
+        const head = group.slots[0]
+        return (
+          <div className="cell-time-group" key={group.key}>
+            {editingTimes && singleTimeGroup ? (
+              <div className="cell-time-edit">
+                <input type="time" value={start} onChange={e => setStart(e.target.value)} aria-label={t('shiftCell.startAria')} />
+                <input type="time" value={end} onChange={e => setEnd(e.target.value)} aria-label={t('shiftCell.endAria')} />
+                <button
+                  type="button"
+                  className="btn-small"
+                  onClick={() => { onSetTimes(date, shiftType.id, start, end); setEditingTimes(false) }}
+                >
+                  {t('shiftCell.confirmButton')}
+                </button>
+                {head.time_overridden && (
+                  <button
+                    type="button"
+                    className="btn-secondary btn-small"
+                    title={t('shiftCell.resetToDefaultTitle', { start: head.default_start_time, end: head.default_end_time })}
+                    onClick={() => { onSetTimes(date, shiftType.id, null, null); setEditingTimes(false) }}
+                  >
+                    {t('shiftCell.defaultButton')}
+                  </button>
+                )}
+                <button type="button" className="btn-secondary btn-small" onClick={() => setEditingTimes(false)}>
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <div className={`cell-times ${head.time_overridden ? 'cell-times-overridden' : ''}`}>
+                <span title={head.time_overridden
+                  ? t('shiftCell.deviatesFromTitle', { start: head.default_start_time, end: head.default_end_time })
+                  : undefined}>
+                  {head.start_time}–{head.end_time}{head.time_overridden ? ' *' : ''}
+                </span>
+                {!readOnly && !isFreeBlockColumn && singleTimeGroup && (
+                  <button type="button" className="cell-icon" title={t('shiftCell.editTimesTitle')} onClick={startEditing}>
+                    ✎
+                  </button>
+                )}
+              </div>
+            )}
 
-      {sorted.map(slot => (
-        <AssignmentSlot
-          key={slot.id}
-          slot={slot}
-          date={date}
-          readOnly={readOnly}
-          isFreeBlockColumn={isFreeBlockColumn}
-          swapSelection={swapSelection}
-          employeeOptions={employeeOptions}
-          onReassign={onReassign}
-          onToggleSwap={onToggleSwap}
-          onRemoveSlot={onRemoveSlot}
-          onReportAbsence={onReportAbsence}
-          setFlash={setFlash}
-        />
-      ))}
+            {group.slots.map(slot => (
+              <AssignmentSlot
+                key={slot.id}
+                slot={slot}
+                date={date}
+                readOnly={readOnly}
+                isFreeBlockColumn={isFreeBlockColumn}
+                swapSelection={swapSelection}
+                employeeOptions={employeeOptions}
+                onReassign={onReassign}
+                onToggleSwap={onToggleSwap}
+                onRemoveSlot={onRemoveSlot}
+                onReportAbsence={onReportAbsence}
+                setFlash={setFlash}
+              />
+            ))}
+          </div>
+        )
+      })}
 
       {!readOnly && !isFreeBlockColumn && (
         <button type="button" className="cell-add" onClick={() => onAddSlot(date, shiftType.id)}>

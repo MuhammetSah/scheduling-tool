@@ -10,6 +10,7 @@ const emptyForm = {
   max_shifts_per_month: '',
   weekly_hours: '',
   min_rest_hours: 11,
+  max_daily_hours: 10,
   unavailable_weekdays: [],
   allowed_shift_types: [],
   unavailable_dates: [],
@@ -73,6 +74,7 @@ function Employees({ setFlash }) {
       max_shifts_per_month: emp.max_shifts_per_month ?? '',
       weekly_hours: emp.weekly_hours ?? '',
       min_rest_hours: emp.min_rest_hours ?? 11,
+      max_daily_hours: emp.max_daily_hours ?? 10,
       unavailable_weekdays: emp.unavailable_weekdays,
       allowed_shift_types: emp.allowed_shift_types,
       unavailable_dates: emp.unavailable_dates,
@@ -153,6 +155,7 @@ function Employees({ setFlash }) {
       max_shifts_per_month: form.max_shifts_per_month === '' ? null : Number(form.max_shifts_per_month),
       weekly_hours: form.weekly_hours === '' ? null : Number(form.weekly_hours),
       min_rest_hours: form.min_rest_hours === '' ? null : Number(form.min_rest_hours),
+      max_daily_hours: form.max_daily_hours === '' ? null : Number(form.max_daily_hours),
       unavailable_weekdays: form.unavailable_weekdays,
       allowed_shift_types: form.allowed_shift_types,
       unavailable_dates: form.unavailable_dates,
@@ -313,6 +316,19 @@ function Employees({ setFlash }) {
                 required
               />
               <p className="hint">{t('employees.minRestHint')}</p>
+            </div>
+            <div className="field">
+              <label htmlFor="emp-daily">{t('employees.maxDailyHoursLabel')}</label>
+              <input
+                id="emp-daily"
+                type="number"
+                min="0"
+                step="0.5"
+                value={form.max_daily_hours}
+                onChange={e => setForm(f => ({ ...f, max_daily_hours: e.target.value }))}
+                required
+              />
+              <p className="hint">{t('employees.maxDailyHoursHint')}</p>
             </div>
             <div className="field checkbox-field">
               <input id="emp-active" type="checkbox" checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />

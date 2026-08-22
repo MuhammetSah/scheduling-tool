@@ -10,6 +10,16 @@ def plan_vorbereiten(hr_client):
         'end_time': '14:00',
         'requirements': [1, 1, 1, 1, 1, 0, 0],
     })
+    # Seit Etappe 4 plant der Generator aus den Bedarfsbaendern, nicht mehr aus
+    # den requirements der Schichtart. Die Zeile darueber bleibt trotzdem
+    # stehen: sie beschreibt dasselbe Bild im alten Modell, und diese Tests
+    # gehen ueber den Schutz vor stillem Datenverlust, nicht ueber die
+    # Bedarfsquelle.
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': wochentag, 'start_time': '06:00', 'end_time': '14:00',
+         'required_count': 1}
+        for wochentag in range(5)
+    ])
     antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 3})
     assert antwort.status_code == 201, antwort.json
     # Ohne mindestens eine echte Zuweisung wuerden die folgenden Tests aus

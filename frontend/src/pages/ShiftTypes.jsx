@@ -8,11 +8,16 @@ const emptyForm = {
   start_time: '08:00',
   end_time: '16:00',
   color: '#0d9488',
+  // Der Planer liest diese Zahlen seit Etappe 4 nicht mehr - Bedarf wird ueber
+  // /coverage-requirements gepflegt. Sie bleiben trotzdem im Formular und im
+  // Payload: das Backend speichert sie weiter, und sie beim Speichern
+  // stillschweigend auf 0 zu setzen wuerde die Rueckfallebene zerstoeren, die
+  // die Spec bis nach Etappe 4 ausdruecklich erhalten wissen will.
   requirements: [1, 1, 1, 1, 1, 1, 1],
 }
 
 function ShiftTypes({ setFlash }) {
-  const { t, weekdayLabels } = useTranslation()
+  const { t } = useTranslation()
   const [shiftTypes, setShiftTypes] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
@@ -37,15 +42,6 @@ function ShiftTypes({ setFlash }) {
   function startEdit(st) {
     setForm({ id: st.id, name: st.name, start_time: st.start_time, end_time: st.end_time, color: st.color, requirements: [...st.requirements] })
     setShowForm(true)
-  }
-
-  function setRequirement(wd, value) {
-    const count = Math.max(0, Number(value) || 0)
-    setForm(f => {
-      const requirements = [...f.requirements]
-      requirements[wd] = count
-      return { ...f, requirements }
-    })
   }
 
   async function submitForm(e) {
@@ -97,9 +93,6 @@ function ShiftTypes({ setFlash }) {
                   </span>
                   <div className="item-meta">
                     <span className="badge">{st.start_time}–{st.end_time}</span>
-                    {weekdayLabels.map((label, wd) => (
-                      <span key={wd} className="badge">{label}: {st.requirements[wd]}</span>
-                    ))}
                   </div>
                 </div>
                 <div className="item-actions">
@@ -134,17 +127,7 @@ function ShiftTypes({ setFlash }) {
                 <input id="st-color" type="color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} />
               </div>
             </div>
-            <div className="field">
-              <label>{t('shiftTypes.requirementsLabel')}</label>
-              <div className="weekday-counts">
-                {weekdayLabels.map((label, wd) => (
-                  <div key={wd} className="weekday-count">
-                    <label htmlFor={`req-${wd}`}>{label}</label>
-                    <input id={`req-${wd}`} type="number" min="0" value={form.requirements[wd]} onChange={e => setRequirement(wd, e.target.value)} />
-                  </div>
-                ))}
-              </div>
-            </div>
+            <p className="hint">{t('shiftTypes.demandMovedHint')}</p>
             <div className="toolbar">
               <button type="submit">{form.id ? t('common.save') : t('common.create')}</button>
               <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>{t('common.cancel')}</button>

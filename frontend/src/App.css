@@ -726,6 +726,16 @@ button.btn-small {
   min-width: 230px;
 }
 
+/* Eine Zelle kann mehrere Zeitgruppen halten - vorlagenlose Bloecke des Tages
+   oder auf ein Arbeitszeitfenster zugeschnittene Bloecke derselben Vorlage.
+   Ab der zweiten Gruppe eine Trennlinie, damit erkennbar bleibt, welche
+   Personen zu welcher Zeitangabe gehoeren. */
+.cell-time-group + .cell-time-group {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--border-color);
+}
+
 .cell-times {
   display: flex;
   align-items: center;

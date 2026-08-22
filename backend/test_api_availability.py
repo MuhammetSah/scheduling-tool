@@ -262,6 +262,14 @@ def test_planer_haelt_sich_end_to_end_an_die_ueber_die_api_gesetzten_fenster(hr_
         'end_time': '16:00',
         'requirements': [1, 1, 1, 1, 1, 1, 1],
     })
+    # Seit Etappe 4 ist das Bedarfsband die Quelle des Planers; die
+    # requirements der Schichtart oben beschreiben dasselbe Bild im alten
+    # Modell und bleiben als Beleg dafuer stehen.
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': wochentag, 'start_time': '08:00', 'end_time': '16:00',
+         'required_count': 1}
+        for wochentag in range(7)
+    ])
 
     antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
     assert antwort.status_code == 201, antwort.json
@@ -498,3 +506,185 @@ def test_verfuegbarkeitseintrag_ohne_objekt_ist_400_statt_500(hr_client):
 
     assert antwort.status_code == 400
     assert antwort.json['message'] == 'Jeder Eintrag unter "availability" muss ein Objekt mit Wochentag und Uhrzeiten sein.'
+
+
+# ---------- eigene Route fuer Arbeitszeitfenster (Etappe 4, Vorarbeit) ----------
+#
+# Spec Paragraph 6 sah GET/PUT /employees/<id>/availability von Anfang an vor;
+# gebaut wurde sie nicht, die Fenster hingen ausschliesslich an
+# /employees/<id> mit @hr_required. Etappe 4 macht die Fenster zu dem, woran
+# der Planer seine Bloecke zuschneidet - dass die betroffene Person sie nicht
+# einsehen kann, hoert damit auf, kosmetisch zu sein.
+
+
+def _mitarbeiterkonto(hr_client, employee_id, username):
+    """Legt ein Mitarbeiterkonto an und meldet die Sitzung darauf an.
+
+    Dasselbe Vorgehen wie in test_api_auth.py: ein eingeladenes Konto hat noch
+    kein Passwort und koennte sich gar nicht anmelden. Geprueft werden soll die
+    Rollenregel, nicht der Anmeldeweg.
+    """
+    konto = hr_client.post('/register', json={
+        'username': username,
+        'role': 'employee',
+        'employee_id': employee_id,
+    }).json
+    with hr_client.session_transaction() as sitzung:
+        sitzung['user_id'] = konto['id']
+    return hr_client
+
+
+def _angelegt_mit_fenster(hr_client, name='Anna', weekday=1):
+    return hr_client.post('/employees', json={
+        'name': name,
+        'email': f'{name.lower()}@example.com',
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': weekday, 'start_time': '08:00', 'end_time': '14:00',
+             'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+
+def test_mitarbeiter_liest_seine_eigenen_fenster(hr_client):
+    angelegt = _angelegt_mit_fenster(hr_client)
+    client = _mitarbeiterkonto(hr_client, angelegt['id'], 'anna')
+
+    antwort = client.get(f'/employees/{angelegt["id"]}/availability')
+
+    assert antwort.status_code == 200, antwort.json
+    assert antwort.json['availability_mode'] == 'windows'
+    assert [(f['weekday'], f['start_time'], f['end_time']) for f in antwort.json['availability']] == [
+        (1, '08:00', '14:00'),
+    ]
+
+
+def test_mitarbeiter_liest_fremde_fenster_nicht(hr_client):
+    fremd = _angelegt_mit_fenster(hr_client, name='Berta')
+    eigen = _angelegt_mit_fenster(hr_client, name='Anna')
+    client = _mitarbeiterkonto(hr_client, eigen['id'], 'anna')
+
+    antwort = client.get(f'/employees/{fremd["id"]}/availability')
+
+    assert antwort.status_code == 403
+
+
+def test_mitarbeiter_darf_eigene_fenster_nicht_schreiben(hr_client):
+    """Lesen ja, schreiben nein.
+
+    require_self_or_hr deckt nur den Lesezugriff ab. Dass ein Mitarbeiter seine
+    eigene Verfuegbarkeit meldet, ist ein anderes Feature - ein Wunsch, den
+    jemand genehmigt - und nicht dieses hier.
+    """
+    angelegt = _angelegt_mit_fenster(hr_client)
+    client = _mitarbeiterkonto(hr_client, angelegt['id'], 'anna')
+
+    antwort = client.put(f'/employees/{angelegt["id"]}/availability', json={
+        'availability_mode': 'anytime',
+        'availability': [],
+    })
+
+    assert antwort.status_code == 403
+
+
+def test_hr_schreibt_fenster_ueber_die_eigene_route(hr_client):
+    angelegt = _angelegt_mit_fenster(hr_client)
+
+    antwort = hr_client.put(f'/employees/{angelegt["id"]}/availability', json={
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 3, 'start_time': '09:00', 'end_time': '17:00',
+             'valid_from': None, 'valid_until': None},
+        ],
+    })
+
+    assert antwort.status_code == 200, antwort.json
+    assert [(f['weekday'], f['start_time']) for f in antwort.json['availability']] == [(3, '09:00')]
+
+
+def test_die_fensterroute_laesst_die_uebrigen_einschraenkungen_stehen(hr_client):
+    """Der eigentliche Grund, warum der Fenster-Zweig herausgezogen werden muss.
+
+    replace_employee_constraints() loescht ALLE Einschraenkungslisten, bevor es
+    neu schreibt. Wuerde diese Route sie unveraendert aufrufen, verloere jeder
+    Aufruf still die freien Wochentage, die gesperrten Daten und die erlaubten
+    Schichtarten - eine Route, die mehr aendert als ihr Name sagt.
+    """
+    angelegt = hr_client.post('/employees', json={
+        'name': 'Anna',
+        'email': 'anna@example.com',
+        'availability_mode': 'windows',
+        'unavailable_weekdays': [6],
+        'unavailable_dates': [{'date': '2026-09-15', 'reason': 'Umzug'}],
+        'availability': [
+            {'weekday': 1, 'start_time': '08:00', 'end_time': '14:00',
+             'valid_from': None, 'valid_until': None},
+        ],
+    }).json
+
+    hr_client.put(f'/employees/{angelegt["id"]}/availability', json={
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 2, 'start_time': '10:00', 'end_time': '16:00',
+             'valid_from': None, 'valid_until': None},
+        ],
+    })
+
+    danach = hr_client.get(f'/employees/{angelegt["id"]}').json
+    assert danach['unavailable_weekdays'] == [6]
+    assert [e['date'] for e in danach['unavailable_dates']] == ['2026-09-15']
+    assert [(f['weekday'], f['start_time']) for f in danach['availability']] == [(2, '10:00')]
+
+
+def test_fensterroute_meldet_unbekannten_mitarbeiter(hr_client):
+    """Geprueft wird die Meldung, nicht nur der Status.
+
+    Eine gar nicht vorhandene Route liefert ebenfalls 404 - dann aber aus
+    Flasks HTTPException-Handler und mit 'Diese Adresse gibt es nicht'. Nur die
+    Pruefung auf 'Mitarbeiter nicht gefunden' unterscheidet die Route, die es
+    gibt und die den Mitarbeiter nicht findet, von der Route, die es nicht gibt.
+    """
+    for antwort in (
+        hr_client.get('/employees/9999/availability'),
+        hr_client.put('/employees/9999/availability', json={}),
+    ):
+        assert antwort.status_code == 404
+        assert antwort.json['message'] == 'Mitarbeiter nicht gefunden'
+
+
+# ---------- taegliche Hoechstarbeitszeit (Etappe 4) ----------
+
+
+def test_max_daily_hours_steht_ohne_angabe_auf_zehn(hr_client):
+    """Paragraph 3 ArbZG: zehn Stunden sind die Obergrenze des Zulaessigen."""
+    antwort = hr_client.post('/employees', json={'name': 'Anna'})
+
+    assert antwort.status_code == 201, antwort.json
+    assert antwort.json['max_daily_hours'] == 10
+
+
+def test_max_daily_hours_wird_gespeichert_und_zurueckgeliefert(hr_client):
+    angelegt = hr_client.post('/employees', json={'name': 'Anna', 'max_daily_hours': 8}).json
+
+    gelesen = hr_client.get(f'/employees/{angelegt["id"]}')
+
+    assert gelesen.json['max_daily_hours'] == 8
+
+
+def test_max_daily_hours_laesst_sich_aendern(hr_client):
+    angelegt = hr_client.post('/employees', json={'name': 'Anna', 'max_daily_hours': 8}).json
+
+    geaendert = hr_client.put(f'/employees/{angelegt["id"]}',
+                              json={'name': 'Anna', 'max_daily_hours': 6})
+
+    assert geaendert.status_code == 200, geaendert.json
+    assert geaendert.json['max_daily_hours'] == 6
+
+
+def test_max_daily_hours_weist_unsinn_mit_400_ab(hr_client):
+    antwort = hr_client.post('/employees', json={'name': 'Anna', 'max_daily_hours': -1})
+
+    assert antwort.status_code == 400
+    # Die Meldung nennt das Feld, nicht irgendein anderes - parse_optional_hours
+    # bekommt den i18n-Schluessel genau dafuer.
+    assert 'tägliche Höchstarbeitszeit' in antwort.json['message']

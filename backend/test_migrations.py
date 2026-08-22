@@ -812,8 +812,15 @@ def test_ableitung_laesst_bestehende_baender_unangetastet(fresh_db):
         connection.close()
 
     assert '0007_derive_coverage' in migrations.applied_versions()
-    zurueckgerollt = migrations.rollback_last()
-    assert zurueckgerollt == '0007_derive_coverage'
+    # Zurueckrollen, bis 0007 an der Reihe war - nicht ein einzelnes
+    # rollback_last(). Dieser Test laeuft gegen das echte
+    # Migrationsverzeichnis, in dem seit 0008_max_daily_hours weitere
+    # Revisionen ueber 0007 liegen; "die letzte ist 0007" waere eine Annahme,
+    # die jede kuenftige Migration erneut brechen wuerde.
+    zurueckgerollt = None
+    while zurueckgerollt != '0007_derive_coverage':
+        zurueckgerollt = migrations.rollback_last()
+        assert zurueckgerollt is not None, 'ohne 0007 zurueckgerollt'
     assert '0007_derive_coverage' not in migrations.applied_versions()
 
     connection = sqlite3.connect(db_file)
@@ -979,3 +986,73 @@ def test_bedarfsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(f
         connection.close()
 
     assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]
+
+
+# ---------- 0008_max_daily_hours ----------
+
+
+def test_0008_ergaenzt_die_taegliche_hoechstarbeitszeit(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        spalten = {zeile[1] for zeile in connection.execute('PRAGMA table_info(employees)')}
+    finally:
+        connection.close()
+
+    assert 'max_daily_hours' in spalten
+
+
+def test_0008_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    """Der Rundlauf, an dem 0004 im Abschluss-Review von Etappe 1 gescheitert waere.
+
+    ADD COLUMN kann kein IF NOT EXISTS, und down() laesst die Spalte bewusst
+    stehen (SQLite kann DROP COLUMN nicht verlaesslich). Ohne den
+    table_columns()-Waechter in up() wuerde der zweite Vorwaertslauf an
+    'duplicate column name' scheitern - und weil app.py die Migrationen beim
+    Modulimport ausfuehrt, waere das eine Anwendung, die nicht mehr startet.
+    """
+    migrations, _db_file = fresh_db
+    migrations.apply_pending()
+    assert '0008_max_daily_hours' in migrations.applied_versions()
+
+    zurueckgerollt = migrations.rollback_last()
+
+    assert zurueckgerollt == '0008_max_daily_hours'
+    assert '0008_max_daily_hours' not in migrations.applied_versions()
+
+    erneut = migrations.apply_pending()
+
+    assert '0008_max_daily_hours' in erneut
+
+
+def test_0008_setzt_bestandszeilen_auf_zehn_stunden(fresh_db):
+    """Bestandsmitarbeiter bekommen die Obergrenze aus Paragraph 3 ArbZG.
+
+    Der Mitarbeiter wird VOR der Migration angelegt - nur so prueft der Test
+    den DEFAULT der Spaltenergaenzung und nicht den einer spaeteren Einfuegung.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    migrations.rollback_last()
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("INSERT INTO employees (name, active) VALUES ('Anna', 1)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    connection.row_factory = sqlite3.Row
+    try:
+        zeile = connection.execute(
+            "SELECT max_daily_hours FROM employees WHERE name = 'Anna'").fetchone()
+    finally:
+        connection.close()
+
+    assert zeile['max_daily_hours'] == 10
