@@ -24,13 +24,22 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Etappe 5d ist **fertig umgesetzt, aber noch nicht gemergt** — Branch `etappe-5d-feiertage`.
+Es ist nichts halb fertig. Alles bis einschließlich 5e ist gemergt, deployt und dokumentiert;
+es gibt keine offenen Branches und keine offenen Pull Requests.
 
-**Damit ist das Arbeitszeitrecht vollständig**, soweit dieses Tool es tragen kann. Was bleibt,
-sind die vier nicht-rechtlichen Teile von Etappe 5: Veröffentlichen-Workflow, Audit-Log,
-Exporte, DSGVO. Beim DSGVO-Teil ist mit Entscheidungen zu rechnen, die beim Nutzer liegen
-(Aufbewahrungsfristen), und bei den Exporten mit der ersten neuen Laufzeitabhängigkeit des
-Projekts.
+**Das Arbeitszeitrecht ist vollständig**, soweit dieses Tool es tragen kann — Arbeitszeitfenster,
+individuelle Zeiten, Zuschnitt, geteilter Dienst, Tagesgrenze, Ruhezeit, Ruhepausen,
+Sechstageregel, freie Sonntage, Achtstundenschnitt und Feiertagskalender. Was es *nicht* prüft,
+steht in den jeweiligen Etappenabschnitten und im README.
+
+Offen bleiben die vier nicht-rechtlichen Teile von Etappe 5:
+
+| Teil | Anmerkung |
+|---|---|
+| **Veröffentlichen-Workflow** | `schedules.status` existiert seit dem ersten Tag und wird nie benutzt. Keine Entscheidungen offen |
+| **Audit-Log** | `login_attempts` ist laut Design-Spec der erste Baustein |
+| **Exporte** | Hier stellt sich die Frage nach neuen Laufzeitabhängigkeiten. iCal und CSV gehen ohne, PDF und Excel nicht — das gehört entschieden, bevor jemand anfängt |
+| **DSGVO** | Krankmeldungen sind Art.-9-Daten. **Aufbewahrungsfristen sind eine Entscheidung des Nutzers**, keine, die eine Sitzung treffen kann |
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -42,9 +51,9 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappen 0 bis 4 sowie 5a, 5b, 5c und 5e gemergt und deployt (PR #16–#20); die API antwortet mit 200 |
-| Branch-Situation | **Ein offener Branch: `etappe-5d-feiertage`** |
-| Aktueller Branch | `etappe-5d-feiertage` |
+| `main` | Alles bis 5e gemergt und deployt (PR #16–#21); die API antwortet mit 200 |
+| Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
+| Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 372 passed / 33 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0011`. `0011_settings` legt die erste Einstellungstabelle des Projekts an; erster Schlüssel ist `holiday_region` |
@@ -542,7 +551,7 @@ nachsichtig — sie kann eine Überschreitung übersehen, nie eine erfinden. Lö
 
 Kein Schemaeingriff.
 
-## Etappe 5d — Feiertagskalender
+## Etappe 5d — abgeschlossen, gemergt, deployt
 
 Spec: [`docs/superpowers/specs/2026-08-22-etappe-5d-feiertage-design.md`](superpowers/specs/2026-08-22-etappe-5d-feiertage-design.md)
 
