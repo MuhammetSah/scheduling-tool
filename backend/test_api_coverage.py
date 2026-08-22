@@ -897,3 +897,36 @@ def test_geschlossener_feiertag_bekommt_keine_bloecke(hr_client):
     daten = {z['date'] for z in antwort.json['assignments']}
     assert erster_montag not in daten
     assert daten == {tag.isoformat() for tag in _montage(2026, 9)[1:]}
+
+
+def test_die_ruhepause_erzeugt_keine_deckungsluecke(hr_client):
+    """Anwesenheit und Arbeitszeit sind seit Etappe 5a zwei verschiedene Groessen.
+
+    Wer 08:00-16:00 im Plan steht, deckt diese acht Stunden ab - auch wenn
+    darin eine halbe Stunde Ruhepause steckt. Wuerde die Deckungsrechnung mit
+    auf netto umgestellt, entstuende hier eine halbe Stunde Luecke irgendwo im
+    Band, und niemand koennte sie je schliessen: jede weitere Person haette
+    ihrerseits eine Pause.
+
+    Der Test muss vom ersten Tag der Etappe an gruen sein. Er belegt nichts
+    Neues, er sichert ab, dass die Netto-Umstellung nicht ueber ihr Ziel
+    hinausschiesst.
+    """
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': 1, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1},
+    ])
+    anna = hr_client.post('/employees', json={'name': 'Anna'}).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00', 'requirements': [0] * 7,
+    }).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht['id'],
+    }).json
+    hr_client.put(f'/assignments/{platz["id"]}',
+                  json={'employee_id': anna['id'], 'break_minutes': 30})
+
+    antwort = hr_client.get('/schedules/2026/9')
+
+    luecken = [g for g in antwort.json['coverage_gaps'] if g['date'] == '2026-09-01']
+    assert luecken == []
