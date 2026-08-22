@@ -26,10 +26,10 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 | | |
 |---|---|
-| `main` | `12b73ba` — Etappen 0 bis 3 gemergt (PR #9, #10, #11, #12, #13, #14) und **in Produktion deployt** |
+| `main` | `d03729f` — Etappen 0 bis 3 gemergt und deployt, dazu der Nachtschicht-Fix in `window_contains_shift()` (PR #15) |
 | Branch-Situation | Keine offenen Branches. Beide gestapelten PRs sind gemergt: #13 (Etappe 2) am 22.08. 12:15, #14 (Etappe 3) am 22.08. 12:16. Etappe 4 beginnt frisch ab `main` |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 196 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 5 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 198 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 5 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0007`, **alle in Produktion angewandt**. Aus den Render-Logs vom 22.08.: `0005_assignment_times` beim Deploy von #13, `0006_coverage, 0007_derive_coverage` beim Deploy von #14, beide Male gefolgt von `Your service is live`. Die Ableitung des Altbestands in Bedarfsbänder lief damit fehlerfrei gegen echte Daten |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
@@ -392,17 +392,6 @@ Aus dem Abschluss-Review von Etappe 3 behoben (eine Fix-Runde, ein Commit):
 
 Weiterhin offen aus den Reviews von Etappe 3:
 
-- **`scheduler.window_contains_shift()` hat denselben Mitternachtsfehler, den die
-  Bandprüfung in Etappe 3 behoben hat — eine Ebene tiefer.** Ein Arbeitszeitfenster
-  `00:00–00:00` ist als „ganztags verfügbar" gemeint, enthält aber keine Nachtschicht:
-  `window_contains_shift({'start_time': '00:00', 'end_time': '00:00'}, '22:00', '06:00')`
-  liefert `False`. Vom Abschluss-Review der Etappe 3 gefunden und von dessen Re-Review
-  eigenständig nachgerechnet und bestätigt. **Es ist ein Befund gegen Etappe 1**, nicht gegen
-  Etappe 3 — `scheduler.py` war für die Fix-Welle gesperrt und wurde nachweislich nicht
-  angefasst. `coverage_model.band_within()` zeigt die Lösung: die Schließzeit als Gegenmenge
-  prüfen statt das Band zu verschieben, weil die Ringnatur im Fenster steckt, nicht im Band.
-  **Vor Etappe 4 angehen** — dort wird auf Mitarbeiterfenster zugeschnitten, und die Etappe
-  hätte den Fehler sonst als Grundlage.
 - der Rundlauftest von `0006_coverage.py` prüft nach `down()`+`up()` nur `business_hours`,
   nicht ob die beiden Nebentabellen (`business_hours_exceptions`, `coverage_requirements`)
   wirklich weg waren — ein vergessenes `DROP TABLE` bliebe wegen `CREATE TABLE IF NOT EXISTS`
