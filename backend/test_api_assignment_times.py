@@ -961,3 +961,136 @@ def test_put_reicht_die_eigene_zeit_der_zuweisung_an_die_fensterpruefung_durch(h
     })
     assert passt_ins_fenster.status_code == 200, passt_ins_fenster.json
     assert passt_ins_fenster.json['warnings'] == []
+
+
+# ---------- Etappe 4: Warnungen zum geteilten Dienst ----------
+#
+# Der Handkorrektur-Pfad warnt, er verbietet nicht - HR bleibt der Chef. Was
+# sich mit dem geteilten Dienst aendert: ein zweiter Block am selben Tag ist
+# kein Befund mehr, eine Ueberschneidung schon, und die Tagesarbeitszeit
+# bekommt eine eigene Meldung.
+
+
+def _tag_mit_block(hr_client, anna_id, start_time, end_time, schicht_id):
+    """Legt einen Platz am 01.09.2026 an und besetzt ihn mit eigenen Zeiten."""
+    platz = hr_client.post('/schedules/2026/9/slots', json={
+        'date': '2026-09-01', 'shift_type_id': schicht_id,
+    }).json
+    antwort = hr_client.put(f'/assignments/{platz["id"]}', json={
+        'employee_id': anna_id, 'start_time': start_time, 'end_time': end_time,
+    })
+    assert antwort.status_code == 200, antwort.json
+    return platz
+
+
+def _aufbau(hr_client, **anna):
+    anna_daten = {'name': 'Anna', 'unavailable_weekdays': [1]}
+    anna_daten.update(anna)
+    person = hr_client.post('/employees', json=anna_daten).json
+    schicht = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '06:00', 'end_time': '22:00',
+    }).json
+    plan = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9}).json
+    return person, schicht, plan
+
+
+def _warnungen(hr_client, person, schicht, plan, start_time, end_time):
+    from app import constraint_warnings, get_db
+    from flask import g
+
+    with hr_client.application.app_context():
+        g.lang = 'de'
+        cursor = get_db().cursor()
+        return constraint_warnings(
+            cursor, person['id'], '2026-09-01', schicht['id'], plan['id'],
+            start_time=start_time, end_time=end_time)
+
+
+def test_geteilter_dienst_wird_nicht_mehr_beanstandet(hr_client):
+    """Bis Etappe 4 warnte jeder zweite Block am Tag mit 'bereits zugeteilt'.
+
+    Das ist jetzt der Normalfall und darf nicht mehr melden. Anna arbeitet
+    dienstags regulaer nicht - das ist der Grund fuer die eine verbleibende
+    Warnung und zugleich der Beleg, dass die Pruefungen ueberhaupt gelaufen
+    sind.
+    """
+    person, schicht, plan = _aufbau(hr_client)
+    _tag_mit_block(hr_client, person['id'], '08:00', '12:00', schicht['id'])
+
+    warnungen = _warnungen(hr_client, person, schicht, plan, '16:00', '20:00')
+
+    assert not any('bereits' in w for w in warnungen), warnungen
+    assert not any('überschneid' in w for w in warnungen), warnungen
+
+
+def test_ueberschneidender_block_warnt(hr_client):
+    """Die Gegenprobe: derselbe Aufbau, nur ueberschneiden sich die Zeiten."""
+    person, schicht, plan = _aufbau(hr_client)
+    _tag_mit_block(hr_client, person['id'], '08:00', '12:00', schicht['id'])
+
+    warnungen = _warnungen(hr_client, person, schicht, plan, '11:00', '15:00')
+
+    assert any('überschneidet' in w and '08:00' in w for w in warnungen), warnungen
+
+
+def test_aneinandergrenzende_bloecke_warnen_nicht(hr_client):
+    """Halboffene Grenze: 12:00 als Ende und als Beginn ist keine Ueberschneidung."""
+    person, schicht, plan = _aufbau(hr_client)
+    _tag_mit_block(hr_client, person['id'], '08:00', '12:00', schicht['id'])
+
+    warnungen = _warnungen(hr_client, person, schicht, plan, '12:00', '16:00')
+
+    assert not any('überschneid' in w for w in warnungen), warnungen
+
+
+def test_ueberschrittene_tagesarbeitszeit_warnt(hr_client):
+    """Paragraph 3 ArbZG: sechs plus vier Stunden sprengen eine Grenze von acht."""
+    person, schicht, plan = _aufbau(hr_client, max_daily_hours=8)
+    _tag_mit_block(hr_client, person['id'], '06:00', '12:00', schicht['id'])
+
+    warnungen = _warnungen(hr_client, person, schicht, plan, '16:00', '20:00')
+
+    assert any('Höchstarbeitszeit' in w for w in warnungen), warnungen
+
+
+def test_die_spanne_allein_loest_die_tageswarnung_nicht_aus(hr_client):
+    """Die Gegenprobe, und der eigentliche Punkt.
+
+    Dieselben zwei Bloecke, Grenze zehn Stunden: von 06:00 bis 20:00 sind es
+    vierzehn Stunden Spanne, aber nur zehn Stunden Arbeitszeit. Paragraph 2
+    Abs. 1 ArbZG rechnet die Unterbrechung nicht mit. Wer die Spanne rechnet,
+    warnt hier faelschlich.
+    """
+    person, schicht, plan = _aufbau(hr_client, max_daily_hours=10)
+    _tag_mit_block(hr_client, person['id'], '06:00', '12:00', schicht['id'])
+
+    warnungen = _warnungen(hr_client, person, schicht, plan, '16:00', '20:00')
+
+    assert not any('Höchstarbeitszeit' in w for w in warnungen), warnungen
+
+
+def test_ruhezeit_misst_ab_dem_letzten_block_des_vortags(hr_client):
+    """Paragraph 5 Abs. 1 ArbZG: ab Beendigung der taeglichen Arbeitszeit.
+
+    Am 31.08. arbeitet Anna 08:00-12:00 und 16:00-20:00. Ein Beginn am 01.09.
+    um 06:00 laesst nur zehn Stunden Ruhe - zu wenig. Wer nur die erste
+    Zuweisung des Vortags ansieht (fetchone(), das Verhalten vor Etappe 4),
+    misst ab 12:00, kommt auf achtzehn Stunden und warnt nicht.
+    """
+    person, schicht, plan = _aufbau(hr_client)
+    # Der Vortag liegt im Vormonat - die Ruhezeitpruefung fragt shift_assignments
+    # bewusst ohne schedule_id ab, genau damit sie ueber die Monatsgrenze
+    # hinwegsieht. Dafuer muss der Augustplan aber existieren.
+    august = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 8})
+    assert august.status_code == 201, august.json
+    for start, ende in (('08:00', '12:00'), ('16:00', '20:00')):
+        platz = hr_client.post('/schedules/2026/8/slots', json={
+            'date': '2026-08-31', 'shift_type_id': schicht['id'],
+        }).json
+        hr_client.put(f'/assignments/{platz["id"]}', json={
+            'employee_id': person['id'], 'start_time': start, 'end_time': ende,
+        })
+
+    warnungen = _warnungen(hr_client, person, schicht, plan, '06:00', '10:00')
+
+    assert any('Ruhezeit' in w for w in warnungen), warnungen

@@ -375,6 +375,14 @@ TRANSLATIONS = {
         'de': '{name} ist an diesem Tag bereits einer anderen Schicht zugeteilt',
         'en': '{name} is already assigned to another shift that day',
     },
+    'warn_overlapping_blocks': {
+        'de': '{name} hat am {date} bereits einen Block von {start}–{end}, der sich damit überschneidet',
+        'en': '{name} already has a block from {start}–{end} on {date} that overlaps this one',
+    },
+    'warn_daily_hours_exceeded': {
+        'de': '{name} käme am {date} auf {hours:.1f} Std.; die tägliche Höchstarbeitszeit liegt bei {cap:g} Std.',
+        'en': '{name} would work {hours:.1f}h on {date}; the maximum daily working time is {cap:g}h',
+    },
     'warn_monthly_cap_reached': {
         'de': '{name} hat das monatliche Limit von {limit} Schichten bereits erreicht',
         'en': '{name} has already reached the monthly limit of {limit} shifts',

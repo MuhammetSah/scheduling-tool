@@ -22,8 +22,8 @@ from coverage_model import band_within, coverage_gaps, first_overlapping_pair, t
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
-    generate_schedule, rest_gap_hours, shift_datetimes, shift_duration_minutes,
-    window_contains_shift, window_is_valid_on,
+    _ranges_overlap, _time_range_minutes, generate_schedule, rest_gap_hours,
+    shift_datetimes, shift_duration_minutes, window_contains_shift, window_is_valid_on,
 )
 
 # Muss vor jedem Modul-Code stehen, der protokollieren koennte - insbesondere
@@ -1933,14 +1933,58 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                     warnings.append(t(g.lang, 'warn_outside_availability_no_window', name=employee['name'],
                                      weekday=weekday_adverb(g.lang, weekday)))
 
-    query = 'SELECT 1 FROM shift_assignments WHERE date = ? AND employee_id = ?'
+    # Everything else this person already holds that day. Until Etappe 4 the
+    # mere existence of one was the warning ("already assigned that day"),
+    # because nobody could work twice in a day. A split shift is now a normal
+    # arrangement, so what remains worth warning about is an *overlap* - and,
+    # separately, the daily working time the blocks add up to.
+    query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time '
+             'FROM shift_assignments WHERE date = ? AND employee_id = ?')
     params = [assignment_date, employee_id]
     if exclude_assignment_id is not None:
         query += ' AND id != ?'
         params.append(exclude_assignment_id)
     cursor.execute(query, params)
-    if cursor.fetchone():
+    same_day = [dict(row) for row in cursor.fetchall()]
+
+    proposed = {
+        'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
+        'start_time': start_time, 'end_time': end_time,
+    }
+    proposed_start, proposed_end = assignment_hours(cursor, proposed)
+
+    same_day_hours = []
+    unknown_hours = False
+    for row in same_day:
+        row_start, row_end = assignment_hours(cursor, row)
+        if row_start and row_end:
+            same_day_hours.append((row_start, row_end))
+        else:
+            unknown_hours = True
+
+    if same_day and (unknown_hours or not (proposed_start and proposed_end)):
+        # No minute axis on at least one side - overlap cannot be decided, so
+        # fall back to the pre-Etappe-4 wording rather than stay silent.
         warnings.append(t(g.lang, 'warn_already_assigned_that_day', name=employee['name']))
+    elif proposed_start and proposed_end:
+        proposed_range = _time_range_minutes(proposed_start, proposed_end)
+        for row_start, row_end in same_day_hours:
+            if _ranges_overlap(proposed_range, _time_range_minutes(row_start, row_end)):
+                warnings.append(t(g.lang, 'warn_overlapping_blocks', name=employee['name'],
+                                  date=assignment_date, start=row_start, end=row_end))
+                break
+
+    # § 3 ArbZG caps the working time of one day, and § 2 Abs. 1 defines that
+    # as the sum of the blocks rather than the span from the first start to the
+    # last end - the interruption of a split shift is not working time.
+    if employee['max_daily_hours'] is not None and proposed_start and proposed_end:
+        total_minutes = shift_duration_minutes(proposed_start, proposed_end)
+        for row_start, row_end in same_day_hours:
+            total_minutes += shift_duration_minutes(row_start, row_end)
+        if total_minutes > employee['max_daily_hours'] * 60:
+            warnings.append(t(g.lang, 'warn_daily_hours_exceeded', name=employee['name'],
+                              date=assignment_date, hours=total_minutes / 60,
+                              cap=employee['max_daily_hours']))
 
     if employee['max_shifts_per_month'] is not None:
         cursor.execute(
@@ -1976,16 +2020,19 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             warnings.append(t(g.lang, 'warn_weekly_hours_exceeded', name=employee['name'],
                              hours=total_minutes / 60, target=employee['weekly_hours']))
 
-    cur_start, cur_end = assignment_hours(cursor, {
-        'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
-        'start_time': start_time, 'end_time': end_time,
-    })
-    if cur_start and cur_end:
-        this_shift = shift_datetimes(assignment_date, cur_start, cur_end)
+    if proposed_start and proposed_end:
+        # § 5 Abs. 1 ArbZG measures the rest period from the end of the *daily
+        # working time*, so both sides of the comparison are whole days, not
+        # single blocks: this date's envelope already includes whatever else
+        # the person holds that day, and the neighbouring date contributes its
+        # own envelope rather than one arbitrarily picked row. Before Etappe 4
+        # a fetchone() was enough, because a day never held more than one.
+        this_day = day_envelope_from_hours(
+            assignment_date, same_day_hours + [(proposed_start, proposed_end)])
         min_rest = employee['min_rest_hours']
         d = date.fromisoformat(assignment_date)
 
-        # (neighbouring date, is that neighbour the earlier of the two shifts?)
+        # (neighbouring date, is that neighbour the earlier of the two days?)
         neighbors = [((d - timedelta(days=1)).isoformat(), True), ((d + timedelta(days=1)).isoformat(), False)]
         for neighbor_date, neighbor_is_earlier in neighbors:
             query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time '
@@ -1995,21 +2042,36 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                 query += ' AND id != ?'
                 params.append(exclude_assignment_id)
             cursor.execute(query, params)
-            neighbor = cursor.fetchone()
-            if not neighbor:
+            neighbor_hours = []
+            for neighbor in cursor.fetchall():
+                n_start, n_end = assignment_hours(cursor, neighbor)
+                if n_start and n_end:
+                    neighbor_hours.append((n_start, n_end))
+            if not neighbor_hours:
                 continue
-            n_start, n_end = assignment_hours(cursor, neighbor)
-            if not n_start or not n_end:
-                continue
-            neighbor_shift = shift_datetimes(neighbor_date, n_start, n_end)
+            neighbor_day = day_envelope_from_hours(neighbor_date, neighbor_hours)
 
-            gap = (rest_gap_hours(neighbor_shift, this_shift) if neighbor_is_earlier
-                   else rest_gap_hours(this_shift, neighbor_shift))
+            gap = (rest_gap_hours(neighbor_day, this_day) if neighbor_is_earlier
+                   else rest_gap_hours(this_day, neighbor_day))
             if gap < min_rest:
                 warnings.append(t(g.lang, 'warn_rest_period_too_short', name=employee['name'],
                                  gap=gap, required=min_rest))
 
     return warnings
+
+
+def day_envelope_from_hours(iso_date, hours):
+    """The working-time envelope of one day: (earliest start, latest end).
+
+    The counterpart of day_envelope() inside scheduler._search(), for the
+    manual-correction path, which reads saved rows instead of a search state.
+    Two implementations of the same idea is one more than the project likes,
+    but the scheduler's closes over its own search state and this one takes a
+    list - the shared part is shift_datetimes(), and that is imported, not
+    copied.
+    """
+    pairs = [shift_datetimes(iso_date, start, end) for start, end in hours]
+    return min(start for start, _ in pairs), max(end for _, end in pairs)
 
 
 def refresh_unfilled_count(cursor, schedule_id):
