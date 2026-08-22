@@ -383,6 +383,10 @@ TRANSLATIONS = {
         'de': '{name} hat am {date} bereits einen Block von {start}–{end}, der sich damit überschneidet',
         'en': '{name} already has a block from {start}–{end} on {date} that overlaps this one',
     },
+    'warn_break_below_minimum': {
+        'de': '{name} hätte bei {hours:.1f} Std. nur {minutes} Min. Pause; nach § 4 ArbZG sind mindestens {required} Min. vorgeschrieben',
+        'en': '{name} would get only {minutes} min of break for {hours:.1f}h; § 4 ArbZG requires at least {required} min',
+    },
     'warn_daily_hours_exceeded': {
         'de': '{name} käme am {date} auf {hours:.1f} Std.; die tägliche Höchstarbeitszeit liegt bei {cap:g} Std.',
         'en': '{name} would work {hours:.1f}h on {date}; the maximum daily working time is {cap:g}h',

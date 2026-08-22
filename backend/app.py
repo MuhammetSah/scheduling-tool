@@ -1900,7 +1900,8 @@ def weekday_adverb(lang, weekday_index):
 
 
 def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, schedule_id,
-                        exclude_assignment_id=None, start_time=None, end_time=None):
+                        exclude_assignment_id=None, start_time=None, end_time=None,
+                        break_minutes=None):
     """Non-blocking warnings for assigning `employee_id` to one shift.
 
     Unlike the scheduler's hard constraints (which only ever see one month at a
@@ -1973,7 +1974,7 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     # because nobody could work twice in a day. A split shift is now a normal
     # arrangement, so what remains worth warning about is an *overlap* - and,
     # separately, the daily working time the blocks add up to.
-    query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time '
+    query = ('SELECT id, schedule_id, date, shift_type_id, start_time, end_time, break_minutes '
              'FROM shift_assignments WHERE date = ? AND employee_id = ?')
     params = [assignment_date, employee_id]
     if exclude_assignment_id is not None:
@@ -1988,14 +1989,18 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     }
     proposed_start, proposed_end = assignment_hours(cursor, proposed)
 
-    same_day_hours = []
+    # (start, end, break) per block already held that day. The break rides
+    # along because § 2 Abs. 1 ArbZG counts working time without it, so the
+    # daily total below cannot be summed from the hours alone.
+    same_day_blocks = []
     unknown_hours = False
     for row in same_day:
         row_start, row_end = assignment_hours(cursor, row)
         if row_start and row_end:
-            same_day_hours.append((row_start, row_end))
+            same_day_blocks.append((row_start, row_end, row['break_minutes']))
         else:
             unknown_hours = True
+    same_day_hours = [(start, end) for start, end, _ in same_day_blocks]
 
     if same_day and (unknown_hours or not (proposed_start and proposed_end)):
         # No minute axis on at least one side - overlap cannot be decided, so
@@ -2010,16 +2015,31 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                 break
 
     # § 3 ArbZG caps the working time of one day, and § 2 Abs. 1 defines that
-    # as the sum of the blocks rather than the span from the first start to the
-    # last end - the interruption of a split shift is not working time.
-    if employee['max_daily_hours'] is not None and proposed_start and proposed_end:
-        total_minutes = shift_duration_minutes(proposed_start, proposed_end)
-        for row_start, row_end in same_day_hours:
-            total_minutes += shift_duration_minutes(row_start, row_end)
+    # as the sum of the blocks *without their breaks*, rather than the span
+    # from the first start to the last end - neither the interruption of a
+    # split shift nor a rest period inside a block is working time.
+    proposed_span = (shift_duration_minutes(proposed_start, proposed_end)
+                     if proposed_start and proposed_end else None)
+    if employee['max_daily_hours'] is not None and proposed_span is not None:
+        total_minutes = net_working_minutes(proposed_span, break_minutes)
+        for row_start, row_end, row_break in same_day_blocks:
+            total_minutes += net_working_minutes(
+                shift_duration_minutes(row_start, row_end), row_break)
         if total_minutes > employee['max_daily_hours'] * 60:
             warnings.append(t(g.lang, 'warn_daily_hours_exceeded', name=employee['name'],
                               date=assignment_date, hours=total_minutes / 60,
                               cap=employee['max_daily_hours']))
+
+    # § 4 ArbZG. This is the only place the rule can be broken at all: left
+    # alone, break_minutes is NULL and reads as the legal minimum, so every
+    # plan is compliant by construction. Only someone entering a shorter break
+    # by hand gets here - and it stays a warning, as everywhere else.
+    if proposed_span is not None and break_minutes is not None:
+        required = legal_break_minutes(proposed_span)
+        if break_minutes < required:
+            warnings.append(t(g.lang, 'warn_break_below_minimum', name=employee['name'],
+                              hours=proposed_span / 60, minutes=break_minutes,
+                              required=required))
 
     if employee['max_shifts_per_month'] is not None:
         cursor.execute(
@@ -2032,7 +2052,8 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if employee['weekly_hours'] is not None:
         week_start, week_end = week_bounds(assignment_date)
         cursor.execute('''
-            SELECT sa.id, sa.date, sa.schedule_id, sa.shift_type_id, sa.start_time, sa.end_time
+            SELECT sa.id, sa.date, sa.schedule_id, sa.shift_type_id, sa.start_time,
+                   sa.end_time, sa.break_minutes
             FROM shift_assignments sa
             WHERE sa.employee_id = ? AND sa.date BETWEEN ? AND ?
         ''', (employee_id, week_start, week_end))
@@ -2042,14 +2063,16 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                 continue
             start, end = assignment_hours(cursor, row)
             if start and end:
-                total_minutes += shift_duration_minutes(start, end)
+                total_minutes += net_working_minutes(
+                    shift_duration_minutes(start, end), row['break_minutes'])
 
         new_start, new_end = assignment_hours(cursor, {
             'schedule_id': schedule_id, 'date': assignment_date, 'shift_type_id': shift_type_id,
             'start_time': start_time, 'end_time': end_time,
         })
         if new_start and new_end:
-            total_minutes += shift_duration_minutes(new_start, new_end)
+            total_minutes += net_working_minutes(
+                shift_duration_minutes(new_start, new_end), break_minutes)
 
         if total_minutes > employee['weekly_hours'] * 60:
             warnings.append(t(g.lang, 'warn_weekly_hours_exceeded', name=employee['name'],
@@ -2155,6 +2178,7 @@ def update_assignment(assignment_id):
     warnings = constraint_warnings(
         cursor, employee_id, assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
         exclude_assignment_id=assignment_id, start_time=start_time, end_time=end_time,
+        break_minutes=break_minutes,
     )
 
     # start_time/end_time and break_minutes are written on every PUT, same
