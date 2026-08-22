@@ -17,6 +17,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import mailer
 import security
 import timeutil
+from coverage_model import band_within, coverage_gaps, first_overlapping_pair, trim_band_to_hours
 from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
@@ -1360,6 +1361,7 @@ def fetch_schedule(year, month):
         'assignments': assignments,
         'absences': absences,
         'distribution': build_distribution(assignments, active_employees),
+        'coverage_gaps': coverage_gaps_for_month(cursor, year, month, assignments),
     }
 
 
@@ -1508,6 +1510,7 @@ def get_schedule(year, month):
     ]
     schedule['absences'] = [a for a in schedule['absences'] if a['employee_id'] == linked_employee_id]
     schedule.pop('distribution', None)
+    schedule.pop('coverage_gaps', None)
     schedule['scope'] = 'own'
     schedule['unfilled_count'] = 0
     schedule['linked_employee_id'] = linked_employee_id
@@ -2045,6 +2048,586 @@ def replacement_suggestions(assignment_id):
 
     candidates.sort(key=lambda c: (c['current_load'], c['name']))
     return jsonify(candidates)
+
+
+# ---------- opening hours (business hours) and exceptions ----------
+#
+# business_hours always has exactly seven rows (one per weekday, see
+# 0006_coverage.py) - PUT below only ever overwrites those seven, it never
+# deletes or inserts, so that invariant can't be broken from here.
+# business_hours_exceptions holds one-off overrides for a single date (a
+# holiday, a special opening) and is otherwise empty; UNIQUE(date) is
+# enforced explicitly below with a 400 rather than silently upserting,
+# unlike employee_absences' ON CONFLICT DO UPDATE - a second exception for
+# the same date is a mistake to flag, not a correction to accept quietly.
+#
+# business_hours_for() below owns the precedence rule (an exception fully
+# overrides the weekday) and is the only place that decides it. It takes the
+# two dicts a caller has already loaded rather than a cursor, so that the one
+# caller which needs it per date - the month loop in coverage_gaps_for_month(),
+# through _closed_on() and for the trimming window - can use it without turning
+# into the per-date query the Task 4 and Task 5 reviews rejected. Earlier
+# versions of this comment claimed the helper was already the shared read path
+# while nothing outside the tests actually called it; that is what this shape
+# fixes.
+#
+# The two write paths cross-validate each other: /coverage-requirements refuses
+# a band outside its weekday's opening hours, and /business-hours refuses hours
+# that would invalidate a band already saved (see
+# reject_hours_conflicting_with_bands() below). Without the second direction,
+# narrowing a weekday's hours left behind bands that GET handed out and PUT
+# refused to take back, which locked the coverage editor for every weekday at
+# once, because that route validates the whole list in one pass.
+
+def serialize_business_hours(row):
+    return {
+        'weekday': row['weekday'],
+        'open_time': row['open_time'],
+        'close_time': row['close_time'],
+        'closed': bool(row['closed']),
+    }
+
+
+def reject_hours_conflicting_with_bands(cursor, by_weekday):
+    """Refuses opening hours that would invalidate a coverage band already saved.
+
+    The mirror image of the check replace_coverage_requirements() runs against
+    the stored opening hours, and deliberately through the same two rules in
+    the same order: the closed flag first, then band_within(). Re-deciding
+    containment here with a second, similar comparison is exactly what this
+    project avoids elsewhere, so there is none.
+
+    The message names the weekday and the concrete band. Without both, HR reads
+    "these hours don't work" and goes looking in the opening-hours editor, while
+    the row that actually blocks the save sits in the coverage editor under some
+    other weekday.
+
+    One query for every weekday's bands, not one per weekday -
+    coverage_requirements_by_weekday() is the same loader the gap calculation
+    uses.
+    """
+    bands_by_weekday = coverage_requirements_by_weekday(cursor)
+    if not bands_by_weekday:
+        return
+
+    # Sorted by weekday so that a request touching several conflicting days
+    # always reports the earliest one, rather than whichever order the caller
+    # happened to send its seven entries in.
+    for weekday, (open_time, close_time, closed) in sorted(by_weekday.items()):
+        for band in bands_by_weekday.get(weekday, []):
+            if closed:
+                raise ValueError(t(
+                    g.lang, 'business_hours_closed_with_band',
+                    weekday=WEEKDAYS[g.lang][weekday],
+                    start=band['start_time'], end=band['end_time'],
+                ))
+            if not band_within(band, open_time, close_time):
+                raise ValueError(t(
+                    g.lang, 'business_hours_conflicts_band',
+                    weekday=WEEKDAYS[g.lang][weekday],
+                    start=band['start_time'], end=band['end_time'],
+                    open=open_time, close=close_time,
+                ))
+
+
+def replace_business_hours(connection, entries):
+    """Overwrites all seven weekday rows from a list of exactly seven entries.
+
+    Validates the whole list first and only writes once every entry has
+    passed - a bad entry must not overwrite some of the seven rows and leave
+    the rest as they were. Requiring exactly seven entries, each with a
+    distinct weekday in 0..6, is what guarantees every weekday gets updated
+    and none twice: seven distinct values in that range can only be
+    {0, 1, ..., 6}.
+
+    The last validation step is the cross-check against already saved coverage
+    bands (see reject_hours_conflicting_with_bands()), and it runs before the
+    first UPDATE for the same reason as everything above it: a rejected save
+    must leave all seven rows exactly as they were.
+    """
+    if not isinstance(entries, list) or len(entries) != 7:
+        raise ValueError(t(g.lang, 'business_hours_length'))
+
+    by_weekday = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(t(g.lang, 'business_hours_entry_invalid'))
+        try:
+            weekday = int(entry.get('weekday'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if not 0 <= weekday <= 6:
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if weekday in by_weekday:
+            raise ValueError(t(g.lang, 'business_hours_weekday_duplicate'))
+
+        open_time = entry.get('open_time')
+        close_time = entry.get('close_time')
+        if not valid_time(open_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=open_time))
+        if not valid_time(close_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=close_time))
+
+        by_weekday[weekday] = (open_time, close_time, 1 if entry.get('closed') else 0)
+
+    cursor = connection.cursor()
+    reject_hours_conflicting_with_bands(cursor, by_weekday)
+
+    for weekday, (open_time, close_time, closed) in by_weekday.items():
+        cursor.execute(
+            'UPDATE business_hours SET open_time = ?, close_time = ?, closed = ? WHERE weekday = ?',
+            (open_time, close_time, closed, weekday),
+        )
+
+
+@app.route('/business-hours', methods=['GET'])
+@hr_required
+def list_business_hours():
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM business_hours ORDER BY weekday')
+    return jsonify([serialize_business_hours(row) for row in cursor.fetchall()])
+
+
+@app.route('/business-hours', methods=['PUT'])
+@hr_required
+def update_business_hours():
+    entries = request.get_json(silent=True)
+    connection = get_db()
+    try:
+        replace_business_hours(connection, entries)
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+    connection.commit()
+
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM business_hours ORDER BY weekday')
+    return jsonify([serialize_business_hours(row) for row in cursor.fetchall()])
+
+
+def serialize_business_hours_exception(row):
+    return {
+        'date': row['date'],
+        'open_time': row['open_time'],
+        'close_time': row['close_time'],
+        'closed': bool(row['closed']),
+        'label': row['label'],
+    }
+
+
+def parse_business_hours_exception(data):
+    """Validates one exception's fields, returning (date, open_time, close_time, closed, label).
+
+    open_time/close_time are nullable in the schema - a closed exception
+    (a holiday) needs no times. Only when the exception is NOT closed are
+    both required, since an open exception with unknown hours would leave
+    business_hours_for() with nothing usable to hand back to its callers -
+    and those hours are what coverage_gaps_for_month() trims that date's
+    coverage bands to, so a special opening really does change the demand
+    reported for its date rather than only its open/closed state.
+    """
+    iso_date = data.get('date')
+    try:
+        date.fromisoformat(iso_date)
+    except (TypeError, ValueError):
+        raise ValueError(t(g.lang, 'invalid_date_value', date=iso_date))
+
+    closed = 1 if data.get('closed') else 0
+    open_time = data.get('open_time')
+    close_time = data.get('close_time')
+
+    if closed:
+        for value in (open_time, close_time):
+            if value is not None and not valid_time(value):
+                raise ValueError(t(g.lang, 'availability_time_invalid', value=value))
+    else:
+        if not valid_time(open_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=open_time))
+        if not valid_time(close_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=close_time))
+
+    return iso_date, open_time, close_time, closed, data.get('label')
+
+
+@app.route('/business-hours/exceptions', methods=['GET'])
+@hr_required
+def list_business_hours_exceptions():
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM business_hours_exceptions ORDER BY date')
+    return jsonify([serialize_business_hours_exception(row) for row in cursor.fetchall()])
+
+
+@app.route('/business-hours/exceptions', methods=['POST'])
+@hr_required
+def create_business_hours_exception():
+    data = request.get_json(silent=True) or {}
+    connection = get_db()
+    cursor = connection.cursor()
+
+    try:
+        iso_date, open_time, close_time, closed, label = parse_business_hours_exception(data)
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+
+    cursor.execute('SELECT id FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    if cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'business_hours_exception_date_taken')}), 400
+
+    cursor.execute(
+        'INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (iso_date, open_time, close_time, closed, label),
+    )
+    connection.commit()
+
+    cursor.execute('SELECT * FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    return jsonify(serialize_business_hours_exception(cursor.fetchone())), 201
+
+
+@app.route('/business-hours/exceptions/<iso_date>', methods=['DELETE'])
+@hr_required
+def delete_business_hours_exception(iso_date):
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'business_hours_exception_not_found')}), 404
+
+    cursor.execute('DELETE FROM business_hours_exceptions WHERE date = ?', (iso_date,))
+    connection.commit()
+    return jsonify({'message': t(g.lang, 'business_hours_exception_deleted')}), 200
+
+
+def business_hours_for(iso_date, weekday, hours_by_weekday, exceptions_by_date):
+    """(open_time, close_time, closed) for one date - an exception fully overrides the weekday rule.
+
+    A pure helper over data the caller has already loaded:
+    `hours_by_weekday` from load_business_hours_by_weekday(),
+    `exceptions_by_date` from business_hours_exceptions_by_date(). It runs no
+    query of its own, which is what lets coverage_gaps_for_month() call it once
+    per date of the month without adding a single query - the N+1 constraint
+    from the Task 4 and Task 5 reviews is met by where the data is loaded, not
+    by avoiding this function.
+
+    `weekday` is passed in rather than derived from `iso_date` because every
+    caller is already looping over dates it built from a calendar and knows the
+    weekday; re-parsing the string here would be work done twice.
+
+    An exception that is open but carries no times of its own describes no
+    usable window. The API refuses to store one (see
+    parse_business_hours_exception()), but a row written past the API - by a
+    migration or by hand - must not make the month loop fall over, so the
+    weekday rule stands in for it. A closed exception needs no times and keeps
+    its precedence either way.
+    """
+    exception = exceptions_by_date.get(iso_date)
+    if exception is not None:
+        closed = bool(exception['closed'])
+        if closed or (exception['open_time'] and exception['close_time']):
+            return exception['open_time'], exception['close_time'], closed
+
+    hours = hours_by_weekday.get(weekday)
+    if hours is None:
+        return None, None, False
+    return hours[0], hours[1], bool(hours[2])
+
+
+# ---------- coverage requirement bands ----------
+#
+# coverage_requirements holds bands of required headcount across a weekday's
+# opening hours ("Monday 08:00-12:00 needs 3 people"). PUT replaces the whole
+# list across all seven weekdays at once - same full-replace semantics as
+# /business-hours and the employee constraint lists above - so the overlap
+# check below validates the *final* state in one pass instead of reasoning
+# about a sequence of incremental edits.
+#
+# Two things this validation deliberately does NOT do:
+#
+# - It never consults business_hours_for(). That helper answers "which window
+#   applies on this DATE", and a date is precisely what a band does not have:
+#   bands hang off the weekday, so exceptions (business_hours_exceptions) play
+#   no role here at all. load_business_hours_by_weekday() below reads all seven
+#   weekdays in a single query and the loop below matches against that dict.
+# - It never checks overlap across a weekday boundary. A Monday 22:00-06:00
+#   band and a Tuesday 00:00-08:00 band describe different points in the week
+#   under the start-anchored reading this project uses everywhere else (see
+#   coverage_model._band_range): the night shift ends early the next day, the
+#   Tuesday band sits on Tuesday morning. A real conflict would only appear
+#   once the week is treated as a 10080-minute ring across its own weekly
+#   repetition - documented known limitation, not built here.
+
+def serialize_coverage_requirement(row):
+    return {
+        'weekday': row['weekday'],
+        'start_time': row['start_time'],
+        'end_time': row['end_time'],
+        'required_count': row['required_count'],
+    }
+
+
+def parse_coverage_requirements(entries):
+    """Validates every band's shape, weekday range, time format and count.
+
+    Overlap and opening-hours checks are not done here - they need the whole
+    list grouped by weekday, which replace_coverage_requirements() does after
+    this parse pass succeeds.
+    """
+    if not isinstance(entries, list):
+        raise ValueError(t(g.lang, 'coverage_requirement_entry_invalid'))
+
+    parsed = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(t(g.lang, 'coverage_requirement_entry_invalid'))
+
+        try:
+            weekday = int(entry.get('weekday'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        if not 0 <= weekday <= 6:
+            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+
+        start_time = entry.get('start_time')
+        end_time = entry.get('end_time')
+        if not valid_time(start_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=start_time))
+        if not valid_time(end_time):
+            raise ValueError(t(g.lang, 'availability_time_invalid', value=end_time))
+
+        try:
+            required_count = int(entry.get('required_count'))
+        except (TypeError, ValueError):
+            raise ValueError(t(g.lang, 'field_must_be_number', field=t(g.lang, 'required_count_label')))
+        if required_count < 0:
+            raise ValueError(t(g.lang, 'field_must_not_be_negative', field=t(g.lang, 'required_count_label')))
+
+        parsed.append({
+            'weekday': weekday, 'start_time': start_time, 'end_time': end_time,
+            'required_count': required_count,
+        })
+
+    return parsed
+
+
+def load_business_hours_by_weekday(cursor):
+    """All seven business_hours rows as {weekday: (open_time, close_time, closed)}.
+
+    One query for all seven weekdays, not business_hours_for() called per
+    band - see the comment above this section for why.
+    """
+    cursor.execute('SELECT weekday, open_time, close_time, closed FROM business_hours')
+    return {
+        row['weekday']: (row['open_time'], row['close_time'], bool(row['closed']))
+        for row in cursor.fetchall()
+    }
+
+
+def replace_coverage_requirements(connection, entries):
+    """Validates and fully replaces all coverage_requirements rows.
+
+    Same "validate everything, write once" shape as replace_business_hours():
+    a bad band anywhere in the list must not partially overwrite the table.
+    The overlap check is grouped by weekday - bands_overlap()/
+    first_overlapping_pair() only ever see one weekday's bands at a time, so a
+    Monday band can never collide with a Tuesday band here (see the section
+    comment on the known cross-weekday limitation).
+    """
+    parsed = parse_coverage_requirements(entries)
+
+    cursor = connection.cursor()
+    hours_by_weekday = load_business_hours_by_weekday(cursor)
+
+    by_weekday = {}
+    for band in parsed:
+        by_weekday.setdefault(band['weekday'], []).append(band)
+
+    for weekday, bands in by_weekday.items():
+        pair = first_overlapping_pair(bands)
+        if pair is not None:
+            first, second = pair
+            raise ValueError(t(
+                g.lang, 'coverage_requirement_overlap',
+                weekday=WEEKDAYS[g.lang][weekday],
+                start1=first['start_time'], end1=first['end_time'],
+                start2=second['start_time'], end2=second['end_time'],
+            ))
+
+        open_time, close_time, closed = hours_by_weekday[weekday]
+        for band in bands:
+            if closed:
+                raise ValueError(t(
+                    g.lang, 'coverage_requirement_closed_day',
+                    weekday=WEEKDAYS[g.lang][weekday],
+                    start=band['start_time'], end=band['end_time'],
+                ))
+            if not band_within(band, open_time, close_time):
+                raise ValueError(t(
+                    g.lang, 'coverage_requirement_outside_hours',
+                    weekday=WEEKDAYS[g.lang][weekday],
+                    start=band['start_time'], end=band['end_time'],
+                    open=open_time, close=close_time,
+                ))
+
+    cursor.execute('DELETE FROM coverage_requirements')
+    for band in parsed:
+        cursor.execute(
+            'INSERT INTO coverage_requirements (weekday, start_time, end_time, required_count) '
+            'VALUES (?, ?, ?, ?)',
+            (band['weekday'], band['start_time'], band['end_time'], band['required_count']),
+        )
+
+
+@app.route('/coverage-requirements', methods=['GET'])
+@hr_required
+def list_coverage_requirements():
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM coverage_requirements ORDER BY weekday, start_time')
+    return jsonify([serialize_coverage_requirement(row) for row in cursor.fetchall()])
+
+
+@app.route('/coverage-requirements', methods=['PUT'])
+@hr_required
+def update_coverage_requirements():
+    entries = request.get_json(silent=True)
+    connection = get_db()
+    try:
+        replace_coverage_requirements(connection, entries)
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+    connection.commit()
+
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM coverage_requirements ORDER BY weekday, start_time')
+    return jsonify([serialize_coverage_requirement(row) for row in cursor.fetchall()])
+
+
+# ---------- coverage gaps ----------
+#
+# GET /schedules/<year>/<month> reports where a month's actual staffing falls
+# short of what /coverage-requirements demands. fetch_schedule() runs over
+# every day of the month, so reading coverage_requirements, business_hours or
+# business_hours_exceptions per date would be exactly the N+1 the Task 4 and
+# Task 5 reviews flagged. The three loader functions below each run exactly
+# once per call to fetch_schedule(), regardless of how many days the month
+# has; the precedence rule (exception beats weekday) is then replayed against
+# their results in memory by business_hours_for(), which is a pure function
+# over those dicts and issues no query at all.
+#
+# The actual gap arithmetic lives in coverage_model.coverage_gaps() - a pure
+# function, no database - and runs once per date, fed the bands and covered
+# intervals assembled here.
+
+def coverage_requirements_by_weekday(cursor):
+    """All coverage_requirements rows as {weekday: [bands...]}, one query for the whole month."""
+    cursor.execute(
+        'SELECT weekday, start_time, end_time, required_count FROM coverage_requirements '
+        'ORDER BY weekday, start_time'
+    )
+    by_weekday = {}
+    for row in cursor.fetchall():
+        by_weekday.setdefault(row['weekday'], []).append({
+            'start_time': row['start_time'], 'end_time': row['end_time'],
+            'required_count': row['required_count'],
+        })
+    return by_weekday
+
+
+def business_hours_exceptions_by_date(cursor, start_date, end_date):
+    """All business_hours_exceptions rows in [start_date, end_date] as {date: row}, one query."""
+    cursor.execute(
+        'SELECT date, open_time, close_time, closed FROM business_hours_exceptions '
+        'WHERE date BETWEEN ? AND ?',
+        (start_date, end_date),
+    )
+    return {row['date']: row for row in cursor.fetchall()}
+
+
+def _closed_on(iso_date, weekday, hours_by_weekday, exceptions_by_date):
+    """Is the business shut on this date? Nothing but the closed flag of business_hours_for().
+
+    The precedence rule is not repeated here - this is a name for the question
+    the month loop asks, answered by the one function that owns the rule.
+
+    Both sources of a closed day still matter, and neither can be inferred from
+    the other. An exception closes a single date while its weekday stays open.
+    A weekday marked closed in business_hours, on the other hand, can still
+    carry bands: /business-hours now rejects closing a weekday that has any
+    (reject_hours_conflicting_with_bands()), but a database written before that
+    check existed, or by migration 0007 straight past the API, can hold exactly
+    that combination - so the flag is read, never assumed False just because
+    bands are there.
+    """
+    return business_hours_for(iso_date, weekday, hours_by_weekday, exceptions_by_date)[2]
+
+
+def coverage_gaps_for_month(cursor, year, month, assignments):
+    """Coverage gaps for every date of the month, from data loaded once - not per day.
+
+    `assignments` is fetch_schedule()'s own list: its start_time/end_time are
+    already resolved to the actual hours (own time > date override > shift
+    type default - see the loop that builds it), so no second call to
+    assignment_hours() is needed here. An assignment covers nothing unless it
+    is held by someone: employee_id IS NULL both for a still-unfilled slot and
+    for one an absence just freed, and both must contribute no coverage.
+
+    Every band is trimmed to the effective opening window of its date before it
+    is counted - effective meaning the one business_hours_for() resolves, so a
+    special opening on a single date narrows or widens that date's demand and
+    not just its open/closed state. Trimming is what keeps a band that predates
+    the current opening hours from demanding staff for a closed business: bands
+    derived by migration 0007 never passed the API's validation at all, and any
+    database edited before /business-hours started cross-checking can hold the
+    same thing. A band that is trimmed away entirely produces no gap.
+    """
+    bands_by_weekday = coverage_requirements_by_weekday(cursor)
+    if not bands_by_weekday:
+        return []
+
+    hours_by_weekday = load_business_hours_by_weekday(cursor)
+    days_in_month = calendar.monthrange(year, month)[1]
+    exceptions_by_date = business_hours_exceptions_by_date(
+        cursor, date(year, month, 1).isoformat(), date(year, month, days_in_month).isoformat(),
+    )
+
+    intervals_by_date = {}
+    for a in assignments:
+        if a['employee_id'] is None or not a['start_time'] or not a['end_time']:
+            continue
+        intervals_by_date.setdefault(a['date'], []).append(
+            {'start_time': a['start_time'], 'end_time': a['end_time']}
+        )
+
+    gaps = []
+    for day in range(1, days_in_month + 1):
+        day_date = date(year, month, day)
+        iso_date = day_date.isoformat()
+        weekday = day_date.weekday()
+
+        bands = bands_by_weekday.get(weekday)
+        if not bands:
+            continue
+        if _closed_on(iso_date, weekday, hours_by_weekday, exceptions_by_date):
+            continue
+
+        # Both of these read the same preloaded dicts and query nothing; the
+        # second call is what turns "open at all" into "open when, exactly".
+        open_time, close_time, _ = business_hours_for(
+            iso_date, weekday, hours_by_weekday, exceptions_by_date)
+        if open_time and close_time:
+            bands = [
+                trimmed for trimmed in
+                (trim_band_to_hours(band, open_time, close_time) for band in bands)
+                if trimmed is not None
+            ]
+            if not bands:
+                continue
+
+        for gap in coverage_gaps(bands, intervals_by_date.get(iso_date, [])):
+            gaps.append({'date': iso_date, **gap})
+
+    return gaps
 
 
 # ---------- error handling ----------

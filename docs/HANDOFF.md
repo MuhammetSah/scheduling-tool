@@ -1,7 +1,7 @@
 # Handoff — Stand und offene Punkte
 
 Kompakte Übergabe, damit eine neue Sitzung ohne Vorwissen weiterarbeiten kann.
-Stand: 18.08.2026.
+Stand: 22.08.2026.
 
 ## Das Projekt
 
@@ -16,19 +16,24 @@ Dialektschicht** in `backend/db.py`, kein ORM. Backend auf Render, Frontend auf 
 
 Kern ist `backend/scheduler.py`: Backtracking-Suche mit Branch-and-Bound, lexikografisches
 Ziel (erst unbesetzte Schichten minimieren, dann Fairness über die Summe quadrierter
-Schichtzahlen). Diese Suche wurde in allen drei Etappen **nicht** angefasst — auch Etappe 2
-(individuelle Zeiten) betrifft ausschließlich den Handkorrektur-Pfad, nie den Generator.
+Schichtzahlen). Diese Suche wurde in allen vier Etappen **nicht** angefasst — auch Etappe 2
+(individuelle Zeiten) betrifft ausschließlich den Handkorrektur-Pfad, nie den Generator, und
+Etappe 3 (Öffnungszeiten und Bedarf) pflegt und wertet `coverage_requirements` aus, ohne dass
+der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
+`shift_requirements`. Die Umstellung ist Etappe 4.
 
 ## Aktueller Stand
 
 | | |
 |---|---|
-| `main` | `8116e63` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11, #12) gemergt |
-| Arbeitsbranch | `etappe-2-individuelle-zeiten`, ab `b65db6e` verzweigt. Etappe 2 lokal abgeschlossen (dieser Commit), Abschluss-Review und Merge nach `main` stehen noch aus |
-| Testsuite | 141 passed / 22 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning` |
-| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` — alle grün auf `251d8c7` (Stand vor diesem Dokumentations-Commit; der Lauf für diesen Commit selbst steht noch aus) |
-| Migrationen | `0001`–`0005` lokal angewandt und rundlauffest (up → down → up geprüft); in Produktion bislang nur `0001`–`0003`, `0004` und `0005` sind beim nächsten Deploy fällig |
-| Laufzeitabhängigkeiten | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
+| `main` | `8116e63` — Etappe 0 (PR #9, #10) und Etappe 1 (PR #11, #12) gemergt. Etappe 2 und Etappe 3 sind **noch nicht** gemergt |
+| Branch-Situation | Zwei offene, gestapelte Branches. `etappe-2-individuelle-zeiten` (ab `main`, PR #13, **offen**) — Etappe 2 lokal abgeschlossen, Abschluss-Review und Merge stehen aus. Darauf aufbauend `etappe-3-oeffnungszeiten-bedarf` (Draft-PR #14, **offen**): das Schema von Etappe 3 baut auf Migration `0005` aus Etappe 2 auf, deshalb stapelt der Branch statt direkt ab `main` zu verzweigen. Löst sich mit dem Merge von #13 von selbst auf |
+| Aktueller Branch | `etappe-3-oeffnungszeiten-bedarf`, HEAD `d392583` — Etappe 3 lokal abgeschlossen, inklusive Dokumentation |
+| Testsuite | 188 passed / 28 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu erstmals eine Frontend-Testsuite (Vitest + Testing Library), 5 Tests |
+| CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (der `frontend`-Job führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `d392583`. Ein kleiner Nachtrag-Commit (Korrektur eines veralteten Commit-Hashs in dieser Tabelle) läuft zum Zeitpunkt dieses Standes noch durch die eigene CI |
+| Migrationen | `0001`–`0007` lokal angewandt und rundlauffest (up → down → up geprüft). In `main` stecken bislang nur `0001`–`0004` (Etappe 0 und 1); `0004` war laut Etappe-1-Handoff beim nächsten Deploy fällig, der tatsächliche Produktionsstand wurde in dieser Sitzung nicht neu geprüft. `0005` (Etappe 2) und `0006`/`0007` (Etappe 3) liegen noch auf den offenen PRs #13/#14 und erreichen Produktion erst mit deren Merge |
+| Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata |
+| Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
 ## Etappe 0 — abgeschlossen, gemergt, deployt
 
@@ -151,10 +156,73 @@ eine echte Schichtart zu, und es gibt bewusst keine Schaltfläche im Frontend da
 Datenmodell geht dem Planer damit absichtlich voraus — Etappe 4 baut darauf auf, ohne Schema
 und Algorithmus gleichzeitig ändern zu müssen.
 
-**Nächster Schritt einer neuen Sitzung:** Abschluss-Review für Etappe 2 einholen (die sechs
-Task-Reviews oben sind einzeln sauber, aber es gab noch keine Gesamtdurchsicht wie am Ende von
-Etappe 1), dann PR nach `main`. Danach Etappe 3 (Öffnungszeiten und Bedarf auf der Zeitachse)
-auf einem neuen Branch beginnen.
+**Nächster Schritt einer neuen Sitzung war:** Abschluss-Review für Etappe 2 einholen, dann PR
+nach `main`. Stattdessen wurde — mangels Merge von PR #13 — direkt auf einem gestapelten Branch
+mit Etappe 3 weitergearbeitet (siehe dortiger Abschnitt und die Branch-Situation oben); die
+Gesamtdurchsicht für Etappe 2 steht weiterhin aus.
+
+## Etappe 3 — abgeschlossen
+
+Plan: [`docs/superpowers/plans/2026-08-18-etappe-3-oeffnungszeiten-bedarf.md`](superpowers/plans/2026-08-18-etappe-3-oeffnungszeiten-bedarf.md)
+Ledger: `.superpowers/sdd/2026-08-18-etappe-3-oeffnungszeiten-bedarf/progress.md` (gitignoriert)
+
+Ziel erreicht: Öffnungszeiten sind pro Wochentag definierbar (mit datumsgenauen Ausnahmen),
+und Bedarf ist als Bänder auf der Zeitachse ausdrückbar — absolute Besetzungsstärke, nicht
+additiv, mit halboffener Grenze zwischen benachbarten Bändern. Der Plan meldet Deckungslücken
+gegen die tatsächlichen, in Etappe 2 eingeführten Zuweisungszeiten. **Der Planer wurde dabei
+bewusst NICHT umgestellt:** `build_slots()` in `backend/scheduler.py` baut weiterhin
+ausschließlich aus `shift_types`/`shift_requirements`; `coverage_requirements` wird in dieser
+Etappe nur gepflegt und ausgewertet, nie geplant. Beide Modelle laufen nebeneinander her, das
+ist gewollt — die Spec sieht die Entfernung von `shift_requirements` erst nach Etappe 4 vor,
+und die Umstellung des Generators gehört mit dem Zuschnitt zusammen in genau diese Etappe.
+
+| Task | Stand | Commit |
+|---|---|---|
+| 1 Schema für Öffnungszeiten und Bedarfsbänder | ✅ Review sauber | `f929d4c` |
+| 2 Bedarfskurve aus Schichtarten ableiten (reine Funktion, ohne DB) | ✅ Review sauber | `d9a17df` |
+| 3 Bestehenden Schichtbedarf einmalig in Bänder überführen | ✅ Review sauber | `27e218c` |
+| 4 Öffnungszeiten und Ausnahmen über die API pflegen | ✅ Review sauber nach einer Fix-Runde (2 Important) | `2ec2ef0` / Fix `484d8d8` |
+| 5 Bedarfsbänder über die API pflegen | ✅ Review sauber (0 Critical/Important/Minor) | `028b518` |
+| 6 Deckungslücken auf der Zeitachse melden | ✅ Review sauber | `64751e3` |
+| 7 Frontend-Editoren für Öffnungszeiten und Bedarf | ✅ Review sauber | `ea88166` |
+| 8 Frontend-Testinfrastruktur mit Vitest aufsetzen | ✅ Review sauber (0/0/0) | `29d6da9` |
+| 9 Dokumentation | ✅ | dieser Commit |
+
+**Die Semantik, einmal präzise:** `business_hours` trägt genau eine Zeile je Wochentag
+(`UNIQUE(weekday)`), Standard nach der Migration `00:00`/`00:00` mit `closed = 0` — nach der
+Mitternachtskonvention `end <= start` heißt das "der ganze Tag" und ist der einzige Standard,
+der kein bestehendes Verhalten ändert, weil es vor dieser Etappe überhaupt keine
+Öffnungszeiten gab. `business_hours_exceptions` schlägt für ein einzelnes Datum die
+Wochentagsregel. **Öffnungszeiten sind in dieser Etappe eine Validierungsgrenze, keine
+Planerbedingung** — sie beschränken, welche Bänder gespeichert werden dürfen, verbieten aber
+keine bestehende Zuweisung und lösen keine Warnung aus. `coverage_requirements` trägt Bänder
+pro Wochentag mit **absoluter, nicht additiver** Besetzungsstärke; Bänder desselben Wochentags
+dürfen sich nicht überlappen (400) und müssen innerhalb der Öffnungszeit liegen (400) — die
+Grenze zwischen benachbarten Bändern ist halboffen, `08:00–12:00` und `12:00–16:00` berühren
+sich nur und sind beide erlaubt. Die Bänder wurden **einmalig** bei der Migration
+(`0007_derive_coverage.py`) aus dem bestehenden `shift_requirements`-Bedarf abgeleitet
+(`coverage_curve()` in `backend/coverage_model.py`); danach gibt es **keine** automatische
+Neuberechnung, wenn sich `shift_requirements` später ändert — sonst hätte man zwei Quellen,
+die sich gegenseitig überschreiben. `GET /schedules/<jahr>/<monat>` liefert zusätzlich
+`coverage_gaps`, gerechnet gegen die tatsächlichen Zeiten der Zuweisungen (Etappe 2); ein
+unbesetzter Platz und ein durch Abwesenheit freigewordener decken nichts ab.
+
+**Bekannte, dokumentierte Grenze:** Überlappung über die Wochentagsgrenze hinweg wird nicht
+geprüft — ein Band Montag 22:00–06:00 und eines Dienstag 00:00–08:00 werden beide akzeptiert
+(über die API nachgeprüft, nicht angenommen: `test_nachtband_wird_unter_ganztaegiger_oeffnung_akzeptiert`).
+Bei konsequent start-verankerter Lesart beschreiben sie auch nicht dieselbe Zeit; ein realer
+Konflikt entstünde erst über die Wochenwiederholung hinweg, und das zu erkennen hieße, die
+Woche als 10080-Minuten-Ring zu behandeln — bewusst nicht gebaut, siehe README.
+
+Diese Etappe hat zwei neue Fallstricke hervorgebracht — die gleichnamigen Testfunktionen bei
+Task 4/5 und `coverage.py` als verbotener Modulname; beide jetzt in der Liste "Fallstricke
+dieses Projekts" unten als Punkte 15 und 16.
+
+**Nächster Schritt einer neuen Sitzung:** Eine gemeinsame Abschluss-Review-Runde für Etappe 2
+UND Etappe 3 einholen (für Etappe 2 steht sie komplett aus, siehe oben; für Etappe 3 sind nur
+die acht Einzel-Task-Reviews gelaufen, keine Gesamtdurchsicht), dann beide PRs (#13 zuerst,
+danach #14) nach `main` mergen — in dieser Reihenfolge, weil #14 auf #13 aufbaut. Danach
+Etappe 4 (Zuschnitt im Planer) auf einem neuen Branch ab `main` beginnen.
 
 ## Arbeitsweise
 
@@ -210,6 +278,14 @@ Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante
 14. **`PUT /assignments/<id>` schreibt die Zeiten bei jedem Aufruf mit.** Fehlen sie im Body,
     werden sie auf NULL gesetzt. Wer nur den Mitarbeiter tauschen will, muss die Zeiten
     mitschicken. Das Frontend tut das; ein künftiger Aufrufer muss es auch.
+15. **Zwei gleichnamige Testfunktionen im selben Modul überschreiben sich in Python still.**
+    Der erste verschwindet lautlos aus der Suite, ohne dass irgendetwas fehlschlägt. In
+    Etappe 3 gaben zwei Task-Briefs (4 und 5) denselben Testnamen vor; der Implementer von
+    Task 5 hat es bemerkt und beide eindeutig umbenannt. `pytest --collect-only` zeigt es.
+16. **Ein Modulname im Backend darf kein installiertes Paket verdecken.** `backend/coverage.py`
+    hätte das PyPI-Paket `coverage` (Abhängigkeit von `pytest-cov`) verdeckt, sobald jemand das
+    ergänzt — auch wenn `coverage` zum Entscheidungszeitpunkt nicht installiert war. Deshalb
+    heißt die Datei `coverage_model.py`.
 
 ## Offen — liegt beim Nutzer
 
@@ -238,8 +314,8 @@ Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 - `fetchSchedule()` schluckt jeden GET-Fehler zu `null`
 - `MIGRATIONS_DIR.iterdir()` wirft, wenn das Verzeichnis fehlt
 - Zwei Validierungstests in `test_api_availability.py` prüfen nur den Status, nicht die Meldung
-- **Frontend hat keinerlei Testinfrastruktur.** Bewusste Entscheidung; sollte spätestens mit
-  dem Zeitachsen-Editor aus Etappe 3 nachgerüstet werden (Vitest + Testing Library)
+- ~~Frontend hat keinerlei Testinfrastruktur~~ — **erledigt in Etappe 3** (Task 8, Vitest +
+  Testing Library, siehe dort)
 
 Neu aus dem Abschluss-Review von Etappe 1:
 
@@ -257,8 +333,9 @@ Neu aus dem Abschluss-Review von Etappe 1:
 - die Fensterprüfung rechnet im innersten Schleifenkörper von `eligible_candidates()` alle
   `"HH:MM"`-Strings pro Kandidat und Knoten neu. Datenbankseitig ist alles vorgeladen, nur
   rechnerisch. Erst angehen, wenn der Benchmark es zeigt
-- der `Project Structure`-Block im README listet weiterhin weder `migrations/` noch
-  `security.py`, `timeutil.py` oder die seit Etappe 0 hinzugekommenen Testdateien
+- der `Project Structure`-Block im README listet seit Etappe 3 zwar `migrations/` und
+  `coverage_model.py`, weiterhin aber nicht `security.py`, `timeutil.py` oder die seit
+  Etappe 0 hinzugekommenen Testdateien
 - Spec §6 sah eine eigene Route `GET/PUT /employees/<id>/availability` mit `require_self_or_hr`
   vor; gebaut wurde sie nicht, die Fenster hängen an `/employees/<id>` (`@hr_required`).
   Sicherheitsseitig die konservative Richtung, aber ein Mitarbeiter sieht seine eigenen
@@ -289,16 +366,63 @@ Neu aus den Reviews von Etappe 2:
 - mehrere vorlagenlose Blöcke am selben Datum landen in derselben Zelle und nur der erste
   liefert die Zellenzeile — erst ab Etappe 4 erzeugbar
 
+Aus dem Abschluss-Review von Etappe 3 behoben (eine Fix-Runde, ein Commit):
+
+- `/business-hours` und `/coverage-requirements` prüfen einander in beide Richtungen; eine
+  Öffnungszeit, die ein gespeichertes Band ungültig machen würde, wird mit Nennung von
+  Wochentag und Band abgelehnt (`reject_hours_conflicting_with_bands()`)
+- `coverage_gaps_for_month()` schneidet jedes Band auf das **effektive** Öffnungsfenster des
+  Datums zu — Ausnahme schlägt Wochentag, und die Zeiten einer offenen Ausnahme wirken jetzt
+  wirklich, statt nur ihr `closed`-Flag
+- `band_within()` prüft die Enthaltung über die Schließzeit statt über eine gerade Achse; ein
+  Nachtband 22:00–06:00 passt damit in die ganztägige Standard-Öffnungszeit, ohne dass
+  07:00–12:00 bei 08:00–18:00 durchginge
+- `business_hours_for()` ist eine reine Funktion auf vorgeladenen Dicts und hat wieder echte
+  Aufrufer (`_closed_on()` und der Zuschnitt); `fetch_schedule()` macht unverändert acht
+  Abfragen
+
+Weiterhin offen aus den Reviews von Etappe 3:
+
+- **`scheduler.window_contains_shift()` hat denselben Mitternachtsfehler, den die
+  Bandprüfung in Etappe 3 behoben hat — eine Ebene tiefer.** Ein Arbeitszeitfenster
+  `00:00–00:00` ist als „ganztags verfügbar" gemeint, enthält aber keine Nachtschicht:
+  `window_contains_shift({'start_time': '00:00', 'end_time': '00:00'}, '22:00', '06:00')`
+  liefert `False`. Vom Abschluss-Review der Etappe 3 gefunden und von dessen Re-Review
+  eigenständig nachgerechnet und bestätigt. **Es ist ein Befund gegen Etappe 1**, nicht gegen
+  Etappe 3 — `scheduler.py` war für die Fix-Welle gesperrt und wurde nachweislich nicht
+  angefasst. `coverage_model.band_within()` zeigt die Lösung: die Schließzeit als Gegenmenge
+  prüfen statt das Band zu verschieben, weil die Ringnatur im Fenster steckt, nicht im Band.
+  **Vor Etappe 4 angehen** — dort wird auf Mitarbeiterfenster zugeschnitten, und die Etappe
+  hätte den Fehler sonst als Grundlage.
+- der Rundlauftest von `0006_coverage.py` prüft nach `down()`+`up()` nur `business_hours`,
+  nicht ob die beiden Nebentabellen (`business_hours_exceptions`, `coverage_requirements`)
+  wirklich weg waren — ein vergessenes `DROP TABLE` bliebe wegen `CREATE TABLE IF NOT EXISTS`
+  unbemerkt
+- ein Docstring in `test_migrations_postgres.py` spricht von Einzelindex-Zugriff, der Test
+  vergleicht aber ganze Tupel
+- für `0007_derive_coverage.py` gibt es nur einen Postgres-Test (die Ableitung selbst), keine
+  Postgres-Gegenprobe für den Leer-Bestand-Wächter oder den Rundlauf
+- `int(entry.get('weekday'))` in `replace_business_hours()`/`parse_coverage_requirements()`
+  (`backend/app.py`) schluckt `True`/`False` als `1`/`0` und kürzt `3.9` zu `3`
+- die Datumsprüfung beim Anlegen einer `business_hours_exceptions`-Zeile
+  (`create_business_hours_exception()`) ist check-then-act ohne Sperre
+- kein eigener HTTP-Test für den Abwesenheitsfall bei den Deckungslücken (code-seitig korrekt,
+  über denselben `employee_id IS NULL`-Filter wie ein unbesetzter Platz)
+- der Entfernen-Button im Bedarfseditor (`frontend/src/pages/CoverageEditor.jsx`) hat nur
+  `title`, kein `aria-label`
+- die Datumsformatierung steht jetzt in dritter Kopie im Frontend — folgt aber bereits
+  etablierter Projektkonvention, keine neu eingeführte Dublette
+
 ## Roadmap
 
 Design: [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md)
 
-- **Etappe 3** — Öffnungszeiten und Bedarf auf der Zeitachse: `business_hours`,
-  `business_hours_exceptions`, `coverage_requirements` (nicht überlappend, absolute
-  Besetzungsstärke), Migration aus `shift_requirements`, Deckungslücken-Anzeige
 - **Etappe 4** — Zuschnitt im Planer: Blockplanung aus Bedarf und Fenstern, automatisches
-  Kürzen auf das Mitarbeiterfenster, benannte Restlücken. Das ist der Punkt, an dem das Tool
-  über Papershift und Deputy hinausgeht — dort wird nicht automatisch zugeschnitten.
+  Kürzen auf das Mitarbeiterfenster, benannte Restlücken. **Das ist der Punkt, an dem der
+  Planer auf `coverage_requirements` umgestellt wird** — `build_slots()` baut bis dahin
+  weiterhin aus `shift_requirements` (siehe Etappe 3 oben), das erst nach dieser Etappe
+  entfernt wird. Das Tool geht damit auch über Papershift und Deputy hinaus — dort wird nicht
+  automatisch zugeschnitten.
 - **Etappe 5** — restliche Produktionsreife: Veröffentlichen-Workflow (`schedules.status` wird
   bis heute nicht genutzt), Audit-Log, Exporte, DSGVO (Krankmeldungen sind Art.-9-Daten),
   ArbZG-Prüfungen (max. 8/10 h, Pausen, max. 6 Tage in Folge)

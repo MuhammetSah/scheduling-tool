@@ -108,3 +108,7 @@ jobs:
         run: npm run lint
       - name: Build
         run: npm run build
+      - name: Tests
+        # --run: ohne diesen Schalter bleibt Vitest im Watch-Modus haengen
+        # und der Job laeuft in den Timeout.
+        run: npm test -- --run

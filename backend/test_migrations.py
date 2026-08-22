@@ -14,6 +14,8 @@ INDEXES_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0002_indexe
 LOGIN_ATTEMPTS_SQL_PATH = Path(__file__).resolve().parent / 'migrations' / '0003_login_attempts.sql'
 AVAILABILITY_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0004_employee_availability.py'
 ASSIGNMENT_TIMES_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0005_assignment_times.py'
+COVERAGE_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0006_coverage.py'
+DERIVE_COVERAGE_PY_PATH = Path(__file__).resolve().parent / 'migrations' / '0007_derive_coverage.py'
 
 # Die von 0001_baseline.py angelegten Tabellen, als Literal statt aus der
 # Datei abgeleitet. 0001_baseline aendert sich per Konvention nie wieder
@@ -46,7 +48,10 @@ BASELINE_TABELLEN = {
 # unten, dem Gegenstueck zu test_baseline_erzeugt_genau_die_erwarteten_tabellen...
 # fuer den vollstaendigen, echten Migrationsordner statt nur fuer 0001_baseline
 # isoliert.
-ALLE_MIGRATIONEN_TABELLEN = BASELINE_TABELLEN | {'login_attempts', 'employee_availability'}
+ALLE_MIGRATIONEN_TABELLEN = BASELINE_TABELLEN | {
+    'login_attempts', 'employee_availability',
+    'business_hours', 'business_hours_exceptions', 'coverage_requirements',
+}
 
 
 @pytest.fixture
@@ -596,12 +601,18 @@ def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fres
 
     Vorbild: test_fenstermigration_... aus Etappe 1, entstanden aus dem Critical
     des dortigen Abschluss-Reviews.
+
+    Nicht auf "die letzte Migration" verlassen (wie test_indexmigration_ und
+    test_fenstermigration_ oben): spaetere Aufgaben haengen weitere
+    Migrationen hinten an - inzwischen 0006_coverage -, und rollback_last()
+    ohne Schleife wuerde dann die falsche Migration zurueckrollen.
     """
     migrations, db_file = fresh_db
     migrations.apply_pending()
     assert '0005_assignment_times' in migrations.applied_versions()
 
-    migrations.rollback_last()
+    while '0005_assignment_times' in migrations.applied_versions():
+        migrations.rollback_last()
     assert '0005_assignment_times' not in migrations.applied_versions()
 
     connection = sqlite3.connect(db_file)
@@ -628,3 +639,343 @@ def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fres
         connection.close()
 
     assert zeile == (1, '2026-03-17', 1, 0, None, None)
+
+
+def test_oeffnungszeiten_starten_rund_um_die_uhr_offen(fresh_db):
+    """Der Standard darf kein bestehendes Verhalten aendern.
+
+    Vor dieser Etappe gibt es keine Oeffnungszeiten, also darf ihre Einfuehrung
+    nichts verbieten, was vorher erlaubt war. 00:00-00:00 ist nach der
+    Mitternachtskonvention des Projekts der ganze Tag.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        zeilen = connection.execute(
+            'SELECT weekday, open_time, close_time, closed FROM business_hours ORDER BY weekday'
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]
+
+
+def test_genau_eine_oeffnungszeit_pro_wochentag(fresh_db):
+    """UNIQUE(weekday) - ein zweiter Montag waere ein Datenfehler."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO business_hours (weekday, open_time, close_time, closed) "
+                "VALUES (0, '08:00', '18:00', 0)")
+            connection.commit()
+    finally:
+        connection.close()
+
+
+def test_ausnahme_ist_pro_datum_eindeutig(fresh_db):
+    """UNIQUE(date) - zwei Sonderregeln fuer denselben Tag waeren mehrdeutig."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute(
+            "INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) "
+            "VALUES ('2026-12-24', '08:00', '14:00', 0, 'Heiligabend')")
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO business_hours_exceptions (date, open_time, close_time, closed, label) "
+                "VALUES ('2026-12-24', '09:00', '13:00', 0, 'Zweite Regel fuer denselben Tag')")
+            connection.commit()
+    finally:
+        connection.close()
+
+
+def test_bedarfsbaender_starten_leer(fresh_db):
+    """Task 1 legt nur die Tabelle an, ohne Bedarf abzuleiten - das war die
+    Abgrenzung zwischen Task 1 und Task 3.
+
+    Seit Task 3 (0007_derive_coverage.py) existiert die Ableitung, aber
+    fresh_db hat nach der Baseline-Migration keine Schichtarten - und ohne
+    Schichtarten leitet 0007 nichts ab (siehe deren eigener Waechter). Der
+    Test bleibt deshalb bewusst unveraendert gueltig; die eigentliche Probe
+    auf die Ableitung selbst steht in
+    test_bedarf_wird_aus_den_schichtarten_abgeleitet weiter unten, und die
+    Probe auf "keine Schichtarten -> kein Bedarf" nochmal explizit in
+    test_ableitung_ohne_schichtarten_erzeugt_nichts.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        anzahl = connection.execute('SELECT COUNT(*) FROM coverage_requirements').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert anzahl == 0
+
+
+def test_bedarf_wird_aus_den_schichtarten_abgeleitet(leere_migrationen):
+    """Der eigentliche Beweis dieser Migration: dieselbe Kurve wie vorher.
+
+    Aufbau bewusst mit ZWEI Schichtarten an DEMSELBEN Wochentag, die sich
+    ueberlappen - nur so zeigt sich, ob summiert wird. Zwei sich nicht
+    beruehrende Schichtarten wuerden auch bei einer falschen Implementierung
+    zufaellig richtig herauskommen.
+
+    Staffelung: bis 0006 migrieren, DANN Schichtarten und Bedarf einfuegen,
+    DANN 0007 nachschieben. Andersherum prueft der Test nichts - dasselbe
+    Muster wie test_bestandszuweisungen_ueberleben_den_tabellenneubau oben,
+    das isolierte Migrationsverzeichnis kommt von der leere_migrationen-Fixture.
+    """
+    migrations, verzeichnis, db_file = leere_migrationen
+    (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0002_indexes.sql').write_text(INDEXES_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0003_login_attempts.sql').write_text(
+        LOGIN_ATTEMPTS_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0004_employee_availability.py').write_text(
+        AVAILABILITY_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0005_assignment_times.py').write_text(
+        ASSIGNMENT_TIMES_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0006_coverage.py').write_text(COVERAGE_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        # Frueh und Mittag ueberlappen sich montags (weekday=0) von 12:00 bis
+        # 14:00 - genau dieses Stueck muss in der abgeleiteten Kurve die Summe
+        # beider required_count tragen (2+3=5), nicht nur eine der beiden.
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '08:00', '14:00')")
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Mittag', '12:00', '17:00')")
+        connection.execute(
+            'INSERT INTO shift_requirements (shift_type_id, weekday, required_count) VALUES (1, 0, 2)')
+        connection.execute(
+            'INSERT INTO shift_requirements (shift_type_id, weekday, required_count) VALUES (2, 0, 3)')
+        connection.commit()
+    finally:
+        connection.close()
+
+    (verzeichnis / '0007_derive_coverage.py').write_text(
+        DERIVE_COVERAGE_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    angewandt = migrations.apply_pending()
+    assert '0007_derive_coverage' in angewandt
+
+    connection = sqlite3.connect(db_file)
+    try:
+        baender = connection.execute(
+            'SELECT weekday, start_time, end_time, required_count FROM coverage_requirements '
+            'ORDER BY weekday, start_time'
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert baender == [
+        (0, '08:00', '12:00', 2),
+        (0, '12:00', '14:00', 5),
+        (0, '14:00', '17:00', 3),
+    ]
+
+
+def test_ableitung_laesst_bestehende_baender_unangetastet(fresh_db):
+    """Wer schon Baender gepflegt hat, verliert sie nicht.
+
+    Die Migration darf nur ableiten, wenn coverage_requirements leer ist.
+    Sonst wuerde ein zweiter Lauf - etwa nach einem Rollback - von Hand
+    gepflegte Baender ueberschreiben.
+
+    Diskriminierend nur, weil ausser dem handgepflegten Band auch echte
+    Schichtdaten fuer denselben Wochentag vorliegen: faellt der Waechter aus,
+    wuerde der zweite up()-Lauf eine zusaetzliche, abgeleitete Zeile daneben
+    einfuegen, und die Zeilenmenge unten stimmt nicht mehr.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '08:00', '14:00')")
+        connection.execute(
+            'INSERT INTO shift_requirements (shift_type_id, weekday, required_count) VALUES (1, 0, 2)')
+        connection.commit()
+    finally:
+        connection.close()
+
+    assert '0007_derive_coverage' in migrations.applied_versions()
+    zurueckgerollt = migrations.rollback_last()
+    assert zurueckgerollt == '0007_derive_coverage'
+    assert '0007_derive_coverage' not in migrations.applied_versions()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        # Handgepflegtes Band, bewusst anders als das, was aus den
+        # Schichtdaten oben abgeleitet wuerde (08:00-14:00 mit 2).
+        connection.execute(
+            "INSERT INTO coverage_requirements (weekday, start_time, end_time, required_count) "
+            "VALUES (0, '00:00', '23:59', 1)")
+        connection.commit()
+    finally:
+        connection.close()
+
+    erneut = migrations.apply_pending()
+    assert '0007_derive_coverage' in erneut
+
+    connection = sqlite3.connect(db_file)
+    try:
+        baender = connection.execute(
+            'SELECT weekday, start_time, end_time, required_count FROM coverage_requirements'
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert baender == [(0, '00:00', '23:59', 1)]
+
+
+def test_ableitung_ohne_schichtarten_erzeugt_nichts(fresh_db):
+    """Eine frische Installation hat keine Schichtarten - und danach keinen Bedarf."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        schichtarten = connection.execute('SELECT COUNT(*) FROM shift_types').fetchone()[0]
+        baender = connection.execute('SELECT COUNT(*) FROM coverage_requirements').fetchone()[0]
+    finally:
+        connection.close()
+
+    assert schichtarten == 0
+    assert baender == 0
+
+
+def test_ableitungsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(leere_migrationen):
+    """Rundlauf up -> down -> up: nach der Ruecknahme entsteht dieselbe Kurve erneut.
+
+    Staffelung wie test_bedarf_wird_aus_den_schichtarten_abgeleitet: erst bis
+    0006 migrieren, dann Schichtarten und Bedarf einfuegen, dann 0007
+    nachschieben - sonst liefe der erste Vorwaertslauf schon auf leerem
+    Bestand, und der Rundlauf wuerde nichts pruefen (Pflicht laut Vorgabe:
+    Rundlauf mit Bestandsdaten, nicht auf leerer Datenbank). Eine Zeile in
+    employees - von 0007 nie beruehrt - begleitet den Rundlauf, um zu zeigen,
+    dass down() wirklich nur coverage_requirements trifft (siehe dortiger
+    Docstring) und sonst nichts.
+    """
+    migrations, verzeichnis, db_file = leere_migrationen
+    (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0002_indexes.sql').write_text(INDEXES_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0003_login_attempts.sql').write_text(
+        LOGIN_ATTEMPTS_SQL_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0004_employee_availability.py').write_text(
+        AVAILABILITY_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0005_assignment_times.py').write_text(
+        ASSIGNMENT_TIMES_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    (verzeichnis / '0006_coverage.py').write_text(COVERAGE_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.execute(
+            "INSERT INTO shift_types (name, start_time, end_time) VALUES ('Frueh', '08:00', '14:00')")
+        connection.execute(
+            'INSERT INTO shift_requirements (shift_type_id, weekday, required_count) VALUES (1, 0, 2)')
+        connection.commit()
+    finally:
+        connection.close()
+
+    (verzeichnis / '0007_derive_coverage.py').write_text(
+        DERIVE_COVERAGE_PY_PATH.read_text(encoding='utf-8'), encoding='utf-8')
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        vorher = connection.execute(
+            'SELECT weekday, start_time, end_time, required_count FROM coverage_requirements '
+            'ORDER BY weekday, start_time'
+        ).fetchall()
+    finally:
+        connection.close()
+    assert vorher == [(0, '08:00', '14:00', 2)]
+
+    zurueckgerollt = migrations.rollback_last()
+    assert zurueckgerollt == '0007_derive_coverage'
+
+    connection = sqlite3.connect(db_file)
+    try:
+        anzahl = connection.execute('SELECT COUNT(*) FROM coverage_requirements').fetchone()[0]
+    finally:
+        connection.close()
+    assert anzahl == 0
+
+    erneut = migrations.apply_pending()
+    assert '0007_derive_coverage' in erneut
+
+    connection = sqlite3.connect(db_file)
+    try:
+        nachher = connection.execute(
+            'SELECT weekday, start_time, end_time, required_count FROM coverage_requirements '
+            'ORDER BY weekday, start_time'
+        ).fetchall()
+        mitarbeiter = connection.execute('SELECT name FROM employees').fetchall()
+    finally:
+        connection.close()
+
+    assert nachher == vorher
+    assert mitarbeiter == [('Anna',)]
+
+
+def test_bedarfsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fresh_db):
+    """Rueckwaerts allein reicht nicht - die Migration muss danach wieder vorwaerts laufen.
+
+    Vorbild: test_zeitmigration_... aus Etappe 2. Bestandszeile einfuegen, damit
+    der zweite Vorwaertslauf nicht auf einer leeren Datenbank laeuft.
+
+    Anders als beim Vorbild ueberlebt keine der drei neuen Tabellen die
+    Ruecknahme selbst (down() nimmt sie vollstaendig zurueck, siehe
+    0006_coverage.py) - die Bestandszeile geht deshalb nicht in eine von
+    ihnen, sondern in employees, das schon vor dieser Migration existiert und
+    von ihrem down() unberuehrt bleibt.
+
+    Nicht auf "die letzte Migration" verlassen (wie test_indexmigration_ und
+    test_fenstermigration_ oben): eine spaetere Aufgabe koennte weitere
+    Migrationen hinter 0006_coverage anhaengen, und ein einzelnes
+    rollback_last() wuerde dann die falsche Migration zurueckrollen - genau
+    der Fehler, der test_zeitmigration_... oben erst durch das Hinzufuegen
+    dieser Migration sichtbar wurde.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    assert '0006_coverage' in migrations.applied_versions()
+
+    while '0006_coverage' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert '0006_coverage' not in migrations.applied_versions()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        connection.commit()
+    finally:
+        connection.close()
+
+    erneut = migrations.apply_pending()
+    assert '0006_coverage' in erneut
+
+    connection = sqlite3.connect(db_file)
+    try:
+        zeilen = connection.execute(
+            'SELECT weekday, open_time, close_time, closed FROM business_hours ORDER BY weekday'
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert zeilen == [(wd, '00:00', '00:00', 0) for wd in range(7)]

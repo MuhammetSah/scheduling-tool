@@ -40,11 +40,13 @@ The tool is usable in **German or English** – see [Language](#language) below.
 - **Day-level changes** – beyond the shift type's usual hours (e.g. 08:00–16:30), HR can change what a shift runs on one single date without touching any other day, and can add or remove a place on a given day. Changed hours are marked with `*` in both views and can be reset to the shift type's default in one click
 - **Employee management** – name, optional email, optional monthly shift cap, an optional **weekly target-hours** figure for part-time staff, a **minimum rest period** between shifts (defaults to 11h, individually adjustable), an **availability mode** that is either unrestricted (`anytime`, the default — every employee's behaviour before this feature and after migration) or time-windowed (`windows` — available only inside specific weekday time slots, e.g. Mon–Fri 08:00–14:00; see [Availability windows](#availability-windows) below), recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave HR enters directly), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
 - **Shift type management** – name, start/end time, color, and required headcount per weekday (weekday and weekend staffing needs are often different)
+- **Opening hours and coverage bands** – HR can set when the business is open, per weekday, with one-off date exceptions (a holiday, a special opening), and — independently — how many people should be present across the day in absolute headcount bands (e.g. "08:00–12:00 → 2, 12:00–17:00 → 3"), validated against those opening hours. See [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) below for what these do today, and — just as important — what they deliberately don't do yet
 - **Automatic monthly schedule generation** via backtracking search, respecting weekly-hours caps and rest periods as hard constraints alongside the existing ones
 - **Manual editing** – reassign any shift slot to a different employee (or leave it unfilled), optionally giving that one slot its own start/end times on top of whatever the date and shift type would otherwise resolve to (see [Individual assignment times](#individual-assignment-times) below), with non-blocking warnings if the change violates that employee's usual constraints — including a weekly-hours overrun, too little rest before/after the shift, or (for a `windows`-mode employee) a shift outside their availability windows for that day — all judged against the hours the slot actually runs, so HR can always override, but never by accident
 - **Shift swapping** – pick two shifts and swap their assigned employees in one atomic action; an individual time set on either slot stays with the slot, not the person
 - **Unfilled-slot reporting** – when there isn't enough eligible staff, the tool reports exactly how many/which slots couldn't be filled instead of failing silently or crashing
 - **Workload distribution panel** – shifts per employee (and weekend shifts per employee) for the month, recomputed from what's actually saved, so it stays honest as HR edits the plan by hand
+- **Coverage gap reporting** – the monthly schedule additionally reports where actual staffing falls short of the coverage bands above, computed against every assignment's actual resolved hours (see [Individual assignment times](#individual-assignment-times)) rather than a shift type's nominal ones
 - **Self-service sick/vacation** – an employee can report their own sick or vacation days for the current month; a shift they were already assigned frees up automatically for HR to cover, and HR gets ranked replacement suggestions for it (see below)
 - **Bilingual UI** – every label, message and validation error is available in German and English (see below)
 
@@ -106,6 +108,20 @@ A shift's actual hours are resolved in three layers, checked in this order: the 
 Every check that reasons about actual clock time — the weekly-hours cap, the rest-period warning, and the availability-window check above — resolves an assignment's hours through this same three-layer rule (`assignment_hours()` in `backend/app.py`) rather than reading the shift type directly, so a person working a personally-shortened or personally-lengthened shift is judged against the hours they actually work. This only affects the manual-edit warning path: the automatic generator never sets an assignment's own times or a date override, so a freshly generated plan always runs on layer three, exactly as before this feature existed. Both new columns are either set together or left `NULL` together — a half-filled pair is rejected with `400`, and so is a pair with equal start and end times, which the project's midnight convention (`end <= start` means "runs past midnight") would otherwise silently turn into a 24-hour shift.
 
 A slot can also exist with no shift type behind it at all (`shift_assignments.shift_type_id` is nullable) — a block that is not an instance of any template. It must carry its own start/end times, because it has no shift type and no date override to fall back to; the API rejects a template-less block that doesn't bring its own times. It shows up in both views without a template color — its own last column in the table view once the month has at least one, a neutrally-colored entry in the calendar view — and a shift-type restriction on an employee has nothing to say about it, so it never triggers that particular warning. Nothing in this version of the tool actually creates one, though: the automatic generator always assigns a real shift type, and there is deliberately no button for HR to add a template-less block by hand yet. The data model exists ahead of that UI on purpose, so that the automatic trimming work planned for a later stage (see the roadmap under [Comparison with other approaches](#comparison-with-other-approaches) below) doesn't have to change the schema and the scheduling algorithm in the same step — a shift trimmed down to less than its shift type's hours, or a leftover block with no matching template, needs somewhere to live before that stage's algorithm can produce it.
+
+### Opening hours and coverage requirements
+
+Two new concepts sit alongside the shift-type-based demand the scheduler has always used, and — this is the important part — **the scheduler does not use them yet**. `build_slots()` in `backend/scheduler.py` still builds every slot to generate from `shift_types`/`shift_requirements`, exactly as before this stage. `business_hours` and `coverage_requirements` are maintained and evaluated in this version of the tool, not planned against; switching the generator onto them is a deliberate later step (see the roadmap under [Comparison with other approaches](#comparison-with-other-approaches) below), bundled with the automatic-trimming work there because both need the same block-planning rewrite. Describing the scheduler as already following these bands would be describing a different version of the tool than the one in this repository.
+
+**Opening hours.** `business_hours` holds exactly one row per weekday (`UNIQUE(weekday)` enforces it); `business_hours_exceptions` overrides a single date (a holiday, a special opening) and takes precedence over the weekday rule wherever both are consulted — that precedence is decided in exactly one place, `business_hours_for()` in `backend/app.py`, a pure function over already-loaded rows that every reader goes through. The migration that creates the table (`0006_coverage.py`) seeds all seven weekdays with `open_time`/`close_time` = `00:00`/`00:00` and `closed = 0` — under the project's midnight convention (`end_time <= start_time` means "runs past midnight", the same rule shift hours and availability windows already use) that reads as *open the entire day*. It's the only default in this feature that changes no existing behaviour: before this stage there were no opening hours at all, so introducing them must not forbid anything that was previously allowed. In this version, opening hours are a **validation boundary, not a scheduling constraint** — they limit which coverage bands HR is allowed to save (in both directions: opening hours that would invalidate a band already saved are rejected too, naming the weekday and the band, so narrowing a day can never strand a stock the coverage editor then refuses to take back) and frame how they're displayed, but they never block an existing assignment and never produce a warning; nothing checks a generated or manually-edited shift against them.
+
+**Coverage bands.** `coverage_requirements` describes, per weekday, how many people should be present during a given stretch of the day — "08:00–12:00 → 2, 12:00–17:00 → 3". The count is **absolute headcount, not additive**: between 12:00 and 17:00 the business needs *three* people total, not 2+3=5. Bands of the same weekday may not overlap (rejected with `400`), must lie entirely inside that weekday's opening hours (`400` as well — `band_within()` in `backend/coverage_model.py`). That containment check reads the *closed* stretch of the day rather than the open one: a band is inside the opening hours exactly when it does not touch the time between closing and the next opening. The straight comparison used for [availability windows](#availability-windows) (`scheduler.window_contains_shift()`, which `band_within()` delegated to until it turned out to be wrong here) cannot answer this once a band crosses midnight — a `22:00–06:00` band is minutes `[1320, 1800)` while the all-day default `00:00–00:00` is `[0, 1440)`, so containment fails on an axis that is really a ring. Read through the closed stretch it resolves: on an all-day opening that stretch is empty, and an empty stretch can intersect nothing. Nothing legitimate is loosened by this — under a real `08:00–18:00` opening, a `07:00–12:00` band is still rejected, because the ring only dissolves the midnight crossing, and `required_count` may not be negative. Gaps between bands are allowed and mean "no requirement" for that stretch. The boundary between adjacent bands is **half-open**: `08:00–12:00` and `12:00–16:00` only touch and are both accepted — they are not treated as overlapping.
+
+Coverage bands were derived **once**, at migration time (`0007_derive_coverage.py`), from the existing `shift_requirements` demand: for every weekday, at every point in time, the sum of `required_count` across the shift types covering it, with adjacent equal sums merged into one band (`coverage_curve()` in `backend/coverage_model.py`, an event-point sweep over the day's minute axis). After that one-time derivation, bands are maintained by hand through `PUT /coverage-requirements` — there is deliberately **no automatic recomputation** when `shift_requirements` changes later; keeping the two in sync automatically would mean two sources of truth quietly overwriting each other.
+
+**Coverage gaps.** `GET /schedules/<year>/<month>` additionally returns `coverage_gaps`: stretches of a date where fewer people are actually assigned than that day's coverage bands call for. This is computed against the **actual, resolved** hours of each assignment — the same three-layer resolution [individual assignment times](#individual-assignment-times) already established — so a shift someone personally starts later than usual shows the gap where it really is, not where the shift type's nominal hours would put it. An unfilled slot and one an absence just freed both contribute nothing to coverage (both leave `employee_id` `NULL`). Adjacent stretches with the same missing count are merged, over-coverage produces no entry, and a date closed by an exception has no demand and therefore no gap. Every band is first trimmed to the **effective** opening window of its date — the one `business_hours_for()` resolves, so an exception's own times count, not merely its closed flag, and a special opening genuinely narrows or widens that date's reported demand. A band trimmed away entirely produces no gap. Trimming is what keeps bands older than the current opening hours from demanding staff for a closed business: `0007_derive_coverage.py` writes derived bands straight past the API, and any database edited before `PUT /business-hours` began cross-checking can hold the same mismatch. The obvious N+1-per-day query trap is avoided deliberately: `coverage_gaps_for_month()` loads `coverage_requirements`, `business_hours` and the month's `business_hours_exceptions` in three queries total (eight in the whole `GET`), and `business_hours_for()` is a pure function over those three results — it takes the loaded dicts rather than a cursor, so calling it once per date of the month adds no query at all.
+
+**Known limitation: overlap across a weekday boundary is not checked.** A Monday `22:00–06:00` band and a Tuesday `00:00–08:00` band are both accepted (verified over the API, under the all-day default opening hours — see `test_nachtband_wird_unter_ganztaegiger_oeffnung_akzeptiert` in `backend/test_api_coverage.py`). Read consistently under this project's start-anchored convention they don't even describe the same time: the Monday band's night shift ends early Tuesday morning, while the Tuesday band sits on Tuesday morning proper. A real conflict would only appear once the week is treated as a 10080-minute ring across its own weekly repetition — catching that is possible, but at the cost of error messages nobody could read at a glance, so it's left as a documented limitation instead of built here.
 
 ### Fairness (v1.3)
 
@@ -172,8 +188,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
-- Business hours and per-slot coverage requirements laid out on the actual time axis, replacing today's per-weekday headcounts with coverage gaps shown directly
-- Automatic trimming of a shift to what an employee's availability window actually covers, replacing today's all-or-nothing "fully contained" rule (see [Availability windows](#availability-windows) above) with real partial coverage, leaving whatever the trim can't close as a named remaining gap rather than quietly absorbing it. This is also where a template-less block (see [Individual assignment times](#individual-assignment-times) above) gets its first way to be created
+- Switching the scheduler itself onto `coverage_requirements` instead of `shift_requirements` — block planning from demand bands and availability windows, automatic trimming of a shift to what an employee's window actually covers (replacing today's all-or-nothing "fully contained" rule, see [Availability windows](#availability-windows) above, with real partial coverage), and named remaining gaps for whatever the trim can't close rather than quietly absorbing it. This is also where a template-less block (see [Individual assignment times](#individual-assignment-times) above) gets its first way to be created, and where `shift_requirements` is eventually retired. Opening hours and coverage bands themselves already exist and are validated and displayed today (see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above) — only the scheduler hasn't been switched over to them yet
 - Remaining production-readiness work: a publishing workflow, an audit log, data exports, GDPR housekeeping, and German labor-law (ArbZG) checks
 
 ## Tech Stack
@@ -181,6 +196,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 **Frontend**
 - React (with Vite)
 - React Router
+- Vitest + Testing Library (dev-only, component tests — see Local Setup below)
 
 **Backend**
 - Flask
@@ -197,6 +213,8 @@ schichtplan-tool/
 │   ├── i18n.py                  # Backend message translations (de/en) + t()
 │   ├── mailer.py               # Invitation email (SMTP, or logged in dev)
 │   ├── scheduler.py            # Backtracking scheduler (ordering + fairness)
+│   ├── coverage_model.py       # Pure coverage-curve/gap math (weekday demand bands, no DB)
+│   ├── migrations/              # Versioned schema migrations, 0001-0007 (see Operations below)
 │   ├── baselines.py            # Alternative algorithms, for comparison only
 │   ├── benchmark.py            # Head-to-head comparison run
 │   ├── test_scheduler.py       # Unit tests for the algorithm
@@ -218,11 +236,16 @@ schichtplan-tool/
         │   ├── SetPassword.jsx    # Where an invited employee picks their password
         │   ├── Employees.jsx     # Employee CRUD + constraints
         │   ├── ShiftTypes.jsx    # Shift type CRUD + weekday requirements
+        │   ├── BusinessHours.jsx      # Opening-hours-per-weekday + date-exception editor
+        │   ├── BusinessHours.test.jsx
+        │   ├── CoverageEditor.jsx     # Coverage-band editor (overlap/opening-hours validation)
+        │   ├── CoverageEditor.test.jsx
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
         └── components/
             ├── ScheduleGrid.jsx    # The schedule grid: reassign + swap UI
             ├── ShiftCell.jsx       # One shift/date cell: reassign, swap, suggestions, quick-log absence
             ├── CalendarView.jsx    # Read-only wall-planner view
+            ├── CoverageGaps.jsx    # Renders coverage_gaps against a fetched schedule
             ├── Distribution.jsx    # Shifts-per-employee balance panel
             └── AbsenceManager.jsx  # Employee self-service: report/cancel sick & vacation
 ```
@@ -251,7 +274,7 @@ On first launch the app has no accounts, so opening it lands on "Erstes Konto ei
 ./venv/bin/python -m pytest
 ```
 
-`pytest.ini` picks up every `test_*.py`, including `test_scheduler.py`'s existing `unittest.TestCase`s — pytest runs those unmodified alongside the rest, so there's no separate `unittest` invocation to remember. `.github/workflows/ci.yml` runs the same command on every push to `main` and every pull request, against Python 3.13 (the production version — see `render.yaml`) and 3.14 (so local development on a newer interpreter doesn't drift unnoticed); the workflow's second job runs the frontend's `npm run lint` and `npm run build` the same way.
+`pytest.ini` picks up every `test_*.py`, including `test_scheduler.py`'s existing `unittest.TestCase`s — pytest runs those unmodified alongside the rest, so there's no separate `unittest` invocation to remember. `.github/workflows/ci.yml` runs the same command on every push to `main` and every pull request, against Python 3.13 (the production version — see `render.yaml`) and 3.14 (so local development on a newer interpreter doesn't drift unnoticed). A separate `backend-postgres` job runs the same suite (minus `test_scheduler.py`, which is pure algorithm logic with no database access) against a real Postgres service container instead of SQLite — this is what actually exercises the Postgres dialect layer in `backend/db.py` and the migration runner, not just SQLite. A `frontend` job runs `npm run lint`, `npm run build`, and `npm test` the same way (see Frontend below).
 
 To run the algorithm comparison instead (same `requirements-dev.txt`, which also installs OR-Tools for the exact CP-SAT reference):
 
@@ -274,6 +297,14 @@ Create a `.env` file in the `frontend` folder with:
 ```
 VITE_API_URL=http://localhost:5001
 ```
+
+**Tests.** The project's first frontend test infrastructure, added in this stage alongside the coverage-band editor — the overlap validation that editor does is exactly the kind of component where clicking through the UI by hand stopped being enough. Vitest, `@testing-library/react` and `@testing-library/jest-dom` are dev dependencies; test files sit next to what they test (`frontend/src/pages/*.test.jsx`).
+
+```bash
+npm test -- --run
+```
+
+Plain `npm test` starts Vitest in watch mode, which is what you want locally; `--run` makes it execute once and exit, which is what CI needs so the job actually terminates.
 
 ## Deployment
 
@@ -302,7 +333,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`. To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above). To manage by hand:
 
 ```bash
 cd backend
@@ -364,8 +395,15 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | POST   | `/shift-types`                  | Create a shift type                                            |
 | PUT    | `/shift-types/<id>`               | Update a shift type                                             |
 | DELETE | `/shift-types/<id>`               | Delete a shift type (blocked if used by an existing schedule)   |
+| GET    | `/business-hours`                 | List the seven weekday opening-hours rows (HR)                       |
+| PUT    | `/business-hours`                 | Replace all seven weekday rows at once `[{weekday, open_time, close_time, closed}, ...]` (HR) |
+| GET    | `/business-hours/exceptions`      | List one-off date exceptions to the weekday rule (HR)                |
+| POST   | `/business-hours/exceptions`      | Add an exception for one date `{date, open_time, close_time, closed, label}` (HR) |
+| DELETE | `/business-hours/exceptions/<date>` | Remove a date's exception, reverting it to the weekday rule (HR)   |
+| GET    | `/coverage-requirements`          | List all coverage bands, every weekday (HR)                          |
+| PUT    | `/coverage-requirements`          | Replace the full set of coverage bands at once; rejects a band that overlaps another on the same weekday or falls outside that weekday's opening hours (HR) |
 | POST   | `/schedules/generate`            | Generate (or regenerate) a month's schedule `{year, month}`      |
-| GET    | `/schedules/<year>/<month>`      | Get a month's schedule, its assignments, absences, and the workload distribution |
+| GET    | `/schedules/<year>/<month>`      | Get a month's schedule, its assignments, absences, the workload distribution, and coverage gaps against the opening-hours-bound demand bands |
 | DELETE | `/schedules/<year>/<month>`      | Delete a month's schedule                                           |
 | PUT    | `/schedules/<year>/<month>/shift-times` | Change a shift type's hours on one date, for everyone assigned to it; null times reset it to the shift type's default |
 | POST   | `/schedules/<year>/<month>/slots` | Add one more place to a shift on a single date; `shift_type_id` may be omitted for a template-less block, which must then bring its own start/end times |
@@ -376,7 +414,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (163 tests at the time of writing — `cd backend && pytest` prints the current number; 22 of them are Postgres-only and skip without a Postgres instance), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (216 tests at the time of writing — `cd backend && pytest` prints the current number; 28 of them are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band editor's overlap and opening-hours validation), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

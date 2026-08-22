@@ -392,6 +392,66 @@ TRANSLATIONS = {
         'en': '{name} normally does not work {weekday} at all.',
     },
 
+    # ---- business hours / exceptions ----
+    'business_hours_length': {
+        'de': 'Es müssen genau 7 Einträge übergeben werden, einer je Wochentag (Montag bis Sonntag)',
+        'en': 'Exactly 7 entries must be provided, one per weekday (Monday through Sunday)',
+    },
+    'business_hours_entry_invalid': {
+        'de': 'Jeder Eintrag muss ein Objekt mit Wochentag, Öffnungs- und Schließzeit sein',
+        'en': 'Each entry must be an object with a weekday, opening time and closing time',
+    },
+    'business_hours_weekday_duplicate': {
+        'de': 'Jeder Wochentag darf nur einmal vorkommen',
+        'en': 'Each weekday may only appear once',
+    },
+    'business_hours_exception_date_taken': {
+        'de': 'Für dieses Datum besteht bereits eine Ausnahme',
+        'en': 'An exception already exists for this date',
+    },
+    'business_hours_exception_not_found': {
+        'de': 'Keine Ausnahme für dieses Datum gefunden',
+        'en': 'No exception found for this date',
+    },
+    'business_hours_exception_deleted': {
+        'de': 'Ausnahme gelöscht',
+        'en': 'Exception deleted',
+    },
+    'business_hours_closed_with_band': {
+        'de': 'Am {weekday} ist das Bedarfsband {start}–{end} gespeichert; '
+              'der Tag kann nicht auf geschlossen gesetzt werden. Bitte zuerst das Band entfernen.',
+        'en': 'The coverage band {start}–{end} is saved for {weekday}; '
+              'that day cannot be set to closed. Please remove the band first.',
+    },
+    'business_hours_conflicts_band': {
+        'de': 'Die neue Öffnungszeit ({open}–{close}) am {weekday} passt nicht zum '
+              'gespeicherten Bedarfsband {start}–{end}. Bitte zuerst das Band anpassen.',
+        'en': 'The new opening hours ({open}–{close}) on {weekday} do not fit the '
+              'saved coverage band {start}–{end}. Please adjust the band first.',
+    },
+
+    # ---- coverage requirement bands ----
+    'coverage_requirement_entry_invalid': {
+        'de': 'Jeder Eintrag muss ein Objekt mit Wochentag, Start-, Endzeit und Bedarf sein',
+        'en': 'Each entry must be an object with a weekday, start time, end time and required headcount',
+    },
+    'required_count_label': {
+        'de': 'Der Bedarf',
+        'en': 'The required headcount',
+    },
+    'coverage_requirement_overlap': {
+        'de': 'Bänder überschneiden sich am {weekday}: {start1}–{end1} und {start2}–{end2}',
+        'en': 'Bands overlap on {weekday}: {start1}–{end1} and {start2}–{end2}',
+    },
+    'coverage_requirement_closed_day': {
+        'de': 'Am {weekday} ist geschlossen, dort ist kein Bedarfsband erlaubt ({start}–{end})',
+        'en': 'The business is closed on {weekday}; no coverage band is allowed there ({start}–{end})',
+    },
+    'coverage_requirement_outside_hours': {
+        'de': 'Band {start}–{end} am {weekday} liegt außerhalb der Öffnungszeit ({open}–{close})',
+        'en': 'Band {start}–{end} on {weekday} lies outside the opening hours ({open}–{close})',
+    },
+
     # ---- misc ----
     'api_root': {
         'de': 'Schichtplan-Tool API',
