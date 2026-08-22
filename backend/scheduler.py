@@ -22,26 +22,80 @@ def time_to_minutes(hhmm):
     return int(hours) * 60 + int(minutes)
 
 
+def _time_range_minutes(start_time, end_time):
+    """Start and end minute of a time range, since midnight of the start day.
+
+    An end at or before its start is taken to lie on the following day and
+    gets 1440 added - the same midnight convention as shift_duration_minutes().
+    Shared foundation for window_contains_shift() below and, via
+    coverage_model's re-export, for the demand-band logic - one rollover rule,
+    not one copy per caller.
+    """
+    start = time_to_minutes(start_time)
+    end = time_to_minutes(end_time)
+    if end <= start:
+        end += 24 * 60
+    return start, end
+
+
+def _ranges_overlap(range_a, range_b):
+    """Do two minute ranges overlap - even across midnight?
+
+    Half-open bounds [start, end): two ranges that merely touch (one's end
+    equals the other's start) do not overlap. The second range is additionally
+    checked one cycle earlier and later (+-1440 minutes), because the minute
+    axis is really a ring: minute 1800 of a night shift is the same instant as
+    minute 360 of the following day.
+
+    The one place this shift is computed - coverage_model's overlap and
+    containment checks reuse this function so there aren't several similar
+    versions of the same ring logic.
+    """
+    start_a, end_a = range_a
+    start_b, end_b = range_b
+    return any(
+        start_a < end_b + shift and start_b + shift < end_a
+        for shift in (-24 * 60, 0, 24 * 60)
+    )
+
+
+def _closed_range(open_time, close_time):
+    """The closed period as a minute range: from close_time to the next open_time.
+
+    Empty (end <= start) when open around the clock - exactly the case of a
+    00:00-00:00 window, which _time_range_minutes() turns into [0, 1440) and
+    whose closed period collapses to [1440, 1440).
+    """
+    open_min, close_min = _time_range_minutes(open_time, close_time)
+    return close_min, open_min + 24 * 60
+
+
 def window_contains_shift(window, start_time, end_time):
     """Does the shift fit entirely inside this one window?
 
-    Entirely, not partially - partial coverage is a later stage. Computed in
-    minutes since midnight of the start day, using the same midnight
-    convention as shift_duration_minutes(): an end at or before its start is
-    taken to lie on the following day and gets 1440 added. That lets a night
-    shift compare correctly against a window that also crosses midnight.
+    Entirely, not partially - partial coverage is a later stage. Checked via
+    the complement: the shift lies inside the window exactly when it does not
+    touch the window's CLOSED period. The direct comparison "window_start <=
+    shift_start and shift_end <= window_end" cannot handle a window that spans
+    the full day: a night shift 22:00-06:00 is [1320, 1800), a round-the-clock
+    window 00:00-00:00 is [0, 1440), and 1800 <= 1440 is false - even though
+    the window is open around the clock and the shift obviously fits. Read via
+    the closed period this resolves itself: it is empty there, and an empty
+    range can't intersect anything.
+
+    Shifting the shift by +-1440 and still comparing straight is not enough:
+    none of the three placements of [1320, 1800) lie within [0, 1440), because
+    the shift crosses the window's edge rather than sitting beside it. The
+    ring-ness lives in the window, not in the shift.
     """
-    shift_start = time_to_minutes(start_time)
-    shift_end = time_to_minutes(end_time)
-    if shift_end <= shift_start:
-        shift_end += 24 * 60
+    closed_start, closed_end = _closed_range(window['start_time'], window['end_time'])
+    if closed_end <= closed_start:
+        return True
 
-    window_start = time_to_minutes(window['start_time'])
-    window_end = time_to_minutes(window['end_time'])
-    if window_end <= window_start:
-        window_end += 24 * 60
-
-    return window_start <= shift_start and shift_end <= window_end
+    return not _ranges_overlap(
+        _time_range_minutes(start_time, end_time),
+        (closed_start, closed_end),
+    )
 
 
 def window_is_valid_on(window, iso_date):

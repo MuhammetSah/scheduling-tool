@@ -84,6 +84,16 @@ class FensterEnthaeltSchicht(unittest.TestCase):
         fenster = {'start_time': '20:00', 'end_time': '06:00'}
         self.assertFalse(window_contains_shift(fenster, '19:00', '23:00'))
 
+    def test_ganztaegiges_fenster_enthaelt_nachtschicht(self):
+        """Regressionstest fuer den Mitternachtsfehler: ein Fenster 00:00-00:00
+        ("rund um die Uhr verfuegbar") wird als [0, 1440) abgebildet - eine
+        Nachtschicht 22:00-06:00 als [1320, 1800). Der direkte Vergleich
+        window_start <= shift_start and shift_end <= window_end verneinte das
+        bisher (1800 <= 1440 ist falsch), obwohl die Schicht offensichtlich in
+        ein rund um die Uhr offenes Fenster passt."""
+        fenster = {'start_time': '00:00', 'end_time': '00:00'}
+        self.assertTrue(window_contains_shift(fenster, '22:00', '06:00'))
+
 
 class FensterGueltigkeit(unittest.TestCase):
     def test_ohne_grenzen_ist_ein_fenster_immer_gueltig(self):
@@ -205,6 +215,18 @@ class ModusWindows(unittest.TestCase):
         # das Fenster gilt nur freitags, also verboten.
         nachtschicht_als_samstagsslot = _slot(date='2026-08-15', weekday=5, start_time='22:00', end_time='06:00')
         self.assertFalse(structurally_eligible(mitarbeiter, nachtschicht_als_samstagsslot))
+
+    def test_ganztaegige_verfuegbarkeit_erlaubt_nachtschicht(self):
+        """Der reale Symptomfall aus dem Review: ein Mitarbeiter mit einem
+        rund-um-die-Uhr-Fenster (00:00-00:00) an diesem Wochentag muss fuer
+        eine Nachtschicht in Frage kommen, nicht ausgeschlossen werden."""
+        mitarbeiter = _employee(
+            availability_mode='windows',
+            availability=[{'weekday': 4, 'start_time': '00:00', 'end_time': '00:00',
+                           'valid_from': None, 'valid_until': None}],
+        )
+        nachtschicht = _slot(weekday=4, start_time='22:00', end_time='06:00')
+        self.assertTrue(structurally_eligible(mitarbeiter, nachtschicht))
 
     def test_slot_ohne_zeiten_wird_nicht_eingeschraenkt(self):
         """build_slots() setzt start_time/end_time auf None, wenn die Schichtart
