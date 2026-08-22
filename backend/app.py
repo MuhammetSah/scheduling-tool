@@ -693,8 +693,21 @@ def replace_employee_constraints(connection, employee_id, data):
     for shift_type_id in parse_int_list(data.get('allowed_shift_types')):
         cursor.execute('INSERT INTO employee_allowed_shift_types (employee_id, shift_type_id) VALUES (?, ?)', (employee_id, shift_type_id))
 
+    replace_employee_availability(cursor, employee_id, data.get('availability'))
+
+
+def replace_employee_availability(cursor, employee_id, entries):
+    """Replace one employee's working-time windows, and nothing else.
+
+    Split out of replace_employee_constraints() above so that
+    PUT /employees/<id>/availability can reuse the validation without
+    inheriting its neighbours: that function clears every constraint list
+    before rewriting it, so calling it with only an `availability` key would
+    silently drop the employee's free weekdays, blocked dates and allowed
+    shift types - a route that changes more than its name says.
+    """
     cursor.execute('DELETE FROM employee_availability WHERE employee_id = ?', (employee_id,))
-    for entry in data.get('availability') or []:
+    for entry in entries or []:
         if not isinstance(entry, dict):
             raise ValueError(t(g.lang, 'availability_entry_invalid'))
         try:
@@ -870,6 +883,75 @@ def update_employee(employee_id):
     except ValueError as e:
         return jsonify({'message': str(e)}), 400
     return jsonify(employee)
+
+
+@app.route('/employees/<int:employee_id>/availability', methods=['GET'])
+def get_employee_availability(employee_id):
+    """An employee's own working-time windows, readable by them and by HR.
+
+    Spec §6 asked for this route from the start; the windows ended up hanging
+    off PUT /employees/<id> (@hr_required) instead, which meant the one person
+    the windows are about could not see them. Etappe 4 turns the windows into
+    what the planner cuts blocks against, so that gap stops being cosmetic.
+
+    Writing stays HR-only (see the PUT below): an employee announcing their own
+    availability is a different feature - a request someone approves - not this
+    one.
+    """
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    cursor = get_db().cursor()
+    cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    employee = serialize_employee(cursor, row)
+    return jsonify({
+        'availability_mode': employee['availability_mode'],
+        'availability': employee['availability'],
+    })
+
+
+@app.route('/employees/<int:employee_id>/availability', methods=['PUT'])
+@hr_required
+def put_employee_availability(employee_id):
+    """Replace one employee's windows without touching the rest of their record.
+
+    Same replace-completely semantics as the constraint lists on
+    PUT /employees/<id>, and the same writer: replace_employee_availability()
+    is the only place that validates and stores windows, so this route hands
+    the payload straight to it rather than growing a second copy of that
+    validation.
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    data = request.get_json(silent=True) or {}
+    availability_mode = data.get('availability_mode') or 'anytime'
+    if availability_mode not in ('anytime', 'windows'):
+        return jsonify({'message': t(g.lang, 'availability_mode_invalid')}), 400
+
+    try:
+        replace_employee_availability(cursor, employee_id, data.get('availability'))
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+
+    cursor.execute('UPDATE employees SET availability_mode = ? WHERE id = ?',
+                   (availability_mode, employee_id))
+    connection.commit()
+
+    cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
+    employee = serialize_employee(cursor, cursor.fetchone())
+    return jsonify({
+        'availability_mode': employee['availability_mode'],
+        'availability': employee['availability'],
+    })
 
 
 @app.route('/employees/<int:employee_id>', methods=['DELETE'])
