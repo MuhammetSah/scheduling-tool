@@ -42,7 +42,7 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | `a6e06e2` — Etappen 0 bis 4, 5a und 5b gemergt und deployt (PR #16, #17, #18); Render-Deploy `dep-da5166ht0dsc73c3d1i0` ist `live`, die API antwortet mit 200 |
+| `main` | `b4dcc21` — Etappen 0 bis 4, 5a, 5b und 5e gemergt und deployt (PR #16, #17, #18, #19); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests. Die Etappen-Branches sind nach dem Merge lokal und remote gelöscht |
 | Aktueller Branch | keiner — `main` ist der Stand |
 | Testsuite | 322 passed / 32 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 18 Frontend-Tests (Vitest + Testing Library) |
