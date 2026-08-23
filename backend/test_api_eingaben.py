@@ -322,3 +322,47 @@ def test_dasselbe_fenster_mit_verschiedenen_grenzen_bleibt_erlaubt(hr_client):
         ]})
 
     assert antwort.status_code == 200, antwort.json
+
+
+def test_leere_zeiten_setzen_die_ausnahme_zurueck(hr_client):
+    """Aus dem Review zu PR #28, und der Fehler kam aus derselben Aenderung.
+
+    Das Formular schickt leere Felder als "" und nicht als null. Vorher fiel
+    das auf die Formatpruefung und ergab eine 400; nach dem Umbau auf
+    parse_assignment_times() - das "" zu None macht - fiel es hinter die
+    Ruecksetz-Pruefung in ein INSERT mit NULL-Zeiten, und die Spalte ist NOT
+    NULL. Also ein 500er, wo vorher wenigstens eine verstaendliche 400 stand.
+    Geparst wird jetzt vor der Ruecksetz-Pruefung.
+    """
+    art = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'],
+        'start_time': '10:00', 'end_time': '18:00'})
+
+    antwort = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'],
+        'start_time': '', 'end_time': ''})
+
+    assert antwort.status_code == 200, antwort.json
+    plan = hr_client.get('/schedules/2026/9').json
+    assert not any(z['time_overridden'] for z in plan['assignments'])
+
+
+def test_null_zeiten_setzen_die_ausnahme_weiterhin_zurueck(hr_client):
+    """Gegenprobe: der bisherige Weg bleibt der bisherige Weg."""
+    art = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+    hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'],
+        'start_time': '10:00', 'end_time': '18:00'})
+
+    antwort = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'],
+        'start_time': None, 'end_time': None})
+
+    assert antwort.status_code == 200, antwort.json
+    plan = hr_client.get('/schedules/2026/9').json
+    assert not any(z['time_overridden'] for z in plan['assignments'])

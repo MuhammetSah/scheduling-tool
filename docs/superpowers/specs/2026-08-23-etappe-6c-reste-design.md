@@ -40,6 +40,16 @@ Ursache, nicht der Fehler.
 
 **Gegenprobe:** `end < start` bleibt erlaubt — das ist die Nachtschicht, nicht der Fehler.
 
+**Das Review zu PR #28 hat einen Fehler gefunden, den genau dieser Umbau eingeführt hat.** Das
+Formular schickt geleerte Felder als `""`, nicht als `null`. Vorher fielen sie auf die
+Formatprüfung und ergaben eine verständliche 400; danach machte der Parser `None` daraus — aber
+die Rücksetz-Prüfung stand *davor*, also fiel `""` in ein `INSERT` mit NULL-Zeiten, und die Spalte
+ist `NOT NULL`. Ein 500er, wo vorher eine 400 stand.
+
+**Die Lehre:** wer eine Prüfung durch eine andere ersetzt, verschiebt damit auch, *wann* Werte
+normalisiert werden. Die Reihenfolge der Zweige dahinter ist Teil des Umbaus, nicht Umgebung.
+Geparst wird jetzt vor der Rücksetz-Prüfung, mit Test und Gegenprobe für beide Schreibweisen.
+
 ## 3. Dasselbe Fenster zweimal
 
 Zwei identische Arbeitszeitfenster wurden gespeichert und danach überall doppelt angezeigt. Der

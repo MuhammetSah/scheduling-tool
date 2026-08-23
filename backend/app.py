@@ -2297,6 +2297,21 @@ def set_shift_times(year, month):
     if not cursor.fetchone():
         return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
 
+    # The same parser update_assignment() uses, rather than a second check that
+    # drifts from it. It was already drifting: this route accepted an equal
+    # start and end, which shift_duration_minutes() reads as running past
+    # midnight and turns into a 1440-minute day. And it answered "wrong format"
+    # for a half-filled pair, pointing at the one thing that was fine.
+    #
+    # Before the reset branch, not after: the form sends cleared fields as ""
+    # rather than null, and the parser is what turns those into None. Checking
+    # first would let "" fall past the reset and into an INSERT of NULL times,
+    # which the NOT NULL column answers with a 500.
+    try:
+        start_time, end_time = parse_assignment_times(data)
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
     if start_time is None and end_time is None:
         cursor.execute(
             'DELETE FROM shift_time_overrides WHERE schedule_id = ? AND date = ? AND shift_type_id = ?',
@@ -2304,16 +2319,6 @@ def set_shift_times(year, month):
         )
         connection.commit()
         return jsonify({'message': t(g.lang, 'times_reset_to_default')}), 200
-
-    # The same parser update_assignment() uses, rather than a second check that
-    # drifts from it. It was already drifting: this route accepted an equal
-    # start and end, which shift_duration_minutes() reads as running past
-    # midnight and turns into a 1440-minute day. And it answered "wrong format"
-    # for a half-filled pair, pointing at the one thing that was fine.
-    try:
-        start_time, end_time = parse_assignment_times(data)
-    except ValueError as err:
-        return jsonify({'message': str(err)}), 400
 
     cursor.execute('''
         INSERT INTO shift_time_overrides (schedule_id, date, shift_type_id, start_time, end_time)
