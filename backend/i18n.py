@@ -369,6 +369,12 @@ TRANSLATIONS = {
         'de': 'weekend_weight darf nicht negativ sein',
         'en': 'weekend_weight must not be negative',
     },
+    'no_coverage_defined': {
+        'de': 'Es ist kein Bedarfsband hinterlegt — der Plan bleibt deshalb '
+              'leer. Der Bedarf lässt sich unter „Bedarf" festlegen.',
+        'en': 'No coverage bands are defined — that is why the plan is empty. '
+              'You can set them under “Coverage”.',
+    },
     'need_a_shift_type_first': {
         'de': 'Bitte zuerst mindestens eine Schichtart anlegen',
         'en': 'Please create at least one shift type first',

@@ -160,12 +160,16 @@ function SchedulePage({ setFlash, user }) {
       })
       setSchedule(data)
       setWarnings([])
-      setFlash({
-        type: data.unfilled_count > 0 ? 'error' : 'success',
-        text: data.unfilled_count > 0
-          ? t('schedule.generatedWithGapsFlash', { n: data.unfilled_count })
-          : t('schedule.generatedFullFlash'),
-      })
+      // Der Hinweis geht vor: ein leerer Plan ohne Bedarfsband meldet null
+      // Lücken und sähe sonst wie ein voller Erfolg aus.
+      setFlash(data.notice
+        ? { type: 'warning', text: data.notice }
+        : {
+            type: data.unfilled_count > 0 ? 'error' : 'success',
+            text: data.unfilled_count > 0
+              ? t('schedule.generatedWithGapsFlash', { n: data.unfilled_count })
+              : t('schedule.generatedFullFlash'),
+          })
     } catch (err) {
       // Der Plan enthält Handkorrekturen - einmal nachfragen, dann bestätigt
       // wiederholen. err.data trägt manually_edited_count aus der Antwort.

@@ -1103,6 +1103,17 @@ button.btn-small {
   border: 1px solid #6ee7b7;
 }
 
+/* Seit Etappe 8 setzen Seiten auch type: 'warning' - fuer Hinweise, die
+   weder Erfolg noch Fehler sind: ein Tausch, der durchging aber Absprachen
+   verletzt, ein Plan, der leer bleibt, weil kein Bedarf hinterlegt ist. Ohne
+   diese Regel blieb der Kasten unformatiert und sah aus wie gar keine
+   Meldung. */
+.flash-warning {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+
 .flash-error {
   background-color: #fee2e2;
   color: #991b1b;
