@@ -42,6 +42,11 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
+**Das Nächste ist der 07.09.2026** — die Datenbank läuft ab. Das Umstellungsblatt steht in
+[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md): Reihenfolge, Prüfungen, der Weg zurück. Der
+Sprung vom Bestandsstand `0007` auf `0017` ist geprobt (Etappe 11), die neue Instanz selbst liegt
+beim Nutzer.
+
 **Die Roadmap ist abgearbeitet.** Etappe 8 brachte den geführten Schichttausch, Etappe 9 die
 letzten beiden ArbZG-Regeln, Etappe 10 die Nachweise. Damit ist jeder Punkt umgesetzt, den das
 Entwurfsdokument und das README als offen führten.
@@ -76,10 +81,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 bis 10 gemergt und deployt (PR #16–#32); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 11 gemergt und deployt (PR #16–#33); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 551 passed / 41 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 45 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 555 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 48 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0017`. `0017_qualifications` legt den Nachweiskatalog und zwei Verknüpfungstabellen an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -943,6 +948,37 @@ ohne Vorlage nichts. Seit Etappe 4 schneidet der Planer genau solche Blöcke zu.
 2. **Die Anonymisierung übersah die Nachweise.** `delete_employee()` räumt seit 5i eine feste Liste
    personenbezogener Tabellen; die neue stand nicht darauf.
 
+## Etappe 11 — abgeschlossen, gemergt, deployt
+
+Keine Spec: das hier ist kein Vorhaben, sondern eine Probe vor einem Termin.
+
+**Der Bestandsweg war ungeprüft.** Das Backup vom 22.08. steht auf `schema_migrations` mit sieben
+Zeilen — Stand `0007`. Wer es zurückspielt, lässt zehn Migrationen über gefüllte Tabellen laufen.
+`backend/test_migrations_bestand.py` baut genau das nach (0001–0006 anwenden, Daten einspielen,
+dann 0007, dann der Rest) und prüft danach, dass nichts verloren geht, dass die abgeleiteten
+Bänder das `DROP` in `0010` überleben, dass `0012` jeden Plan auf `published` hebt — **und dass
+die heutige Anwendung den gehobenen Bestand liest.**
+
+**Nachgebaute Daten, nicht der echte Dump.** Er enthält drei Namen und zweiundsechzig Schichten im
+Klartext und gehört weder ins Repository noch in einen CI-Lauf.
+
+**Der erste Tag hat eine Lücke gehabt:** mit einer Schichtart, aber ohne Bedarfsband antwortete
+„Plan erzeugen" mit 201, null Blöcken, null gemeldeten Lücken und keinem Wort. Jetzt sagt es,
+warum der Plan leer bleibt.
+
+**Und die Testsuite hat meinen ersten Entwurf korrigiert.** Der lehnte mit 400 ab; 87
+Bestandstests fielen um und zeigten damit, dass *einen leeren Plan anlegen und von Hand füllen*
+ein gängiger Weg ist. **Die Beschwerde war das Schweigen, nicht die Erlaubnis** — gesagt statt
+verboten.
+
+**Zwei Annahmen vorher nachgerechnet statt CI raten lassen:** `coverage_curve()` verschmilzt Früh-
+und Spätschicht zu einem Band (fünf statt vierzehn), und `GET /employees` blendet Grabsteine aus,
+nicht Inaktive.
+
+**Aus dem Review:** `.flash-warning` gab es im Stylesheet nie — seit Etappe 8 setzen mehrere
+Seiten `type: 'warning'`, und der Kasten blieb unformatiert. Rückwirkend hat also auch die
+Tauschseite ihre Hinweise unsichtbar angezeigt.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -1080,6 +1116,12 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     `UNIQUE` — nicht aus Gewohnheit, sondern weil die Dialektschicht jedem `INSERT` ein
     `RETURNING id` anhängt (Fallstrick 16). Ein zusammengesetzter Primärschlüssel ist die sauberere
     Modellierung und auf Postgres ein Laufzeitfehler.
+
+27. **Ein Riegel, den 87 Tests umwerfen, ist der falsche Riegel.** Wenn eine neue Prüfung breit
+    Bestand bricht, sagt die Suite meistens nicht „die Tests sind veraltet", sondern „das verbotene
+    Verhalten wird gebraucht". In Etappe 11 war es das Anlegen eines leeren Plans zum
+    Von-Hand-Füllen. Erst fragen, was die Tests *benutzen*, dann entscheiden, ob es ein Hinweis
+    oder ein Verbot wird.
 
 ## Offen — liegt beim Nutzer
 
