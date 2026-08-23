@@ -1774,6 +1774,83 @@ def sundays_worked_in_year(cursor, employee_id, year, except_date, exclude_assig
                if iso != except_date and date.fromisoformat(iso).weekday() == 6)
 
 
+def boundary_context(cursor, year, month):
+    """What the neighbouring months already hold, for the generator to respect.
+
+    A month is a billing period, not a unit of rest. Two rules run straight
+    across the boundary and used to stop at it, because both live only in one
+    search run's state and that state started empty on the 1st:
+
+    - **§ 5 Abs. 1 ArbZG, the eleven hours between two shifts.** A night shift
+      ending 06:00 on the 31st and an early shift starting 06:00 on the 1st are
+      each fine within their own month and leave zero hours of rest.
+    - **The weekly-hours target.** A calendar week does not stop at the end of a
+      month either: an empty counter hands everyone a fresh weekly budget on
+      whatever weekday the 1st happens to be, and the straddling week quietly
+      runs over.
+
+    Loaded from the *saved* plans on both sides. Assignments inside the month
+    being generated are excluded - the very same request is about to delete
+    them (see generate_schedule_route), so counting them would dock everyone
+    for shifts that are being replaced. This is the same reasoning
+    scheduling_history() records for the run length and the Sunday budget,
+    which have crossed the boundary since Etappe 5b.
+
+    Returns {'day_hours': ..., 'week_minutes': ...} shaped for
+    scheduler.generate_schedule's `boundary` parameter.
+
+    The range is seven days either side rather than one: the rest period only
+    ever needs the two flanking dates, but a week straddling the boundary can
+    reach six days into the neighbouring month.
+    """
+    first_of_month = date(year, month, 1)
+    last_of_month = date(year, month, calendar.monthrange(year, month)[1])
+    davor = first_of_month - timedelta(days=7)
+    danach = last_of_month + timedelta(days=7)
+
+    cursor.execute(
+        'SELECT employee_id, date, start_time, end_time, break_minutes '
+        'FROM shift_assignments '
+        'WHERE employee_id IS NOT NULL AND date BETWEEN ? AND ? '
+        'AND (date < ? OR date > ?)',
+        (davor.isoformat(), danach.isoformat(),
+         first_of_month.isoformat(), last_of_month.isoformat()),
+    )
+
+    day_hours = {}
+    week_minutes = {}
+    flanken = {(first_of_month - timedelta(days=1)).isoformat(),
+               (last_of_month + timedelta(days=1)).isoformat()}
+
+    for row in cursor.fetchall():
+        if not (row['start_time'] and row['end_time']):
+            # No minute axis, so it can neither bound a rest period nor
+            # contribute working time. Skipped rather than guessed at.
+            continue
+        schluessel = (row['employee_id'], row['date'])
+
+        if row['date'] in flanken:
+            day_hours.setdefault(schluessel, []).append(
+                (row['start_time'], row['end_time']))
+
+        d = date.fromisoformat(row['date'])
+        week_start = (d - timedelta(days=d.weekday())).isoformat()
+        # Only the weeks a slot in this month can actually land in. A week
+        # wholly inside the neighbouring month would seed a counter nothing
+        # ever reads.
+        if not (first_of_month <= date.fromisoformat(week_start) + timedelta(days=6)
+                and date.fromisoformat(week_start) <= last_of_month):
+            continue
+        minuten = net_working_minutes(
+            shift_duration_minutes(row['start_time'], row['end_time']),
+            row['break_minutes'])
+        if minuten:
+            woche = (row['employee_id'], week_start)
+            week_minutes[woche] = week_minutes.get(woche, 0) + minuten
+
+    return {'day_hours': day_hours, 'week_minutes': week_minutes}
+
+
 def load_employees_for_scheduling(cursor, year=None, month=None):
     cursor.execute('SELECT * FROM employees WHERE active = 1')
     employees = []
@@ -2038,7 +2115,8 @@ def generate_schedule_route():
         slots = build_month_blocks(
             year, month, shift_types, effective_bands_by_date(cursor, year, month), employees)
         result = generate_schedule(year, month, employees, shift_types,
-                                   weekend_weight=weekend_weight, slots=slots)
+                                   weekend_weight=weekend_weight, slots=slots,
+                                   boundary=boundary_context(cursor, year, month))
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_year_or_month')}), 400
 
