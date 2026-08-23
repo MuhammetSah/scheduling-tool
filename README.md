@@ -132,6 +132,24 @@ Instead the employee row becomes a tombstone — name replaced, email gone, inac
 
 JSON rather than PDF: Art. 15 Abs. 3 asks for a commonly used electronic format, JSON is one, and the alternative would be a dependency bought for the sake of looking like paper.
 
+## Login throttling
+
+Ten failed attempts in fifteen minutes, then a 429 — high enough that a mistyping human never hits it, low enough that guessing is useless.
+
+**Per username, not per IP.** An IP block catches every colleague behind a shared office connection, and an attacker with rotating addresses walks around it. The lockout also blocks the *correct* password while it lasts: a brake that lets the right answer through is no brake at all.
+
+### The two ways past it, both now closed
+
+**An invited account was free.** An account created by invitation has no password yet, and saying so plainly is a deliberate trade — the invitation went to that person's mailbox, and "wrong password" helps nobody who never set one. But that reply also confirms the username exists, unlike the identical message every other path returns, and the branch returned before recording anything. Unlimited, uncounted: a name list at no cost. The attempt is now counted like any other, so the branch runs out with everything else.
+
+**Checking and counting were two steps.** `is_locked_out()` reads a counter that `record_attempt()` raises a moment later. Two simultaneous requests both read the same below-the-limit count and both get through — ten attempts per quarter hour becomes as many as the attacker opens connections, and the throttle stops being a limit and becomes a suggestion.
+
+Both now happen inside a per-username Postgres advisory lock (`security.attempt_guard()`), following the same pattern the migration runner already uses. **Per username, not global** — a global lock would queue every login in the building behind every other one, and there is a counter-test for exactly that.
+
+**Deliberately asymmetric: no lock on SQLite.** SQLite appears in this project only locally and only as a single process, so the race is not reachable there, and a lock without a reachable race is untested code on the path every developer uses daily. The same reasoning the migration runner records.
+
+The race is not asserted by argument but reproduced: two threads, each with its own connection and therefore its own Postgres session, with half a second between reading and writing so the race happens every time rather than occasionally. A flaky concurrency test is worse than none.
+
 ## Self-service sick / vacation
 
 The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
@@ -411,7 +429,7 @@ schichtplan-tool/
 │   ├── exports.py              # iCal and CSV formatting (no DB)
 │   ├── security.py             # Login throttling, backed by the login_attempts table
 │   ├── timeutil.py             # "Current month" in the operating timezone
-│   ├── migrations/              # Versioned schema migrations, 0001-0008 (see Operations below)
+│   ├── migrations/              # Versioned schema migrations, 0001-0014 (see Operations below)
 │   ├── baselines.py            # Alternative algorithms, for comparison only
 │   ├── benchmark.py            # Head-to-head comparison run
 │   ├── test_scheduler.py       # Unit tests for the algorithm (the compatibility guarantee)
@@ -425,6 +443,9 @@ schichtplan-tool/
 │   ├── test_api_exports.py     # Who may download what
 │   ├── test_api_dsgvo.py       # Access, anonymisation, retention
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
+│   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
+│   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
+│   ├── test_migrations_postgres.py  # The dialect layer and both advisory locks, real Postgres
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
 └── frontend/
@@ -449,6 +470,7 @@ schichtplan-tool/
         │   ├── CoverageEditor.jsx     # Coverage-band editor (overlap/opening-hours validation)
         │   ├── CoverageEditor.test.jsx
         │   ├── AuditLog.jsx      # The change log, deliberately raw
+        │   ├── Employees.test.jsx
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
         └── components/
             ├── ScheduleGrid.jsx    # The schedule grid: reassign + swap UI
@@ -638,7 +660,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (440 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (459 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

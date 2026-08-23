@@ -90,7 +90,7 @@ def test_ip_wird_in_produktion_ueber_proxyfix_aus_x_forwarded_for_gelesen(monkey
 def test_zu_viele_fehlversuche_werden_gesperrt(hr_client):
     hr_client.post('/logout')
 
-    for _ in range(10):
+    for _ in range(security.MAX_FAILED_ATTEMPTS):
         assert hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'}).status_code == 401
 
     gesperrt = hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'})
@@ -104,20 +104,20 @@ def test_zu_viele_fehlversuche_werden_gesperrt(hr_client):
 def test_erfolgreiche_anmeldung_setzt_den_zaehler_zurueck(hr_client):
     hr_client.post('/logout')
 
-    for _ in range(9):
+    for _ in range(security.MAX_FAILED_ATTEMPTS - 1):
         hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'})
 
     assert hr_client.post('/login', json={'username': 'hr', 'password': 'passwort-123'}).status_code == 200
 
-    # Nach dem Zuruecksetzen sind wieder zehn Versuche frei.
+    # Nach dem Zuruecksetzen ist das volle Kontingent wieder frei.
     hr_client.post('/logout')
-    for _ in range(9):
+    for _ in range(security.MAX_FAILED_ATTEMPTS - 1):
         assert hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'}).status_code == 401
 
 
 def test_ein_anderer_benutzername_ist_nicht_mitgesperrt(hr_client):
     hr_client.post('/logout')
-    for _ in range(11):
+    for _ in range(security.MAX_FAILED_ATTEMPTS + 1):
         hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'})
 
     # 401 (unbekannter Benutzer), nicht 429 - die Sperre gilt pro Benutzername.
@@ -126,7 +126,7 @@ def test_ein_anderer_benutzername_ist_nicht_mitgesperrt(hr_client):
 
 def test_sperrmeldung_kommt_in_der_angeforderten_sprache(hr_client):
     hr_client.post('/logout')
-    for _ in range(11):
+    for _ in range(security.MAX_FAILED_ATTEMPTS + 1):
         hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'})
 
     antwort = hr_client.post('/login', json={'username': 'hr', 'password': 'falsch'},
@@ -175,3 +175,54 @@ def test_unerwarteter_fehler_liefert_json_mit_request_id(client, monkeypatch):
     assert 'absichtlich' not in body
     assert 'RuntimeError' not in body
     assert 'Traceback' not in body
+
+
+# ---------- Der eingeladene Zugang, der nichts zaehlte ----------
+
+
+def _eingeladen(hr_client):
+    """Ein Konto mit Einladung, aber ohne gesetztes Passwort."""
+    person = hr_client.post('/employees', json={
+        'name': 'Anna', 'email': 'anna@example.com'}).json
+    hr_client.post('/register', json={
+        'username': 'anna', 'role': 'employee', 'employee_id': person['id']})
+    hr_client.post('/logout')
+
+
+def test_ein_eingeladener_zugang_sagt_dass_kein_passwort_gesetzt_ist(hr_client):
+    """Gegenprobe zuerst: die hilfreiche Meldung bleibt.
+
+    Sie ist eine bewusste Entscheidung - wer nie ein Passwort gesetzt hat,
+    kommt mit "falsches Passwort" nicht weiter.
+    """
+    _eingeladen(hr_client)
+
+    antwort = hr_client.post('/login', json={'username': 'anna', 'password': 'x'})
+
+    assert antwort.status_code == 403
+
+
+def test_auch_dieser_zweig_zaehlt_die_versuche(hr_client):
+    """Er tat es nicht, und damit war er der einzige Weg am Zaehler vorbei.
+
+    Die Meldung verraet, dass es diesen Benutzernamen gibt - anders als die
+    einheitliche Meldung ueberall sonst. Ohne Zaehlung liess sich das beliebig
+    oft abfragen: eine Namensliste ohne Kosten.
+    """
+    _eingeladen(hr_client)
+
+    for _ in range(security.MAX_FAILED_ATTEMPTS):
+        hr_client.post('/login', json={'username': 'anna', 'password': 'x'})
+
+    antwort = hr_client.post('/login', json={'username': 'anna', 'password': 'x'})
+    assert antwort.status_code == 429
+
+
+def test_die_sperre_des_eingeladenen_zugangs_trifft_niemanden_sonst(hr_client):
+    """Gegenprobe: die Sperre gilt pro Benutzername, auch auf diesem Zweig."""
+    _eingeladen(hr_client)
+    for _ in range(security.MAX_FAILED_ATTEMPTS + 1):
+        hr_client.post('/login', json={'username': 'anna', 'password': 'x'})
+
+    assert hr_client.post(
+        '/login', json={'username': 'hr', 'password': 'passwort-123'}).status_code == 200

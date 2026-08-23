@@ -523,29 +523,40 @@ def login():
     connection = get_db()
     cursor = connection.cursor()
 
-    if username and security.is_locked_out(cursor, username):
-        return jsonify({'message': t(g.lang, 'too_many_login_attempts',
-                                     minutes=security.ATTEMPT_WINDOW_MINUTES)}), 429
+    # Checking the counter and raising it are one step, not two: without this
+    # guard, N simultaneous requests all read the same below-the-limit count
+    # and all get through. See security.attempt_guard().
+    with security.attempt_guard(cursor, username):
+        if username and security.is_locked_out(cursor, username):
+            return jsonify({'message': t(g.lang, 'too_many_login_attempts',
+                                         minutes=security.ATTEMPT_WINDOW_MINUTES)}), 429
 
-    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
-    user = cursor.fetchone()
+        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+        user = cursor.fetchone()
 
-    # An invited account has no password yet. Saying so is safe - the invitation
-    # went to that person's mailbox, not to whoever is guessing here - and it is
-    # far more useful than "wrong password" to someone who never set one.
-    if user and not user['hash']:
-        return jsonify({'message': t(g.lang, 'password_not_set_yet')}), 403
+        # An invited account has no password yet. Saying so is a deliberate
+        # trade: the invitation went to that person's mailbox, not to whoever
+        # is guessing here, and it is far more useful than "wrong password" to
+        # someone who never set one. It does tell a guesser that this username
+        # exists - which is why the attempt is counted like any other. Without
+        # that, this was the one branch past the throttle, and a name list came
+        # free.
+        if user and not user['hash']:
+            if username:
+                security.record_attempt(cursor, username, request.remote_addr, succeeded=False)
+                connection.commit()
+            return jsonify({'message': t(g.lang, 'password_not_set_yet')}), 403
 
-    # Same message either way, so the response cannot be used to find out which
-    # usernames exist.
-    if not user or not check_password_hash(user['hash'], password):
-        if username:
-            security.record_attempt(cursor, username, request.remote_addr, succeeded=False)
-            connection.commit()
-        return jsonify({'message': t(g.lang, 'login_failed')}), 401
+        # Same message either way, so the response cannot be used to find out
+        # which usernames exist.
+        if not user or not check_password_hash(user['hash'], password):
+            if username:
+                security.record_attempt(cursor, username, request.remote_addr, succeeded=False)
+                connection.commit()
+            return jsonify({'message': t(g.lang, 'login_failed')}), 401
 
-    security.record_attempt(cursor, username, request.remote_addr, succeeded=True)
-    connection.commit()
+        security.record_attempt(cursor, username, request.remote_addr, succeeded=True)
+        connection.commit()
 
     session.clear()
     session['user_id'] = user['id']
