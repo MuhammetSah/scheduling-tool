@@ -389,6 +389,14 @@ TRANSLATIONS = {
         'en': 'Without a federal state the tool knows no public holidays and says '
               'nothing about them. A plan is still produced.',
     },
+    'plan_too_large': {
+        'de': 'Dieser Monat ist mit {blocks} Blöcken zu groß für die Planung — '
+              'mehr als {limit} kann die Suche derzeit nicht abtragen. Weniger '
+              'Bedarf je Zeitraum oder ein kürzerer Zeitraum hilft.',
+        'en': 'This month is too large to plan with {blocks} blocks — the search '
+              'currently cannot go beyond {limit}. Less demand per band, or a '
+              'shorter one, helps.',
+    },
     'no_coverage_defined': {
         'de': 'Es ist kein Bedarfsband hinterlegt — der Plan bleibt deshalb '
               'leer. Der Bedarf lässt sich unter „Bedarf" festlegen.',

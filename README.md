@@ -442,6 +442,26 @@ The six-day run and the yearly Sunday budget have crossed the boundary since the
 
 **One direction only.** Regenerating August after September exists gives you an August that respects September, not the other way round. A plan that rewrites other plans would be a much larger decision.
 
+### How big a month can get
+
+Measured, not guessed — `backend/benchmark.py` ends with a scaling probe on the production path, with half the workforce in availability-window mode, which is where the two long-deferred performance notes lived.
+
+| people | per shift | blocks | stage 1 | stage 2 | unfilled |
+|---|---|---|---|---|---|
+| 10 | 2 | 124 | 0.011s | 16.1s | 62 |
+| 25 | 5 | 310 | 0.032s | 16.2s | 17 |
+| 50 | 10 | 620 | 0.104s | 16.3s | 5 |
+| 100 | 20 | 1240 | 0.346s | — | too large |
+| 200 | 40 | 2480 | 1.361s | — | too large |
+
+**Block planning is not the bottleneck.** 1.36 seconds at 2480 blocks answers the note that said "only look at `plan_day()` when the benchmark shows it" — it does not show it.
+
+**The wall is recursion depth.** The search calls itself once per block, so a month's block count *is* the stack depth. Python's default limit of 1000 puts the ceiling near 900 blocks — roughly thirty blocks a day, which is a large ward rather than a thought experiment. Above it, generation used to fail with a `RecursionError` surfacing somewhere unrelated (during the measurement it landed in `locale.getlocale`, and the message said nothing).
+
+It now raises a named exception and the API answers with both numbers: how many blocks this month has, and how many the search can take. **Stating a limit is not the same as lifting it** — turning the recursion into an explicit stack is a real rewrite of branch-and-bound with six undo structures, and the compatibility tests only cover shift counts. Raising `sys.setrecursionlimit()` moves the wall and trades a clean exception for a possible hard crash. Both are decisions with a cost, and neither is taken here.
+
+**Two full budgets, not one.** Stage 2 sits above 100% of the 8-second budget whenever gaps remain, because that is what the adaptive strategy does: a second pass with a different ordering. Sixteen seconds is the documented worst case, not an overrun.
+
 ### Fairness (v1.3)
 
 The search optimizes a **lexicographic** objective:
@@ -552,6 +572,7 @@ schichtplan-tool/
 │   ├── test_migrations_bestand.py  # A filled 0007 database lifted to 0017, real Postgres
 │   ├── test_api_tag_eins.py     # What day one on an empty database tells the operator
 │   ├── test_api_einrichtung.py  # What is still missing, and what is only worth knowing
+│   ├── test_scheduler_grenze.py # The recursion ceiling, named rather than crashed into
 ├── docs/
 │   └── DATENBANKWECHSEL.md     # The 07.09.2026 changeover, step by step
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
@@ -783,7 +804,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (566 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (572 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

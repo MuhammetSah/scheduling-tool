@@ -16,13 +16,17 @@ candidate implementation: it is a heavy dependency for what this tool needs.
 
 import calendar
 import random
+import time
 from collections import Counter
 from datetime import date
 
 import baselines
 from block_planner import build_month_blocks
 from coverage_model import coverage_curve
-from scheduler import CHRONOLOGICAL, MOST_CONSTRAINED, build_slots, generate_schedule
+from scheduler import (
+    CHRONOLOGICAL, DEFAULT_TIME_BUDGET_SECONDS, MOST_CONSTRAINED, PlanTooLarge,
+    build_slots, generate_schedule,
+)
 
 
 def employee(id, max_shifts_per_month=None, unavailable_weekdays=None, unavailable_dates=None, allowed_shift_types=None):
@@ -271,6 +275,93 @@ def scenario_windows():
     return employees, shift_types
 
 
+def scenario_scaled(people, per_day, window_share=0.5, seed=7):
+    """Ein Betrieb wachsender Groesse, auf dem Produktionspfad.
+
+    `window_share` ist der Anteil der Belegschaft im Fenster-Modus - genau
+    dort sitzen die beiden zurueckgestellten Leistungsbefunde: der Zuschnitt
+    in plan_day() greift nur bei Fenster-Leuten, und die Fensterpruefung
+    rechnet im innersten Schleifenkoerper von eligible_candidates() alle
+    "HH:MM"-Zeichenketten je Kandidat und Knoten neu.
+
+    In Produktion ist employee_availability leer - niemand nutzt den Modus.
+    Genau deshalb ist das hier eine Frage nach der Zukunft und nicht nach
+    heute.
+
+    Das Szenario ist absichtlich schwer: die Fenster-Leute koennen 08:00-16:00,
+    die Schichten laufen 06:00-14:00 und 14:00-22:00, also passt niemand von
+    ihnen ganz in eine. Die hohe Zahl unbesetzter Plaetze ist deshalb kein
+    Befund, sondern der Aufbau - gemessen werden soll der teure Fall, nicht
+    der bequeme.
+    """
+    rng = random.Random(seed)
+    fenster = [{'weekday': wd, 'start_time': '08:00', 'end_time': '16:00',
+                'valid_from': None, 'valid_until': None} for wd in range(7)]
+    employees = []
+    for i in range(1, people + 1):
+        mit_fenster = rng.random() < window_share
+        employees.append(_timed_employee(
+            i,
+            availability=fenster if mit_fenster else None,
+            unavailable_weekdays=rng.sample(range(7), k=rng.choice([0, 0, 1])),
+        ))
+    shift_types = [
+        {'id': 1, 'start_time': '06:00', 'end_time': '14:00',
+         'requirements': {wd: per_day for wd in range(7)}},
+        {'id': 2, 'start_time': '14:00', 'end_time': '22:00',
+         'requirements': {wd: per_day for wd in range(7)}},
+    ]
+    return employees, shift_types
+
+
+def measure_scaling():
+    """Wo steht die Wand?
+
+    Die beiden Leistungsbefunde tragen seit ihrer Aufnahme die Notiz "erst
+    angehen, wenn der Benchmark es zeigt". Gelaufen ist er dafuer nie. Das
+    hier ist die Messung, die die Notiz einloest - nicht eine Optimierung auf
+    Verdacht.
+
+    Gemessen werden beide Stufen getrennt, weil die Befunde in verschiedenen
+    liegen: build_month_blocks() ist Stufe 1 (der Zuschnitt), generate_schedule()
+    ist Stufe 2 (die Suche). Und gegen das Zeitbudget der Suche gehalten, denn
+    das ist die Zahl, die zaehlt: wird es erreicht, liefert der Planer weiter
+    einen Plan, aber einen schlechteren.
+    """
+    year, month = 2026, 8
+    print('\nSkalierung: wo steht die Wand? (Produktionspfad, Fenster-Modus)')
+    print(f'{"people":>7} {"per shift":>10} {"blocks":>7} {"stage 1":>9} {"stage 2":>9} '
+          f'{"budget":>8} {"unfilled":>9}')
+    print('-' * 68)
+
+    for people, per_day in ((10, 2), (25, 5), (50, 10), (100, 20), (200, 40)):
+        employees, shift_types = scenario_scaled(people, per_day)
+        bands = _bands_by_date(year, month, shift_types)
+
+        start = time.perf_counter()
+        slots = build_month_blocks(year, month, shift_types, bands, employees)
+        stufe1 = time.perf_counter() - start
+
+        start = time.perf_counter()
+        try:
+            ergebnis = generate_schedule(year, month, employees, shift_types, slots=slots)
+        except PlanTooLarge as zu_gross:
+            # Die Grenze gehoert in die Tabelle, nicht in einen Abbruch: sie
+            # ist genau das Ergebnis, wegen dem diese Messung existiert.
+            print(f'{people:>7} {per_day:>10} {len(slots):>7} {stufe1:>8.3f}s '
+                  f'{"-":>9} {"-":>8} {"zu gross (max " + str(zu_gross.limit) + ")":>9}')
+            continue
+        stufe2 = time.perf_counter() - start
+
+        anteil = stufe2 / DEFAULT_TIME_BUDGET_SECONDS
+        print(f'{people:>7} {per_day:>10} {len(slots):>7} {stufe1:>8.3f}s {stufe2:>8.3f}s '
+              f'{anteil:>7.0%} {ergebnis["unfilled_count"]:>9}')
+
+    print('  stage 1 = build_month_blocks (Zuschnitt), stage 2 = generate_schedule (Suche)')
+    print(f'  budget = Anteil am Zeitbudget EINES Suchlaufs ({DEFAULT_TIME_BUDGET_SECONDS}s).')
+    print('  Ueber 100% heisst nicht ueberzogen: bleiben Luecken, faehrt AUTO einen')
+    print('  zweiten Lauf mit anderer Reihenfolge - zwei volle Budgets sind das Maximum.')
+
 def compare_demand_paths():
     year, month = 2026, 8
 
@@ -298,3 +389,4 @@ def compare_demand_paths():
 if __name__ == '__main__':
     run()
     compare_demand_paths()
+    measure_scaling()

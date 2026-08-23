@@ -1,4 +1,5 @@
 import calendar
+import sys
 import time
 from datetime import date, datetime, timedelta
 
@@ -921,6 +922,52 @@ def _search(
     }
 
 
+# Wieviele Bilderrahmen der Suche vorbehalten bleiben, ueber die Plaetze
+# hinaus: backtrack() ruft sich je Platz einmal auf, aber darunter liegen noch
+# der Aufrufer, Flask, Gunicorn und die Helfer, die backtrack() selbst benutzt.
+# Ohne diesen Abstand faellt der Fehler nicht mehr in backtrack(), sondern an
+# einer beliebigen Stelle tiefer - beim Messen war es ausgerechnet in
+# locale.getlocale(), und die Fehlermeldung sagte entsprechend nichts.
+_RECURSION_HEADROOM = 120
+
+
+class PlanTooLarge(Exception):
+    """Der Monat hat mehr Bloecke, als die Suche rekursiv abtragen kann.
+
+    Gefunden beim Messen: backtrack() rekursiert einmal je Platz, die
+    Rekursionstiefe ist also die Blockzahl. Bei Pythons Standardgrenze von
+    1000 laufen 930 Bloecke durch und 992 nicht mehr - das entspricht rund
+    dreissig Bloecken am Tag, also einer grossen Station.
+
+    Eine benannte Ausnahme statt eines RecursionError, weil der Aufrufer
+    daraus eine Meldung machen kann, die die Zahlen nennt. Ein 500er
+    "Unerwarteter Serverfehler" sagt an dieser Stelle am wenigsten.
+    """
+
+    def __init__(self, slots, limit):
+        super().__init__(f'{slots} Bloecke, hoechstens {limit} planbar')
+        self.slots = slots
+        self.limit = limit
+
+
+def _stack_depth():
+    tiefe, rahmen = 0, sys._getframe()
+    while rahmen is not None:
+        tiefe += 1
+        rahmen = rahmen.f_back
+    return tiefe
+
+
+def max_plannable_slots():
+    """Wieviele Bloecke die rekursive Suche von hier aus noch schafft.
+
+    Abgeleitet statt festgeschrieben: die Zahl haengt an
+    sys.getrecursionlimit() und daran, wie tief der Aufrufer schon steht. Eine
+    feste Konstante waere unter Gunicorn eine andere Luege als in einem Test.
+    """
+    return sys.getrecursionlimit() - _stack_depth() - _RECURSION_HEADROOM
+
+
 def generate_schedule(
     year,
     month,
@@ -992,6 +1039,11 @@ def generate_schedule(
     better. Normal months therefore cost one cheap pass, and difficult months get
     the extra effort where it actually buys something.
     """
+    # Vor dem ersten Suchlauf, nicht mittendrin: eine Ausnahme nach vier
+    # Sekunden Rechnen waere dieselbe Nachricht, nur teurer.
+    if slots is not None and len(slots) > max_plannable_slots():
+        raise PlanTooLarge(len(slots), max_plannable_slots())
+
     def run(order):
         return _search(year, month, employees, shift_types, order, fairness,
                        weekend_weight, node_budget, time_budget_seconds, slots,
