@@ -1,64 +1,94 @@
-# Datenbankwechsel am 07.09.2026
+# Der Datenbankzyklus
 
-Die kostenlose Postgres-Instanz läuft ab. Die Entscheidung ist am 22.08.2026 gefallen: **die
-Instanz darf ablaufen, die Datenbank wird neu aufgezogen** — kein bezahlter Plan, kein Umzug des
-Bestands.
+Die kostenlose Postgres-Instanz bei Render läuft nach **30 Tagen** ab. Die Entscheidung des
+Betreibers: ablaufen lassen und eine neue aufziehen. Das ist damit **kein Termin, sondern ein
+Zyklus** — er wiederholt sich, solange der freie Plan der Plan bleibt.
 
-Dieses Blatt ist die Reihenfolge für den Tag, mit den Prüfungen dazwischen. Es ersetzt kein
-Nachdenken, aber es nimmt die Fragen ab, die man um 22 Uhr nicht mehr stellen möchte.
+Dieses Blatt ist die Reihenfolge für einen Durchlauf. Der erste fällt auf den **07.09.2026**.
 
 ---
 
-## Vorher: was schon geprüft ist, und was nicht
+## Die Folge, die man einmal gelesen haben muss
+
+**Eine Datenbank, die alle 30 Tage neu anfängt, hält keine Arbeitszeitnachweise.**
+
+[§ 16 Abs. 2 ArbZG](https://www.gesetze-im-internet.de/arbzg/__16.html) verlangt, Nachweise über
+die acht Stunden hinausgehende Arbeitszeit **mindestens zwei Jahre** aufzubewahren. Das ganze
+Werkzeug ist darauf ausgelegt: die Aufbewahrungsfrist nimmt Zuweisungen ausdrücklich aus, und
+Löschen anonymisiert statt zu löschen, damit die Aufzeichnung ganz bleibt.
+
+Ein Zyklus ohne Rückspielen macht das zunichte — nicht als Fehler des Werkzeugs, sondern als
+Folge der Betriebsentscheidung. **Es gibt genau zwei Wege, die das auflösen:**
+
+1. **Jeden Zyklus sichern und zurückspielen** (Schritt 1 und 5). Dann wächst der Bestand über die
+   Zyklen hinweg weiter, und die zwei Jahre sind erreichbar.
+2. **Einen bezahlten Plan nehmen.** Kostet Geld und spart diesen Zettel.
+
+Was nicht funktioniert: den Zyklus fahren und das Sichern auslassen. Nach zwei Monaten gibt es
+den ersten Monat nicht mehr, und keine Nachträglichkeit holt ihn zurück.
+
+Das ist eine Feststellung, keine Empfehlung — welcher Weg richtig ist, hängt davon ab, ob das
+Werkzeug echte Dienstpläne trägt oder noch erprobt wird.
+
+---
+
+## Der Durchlauf
+
+### 0. Vorher wissen
 
 | | Stand |
 |---|---|
-| Migrationen `0001`–`0017` auf einer **leeren** Datenbank | Läuft bei jedem CI-Lauf (`backend-postgres`) |
-| Der **Bestandsweg** `0007` → `0017` auf gefüllten Tabellen | Geprobt, siehe `backend/test_migrations_bestand.py` |
-| Der erste Tag: Konto, Schichtart, Bedarf, Plan | Geprüft, siehe `backend/test_api_tag_eins.py` |
-| Die **neue Instanz selbst** | Liegt bei dir — Zugangsdaten fasst das Werkzeug nicht an |
+| Migrationen auf einer **leeren** Datenbank | Läuft bei jedem CI-Lauf (`backend-postgres`) |
+| Der **Bestandsweg** über zehn Migrationen auf gefüllten Tabellen | Geprobt, `backend/test_migrations_bestand.py` |
+| Der erste Tag: Konto, Schichtart, Bedarf, Plan | Geprüft, `backend/test_api_tag_eins.py` |
+| Die Instanz selbst, Passwort, IP-Freigabe | Liegt beim Betreiber — Zugangsdaten fasst das Werkzeug nicht an |
 
-**Das Backup steht auf Stand `0007`**, nicht auf dem heutigen. `schema_migrations` hat sieben
-Zeilen. Wer es zurückspielt, lässt zehn Migrationen darüber laufen. Genau dieser Sprung ist
-inzwischen geprobt — mit nachgebauten Daten derselben Form, nicht mit dem echten Dump.
+**`pg_dump` und `pg_restore` sind nicht im PATH.** Sie liegen unter
+`C:\Program Files\PostgreSQL\18\bin\`; die Befehle unten nennen deshalb den vollen Pfad. Ohne ihn
+antwortet die Eingabeaufforderung nur mit „Befehl nicht gefunden", und das sieht aus wie ein
+fehlendes Programm statt wie ein fehlender Pfad.
 
----
+### 1. Sichern, **bevor** die Instanz abläuft
 
-## Der Ablauf
+Der wichtigste Schritt, und der einzige mit einer Frist. Eine abgelaufene Instanz lässt sich
+nicht mehr auslesen.
 
-### 1. Neue Postgres-Instanz anlegen
+```bash
+"/c/Program Files/PostgreSQL/18/bin/pg_dump" "$DATABASE_URL" \
+  --no-owner --format=custom \
+  --file="schichtplan-$(date +%Y-%m-%d).dump"
+```
 
-In Render, gleicher Region wie der Webdienst.
+Prüfen, dass wirklich etwas drin ist:
+
+```bash
+"/c/Program Files/PostgreSQL/18/bin/pg_restore" --list schichtplan-*.dump | grep -c "TABLE DATA"
+```
+
+**Die Datei enthält Betriebsdaten im Klartext** — Namen, Schichten, Krankmeldungen. Sie gehört an
+einen Ort, der in **keinem** Git-Arbeitsverzeichnis liegt. `C:\Users\muham` ist selbst eines; ein
+unbedachtes `git add -A` sammelt sie dort ein, und aus einer Historie ist sie schwer wieder
+herauszubekommen.
+
+### 2. Neue Instanz anlegen
+
+In Render, gleiche Region wie der Webdienst.
 
 **Nenne sie wieder `schichtplan-db`.** `render.yaml` verdrahtet `DATABASE_URL` über
-`fromDatabase: name: schichtplan-db`; ein anderer Name bedeutet, dass du die Verdrahtung von Hand
-nachziehen musst.
+`fromDatabase: name: schichtplan-db`; ein anderer Name heißt, die Verdrahtung von Hand
+nachzuziehen.
 
-**Das Passwort ist neu und gehört nirgendwo sonst hin.** Das alte stand in einem früheren
-Chatverlauf — es stirbt mit der Instanz, aber prüfe, ob du es anderswo verwendet hast.
+**Das Passwort ist neu und gehört nirgendwo sonst hin.**
 
-### 2. `DATABASE_URL` zeigen lassen
+### 3. `DATABASE_URL` zeigen lassen
 
-Entweder über die Blueprint-Verdrahtung (wenn der Name stimmt) oder von Hand in den Umgebungs-
-variablen des Webdienstes. **`PGSSLMODE` nicht setzen** — `db.py` verlangt ohne diese Variable von
-sich aus `sslmode=require`, und das ist für eine gehostete Datenbank das Richtige.
+Über die Blueprint-Verdrahtung (wenn der Name stimmt) oder von Hand in den Umgebungsvariablen des
+Webdienstes. **`PGSSLMODE` nicht setzen** — `db.py` verlangt ohne diese Variable von sich aus
+`sslmode=require`, und das ist für eine gehostete Datenbank das Richtige.
 
-### 3. Deploy auslösen
+### 4. Deploy auslösen und prüfen
 
-Die Anwendung wendet die Migrationen beim Start selbst an (`init_db()` beim Modulimport). Auf
-einer leeren Datenbank laufen `0001`–`0017` durch; `0007_derive_coverage` findet nichts zum
-Ableiten und tut nichts — das ist der Wächter in der Migration, kein Fehler.
-
-**Im Deploy-Log erwarten:**
-
-```
-Migrationen angewandt: 0001_baseline, 0002_indexes, … , 0017_qualifications
-```
-
-Kommt die Zeile nicht, ist `DATABASE_URL` falsch oder die Instanz nicht erreichbar. Nicht
-weitermachen.
-
-### 4. Prüfen, dass sie steht
+Die Anwendung wendet die Migrationen beim Start selbst an. Danach:
 
 ```bash
 curl -s https://schichtplan-api.onrender.com/health
@@ -71,70 +101,57 @@ Erwartet:
 ```
 
 **Diese eine Abfrage beantwortet beide Fragen**: kommt die Datenbank an, und welcher Stand liegt
-dort. Kommt stattdessen ein **503** mit `"database":"unreachable"`, zeigt `DATABASE_URL` auf
-nichts Erreichbares — dann nicht weitermachen, sondern Schritt 2 prüfen.
+dort. Ein **503** mit `"database":"unreachable"` heißt, `DATABASE_URL` zeigt auf nichts
+Erreichbares — dann nicht weitermachen, sondern Schritt 3 prüfen.
 
-`healthCheckPath` in `render.yaml` zeigt seit Etappe 14 ebenfalls hierher. Vorher zeigte es auf
-`/`, und die Route beweist nur, dass Python läuft: Render hätte einen Dienst ohne Datenbank für
-gesund gehalten.
+`healthCheckPath` in `render.yaml` zeigt ebenfalls hierher, damit Render einen Dienst ohne
+Datenbank nicht für gesund hält.
 
+### 5. Zurückspielen — oder bewusst neu anfangen
 
-### 5. Den ersten Tag durchlaufen
-
-Die Datenbank ist leer: kein Konto, keine Mitarbeiter, kein Bedarf.
-
-1. **Erstes Konto anlegen.** Solange es keines gibt, ist `/register` offen — danach nicht mehr.
-   Der erste Zugang ist damit der, der zuerst da ist; leg ihn sofort an.
-2. **Bundesland setzen** (Öffnungszeiten → Feiertage). Ohne Angabe kennt das Werkzeug keinen
-   Feiertag und schweigt dazu.
-3. **§-10-Frage beantworten** (Öffnungszeiten → Sonn- und Feiertagsarbeit). Vorgabe ist „nicht
-   ausgenommen": jede Sonntagsschicht wird dann gemeldet. Für eine Gaststätte oder Klinik ist das
-   Rauschen — für einen Betrieb ohne Ausnahme ist es richtig.
-4. **Aufbewahrungsfrist prüfen** (Öffnungszeiten → Datenschutz). Vorgabe sechs Monate.
-5. **Mitarbeiter, Schichtarten, Bedarfsbänder** anlegen — in dieser Reihenfolge.
-6. **Plan erzeugen.**
-
-**Wenn der Plan leer bleibt**, sagt das Werkzeug jetzt warum: ohne Bedarfsband gibt es nichts zu
-planen, und der Hinweis steht in der Meldung. Vor dieser Etappe blieb er stumm.
-
----
-
-## Falls der Bestand doch gebraucht wird
-
-Nicht der Plan, aber der Weg steht:
+**Mit Bestand** (der Weg, der § 16 erfüllt):
 
 ```bash
-pg_restore --clean --no-owner --dbname="$NEUE_DBURL" schichtplan-2026-08-22.dump
+"/c/Program Files/PostgreSQL/18/bin/pg_restore" --clean --no-owner \
+  --dbname="$NEUE_DBURL" schichtplan-2026-09-06.dump
 ```
 
-Danach findet die Anwendung `0001`–`0007` als angewandt vor (`schema_migrations` ist Teil des
-Dumps) und wendet beim nächsten Start `0008`–`0017` an. **Das ist der geprobte Sprung.** Was
-dabei passiert:
+Danach findet die Anwendung die Migrationen des Dumps als angewandt vor und wendet beim nächsten
+Start nur noch die neueren an. Solange Sicherung und Rückspielen im selben Zyklus liegen, gibt es
+keine — der Stand ist derselbe. Der Sprung über zehn Migrationen ist trotzdem geprobt, weil der
+Dump vom 22.08.2026 auf einem älteren Stand steht (siehe Schritt 0).
 
-- Jeder Mitarbeiter bekommt `max_daily_hours = 10` (§ 3 ArbZG)
-- `shift_requirements` fällt weg; der Bedarf lebt in `coverage_requirements` weiter, abgeleitet
-  von `0007`
-- Jeder vorhandene Plan wird von `generated` auf **`published`** gehoben — er ist danach für
-  Mitarbeiterkonten sichtbar. Wenn das nicht gewollt ist, vorher zurückziehen
-- Vier Tabellen kommen leer dazu (Einstellungen, Protokoll, Tauschanträge, Nachweise)
+**Ohne Bestand**: nichts tun, mit Schritt 6 weitermachen. Der bisherige Plan ist dann fort.
 
-Die Dump-Datei liegt unter `C:\Users\muham\schichtplan-2026-08-22.dump` und **enthält
-Betriebsdaten im Klartext**.
+### 6. Nur beim Neuanfang: einrichten
 
-**Sie liegt dort schlecht.** Der Ablageort wurde gewählt, weil er außerhalb des
-Projektverzeichnisses liegt — aber `C:\Users\muham` ist selbst ein Git-Repository, und die Datei
-steht dort unversioniert mitten drin. Ein unbedachtes `git add -A` sammelt sie ein, und ein Dump
-mit Namen und zweiundsechzig Schichten ist aus einer Historie schwer wieder herauszubekommen.
+Die Datenbank ist leer. Das Werkzeug sagt selbst, was fehlt — die Planseite zeigt es, solange
+etwas fehlt (siehe `GET /setup-status`).
 
-**Vor dem Wechsel:** verschiebe sie an einen Ort, der in keinem Arbeitsverzeichnis liegt — oder
-lösche sie, sobald die neue Datenbank steht und ein frisches Backup existiert.
+1. **Erstes Konto anlegen.** Solange es keines gibt, ist `/register` offen; danach nicht mehr.
+   Der erste Zugang ist der, der zuerst da ist — leg ihn sofort an.
+2. **Bundesland** setzen (Öffnungszeiten → Feiertage).
+3. **§-10-Frage** beantworten (Öffnungszeiten → Sonn- und Feiertagsarbeit). Vorgabe ist „nicht
+   ausgenommen": jede Sonntagsschicht wird dann gemeldet.
+4. **Aufbewahrungsfrist** prüfen (Öffnungszeiten → Datenschutz). Vorgabe sechs Monate.
+5. **Mitarbeiter, Schichtarten, Bedarfsbänder** — in dieser Reihenfolge.
+6. **Plan erzeugen.**
+
+### 7. Für den nächsten Zyklus
+
+- **Datum notieren.** Dreißig Tage ab Schritt 2, und das Sichern gehört ein paar Tage davor.
+- **Die alte Dump-Datei** ist nach erfolgreichem Rückspielen Bestand ohne Zweck und enthält
+  Namen. Löschen oder bewusst archivieren, nicht liegen lassen.
+- **Die IP-Freigabe** der neuen Instanz, falls sie eingeschränkt werden soll.
 
 ---
 
-## Was danach noch offen bleibt
+## Wenn etwas schiefgeht
 
-- **Die IP-Freigabe** der neuen Instanz, falls du sie einschränken willst
-- **Ein neues Backup**, sobald wieder echte Daten drin sind. Der Befehl steht im README unter
-  *Operations*
-- **Das alte Backup aufheben oder löschen** — es ist ab dem Wechsel Bestand ohne Zweck, und es
-  enthält Namen
+| Symptom | Wahrscheinlich |
+|---|---|
+| `/health` antwortet 503, `database: unreachable` | `DATABASE_URL` falsch, Instanz noch nicht bereit, oder `PGSSLMODE` gesetzt |
+| `/health` antwortet gar nicht | Der Dienst startet nicht — das Deploy-Log lesen, dort steht der Migrationsfehler |
+| `applied` kleiner als erwartet | Migrationen nur teilweise angewandt; jede läuft in eigener Transaktion, die fehlgeschlagene steht im Log |
+| Plan leer nach dem Rückspielen | Rückspielen lief gegen die falsche Datenbank; `/health` zeigt den Stand, `GET /schedules/<jahr>/<monat>` den Inhalt |
+| `pg_dump: command not found` | Kein fehlendes Programm, sondern ein fehlender Pfad — siehe Schritt 0 |

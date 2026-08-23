@@ -42,10 +42,20 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
-**Das Nächste ist der 07.09.2026** — die Datenbank läuft ab. Das Umstellungsblatt steht in
-[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md): Reihenfolge, Prüfungen, der Weg zurück. Der
-Sprung vom Bestandsstand `0007` auf `0017` ist geprobt (Etappe 11), die neue Instanz selbst liegt
-beim Nutzer.
+**Das Nächste ist der Datenbankzyklus.** Der Nutzer hat am 23.08.2026 entschieden: die Instanz
+ablaufen lassen und **eine neue 30-Tage-Instanz** aufziehen. Damit ist es kein Termin, sondern ein
+wiederkehrender Vorgang; der erste Durchlauf fällt auf den 07.09.2026. Das Blatt dafür steht in
+[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md).
+
+**Die Folge, die eine neue Sitzung kennen muss:** eine Datenbank, die alle 30 Tage neu anfängt,
+hält keine Arbeitszeitnachweise. § 16 Abs. 2 ArbZG verlangt zwei Jahre, und das ganze Werkzeug ist
+darauf gebaut — die Aufbewahrungsfrist nimmt Zuweisungen aus, Löschen anonymisiert. **Ein Zyklus
+ohne Rückspielen macht das zunichte.** Das ist eine Feststellung, keine Empfehlung: es aufzulösen
+heißt entweder jeden Zyklus zu sichern und zurückzuspielen oder einen bezahlten Plan zu nehmen,
+und beides ist eine Entscheidung des Betreibers.
+
+Der Sprung vom Bestandsstand `0007` auf `0017` ist geprobt (Etappe 11), die neue Instanz selbst
+liegt beim Nutzer.
 
 **Die Roadmap ist abgearbeitet.** Etappe 8 brachte den geführten Schichttausch, Etappe 9 die
 letzten beiden ArbZG-Regeln, Etappe 10 die Nachweise. Damit ist jeder Punkt umgesetzt, den das
