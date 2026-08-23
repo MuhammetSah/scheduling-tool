@@ -68,6 +68,7 @@ ALLE_MIGRATIONEN_TABELLEN = (BASELINE_TABELLEN | {
     'business_hours', 'business_hours_exceptions', 'coverage_requirements',
     'settings',
     'audit_log',
+    'shift_swap_requests',
 }) - {
     # 0010 entfernt sie wieder. Nach 0001 gibt es sie, am Ende nicht mehr -
     # deshalb steht sie oben in BASELINE_TABELLEN und hier in der Gegenmenge,
@@ -1387,3 +1388,69 @@ def test_0014_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
     zurueck_bis(migrations, '0014_anonymisation')
 
     assert '0014_anonymisation' in migrations.apply_pending()
+
+
+# ---------- 0015_swap_requests ----------
+
+
+def test_tauschantraege_laufen_rund(fresh_db):
+    """Rundlauf, und die Gegenprobe, dass down() beide Indizes mitnimmt.
+
+    Ein vergessenes DROP INDEX bliebe bei CREATE INDEX IF NOT EXISTS unbemerkt
+    - derselbe Fehler, den der 0006-Rundlauf seit Etappe 6c auch prueft.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    assert 'shift_swap_requests' in tabellen(db_file)
+    assert {'ix_swap_requests_requester', 'ix_swap_requests_partner'} <= indizes(db_file)
+
+    while '0015_swap_requests' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    assert 'shift_swap_requests' not in tabellen(db_file)
+    assert not ({'ix_swap_requests_requester', 'ix_swap_requests_partner'} & indizes(db_file))
+
+    assert '0015_swap_requests' in migrations.apply_pending()
+    assert 'shift_swap_requests' in tabellen(db_file)
+
+
+def test_ein_antrag_faellt_mit_seiner_schicht_weg(fresh_db):
+    """ON DELETE CASCADE: ein Antrag auf einen geloeschten Platz ist kein
+    Antrag mehr, sondern Muell.
+
+    Auf SQLite braucht das eingeschaltete Fremdschluessel - die Anwendung
+    setzt PRAGMA foreign_keys ein, dieser Test also auch.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        connection.execute('PRAGMA foreign_keys = ON')
+        anna = connection.execute("INSERT INTO employees (name) VALUES ('Anna')").lastrowid
+        berta = connection.execute("INSERT INTO employees (name) VALUES ('Berta')").lastrowid
+        schedule_id = connection.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 9, 'published')").lastrowid
+        eine = connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            "employee_id, start_time, end_time) VALUES (?, '2026-09-07', NULL, 0, ?, "
+            "'06:00', '14:00')", (schedule_id, anna)).lastrowid
+        andere = connection.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            "employee_id, start_time, end_time) VALUES (?, '2026-09-14', NULL, 1, ?, "
+            "'06:00', '14:00')", (schedule_id, berta)).lastrowid
+        connection.execute(
+            'INSERT INTO shift_swap_requests (requester_employee_id, requester_assignment_id, '
+            'partner_employee_id, partner_assignment_id, status, created_at) '
+            "VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)",
+            (anna, eine, berta, andere))
+        connection.commit()
+
+        connection.execute('DELETE FROM shift_assignments WHERE id = ?', (eine,))
+        connection.commit()
+
+        verblieben = connection.execute(
+            'SELECT COUNT(*) FROM shift_swap_requests').fetchone()[0]
+        assert verblieben == 0
+    finally:
+        connection.close()

@@ -153,6 +153,45 @@ TRANSLATIONS = {
         'de': 'Das Fenster {weekday} {start}–{end} ist doppelt angegeben',
         'en': 'The window {weekday} {start}–{end} is given twice',
     },
+    'swap_needs_own_shift': {
+        'de': 'Ein Tauschantrag geht immer von einer eigenen Schicht aus.',
+        'en': 'A swap request always starts from a shift of your own.',
+    },
+    'swap_needs_a_partner': {
+        'de': 'Die zweite Schicht muss einer anderen Person gehören.',
+        'en': 'The second shift must belong to somebody else.',
+    },
+    'swap_would_break_the_law': {
+        'de': 'Dieser Tausch ist nicht möglich: er würde zwingendes '
+              'Arbeitszeitrecht verletzen.',
+        'en': 'This swap is not possible: it would breach compulsory '
+              'working-time law.',
+    },
+    'unknown_swap_status': {
+        'de': 'Unbekannter Stand. Erlaubt sind: {allowed}',
+        'en': 'Unknown status. Allowed values are: {allowed}',
+    },
+    'swap_request_not_found': {
+        'de': 'Tauschantrag nicht gefunden',
+        'en': 'Swap request not found',
+    },
+    'swap_request_already_settled': {
+        'de': 'Dieser Tauschantrag ist bereits entschieden ({status}).',
+        'en': 'This swap request has already been settled ({status}).',
+    },
+    'swap_shifts_changed_hands': {
+        'de': 'Eine der beiden Schichten ist inzwischen anders besetzt. '
+              'Zugestimmt wurde einem anderen Tausch als dem, der jetzt '
+              'zustande käme.',
+        'en': 'One of the two shifts has changed hands since. What was agreed '
+              'to is not the swap that would happen now.',
+    },
+    'swap_needs_partner_consent': {
+        'de': 'Ohne die Zustimmung der Tauschpartnerin oder des Tauschpartners '
+              'wäre es kein Tausch, sondern eine Umsetzung.',
+        'en': 'Without the swap partner’s consent this would not be a swap but '
+              'a reassignment.',
+    },
     'invalid_date_value': {
         'de': 'Ungültiges Datum: {date}',
         'en': 'Invalid date: {date}',

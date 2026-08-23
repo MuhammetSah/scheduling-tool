@@ -1298,3 +1298,67 @@ def test_anonymisierungsspalte_laesst_sich_zurueckrollen_und_erneut_anwenden(pg_
 
     assert '0014_anonymisation' in migrations.apply_pending()
     assert 'anonymized_at' in spalten(schema_url, schema, 'employees')
+
+
+def test_tauschantraege_laufen_auf_postgres_rund(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0015_swap_requests.
+
+    Und ein Schreibtest dazu: die Tabelle bekommt Fremdschluessel auf
+    employees und shift_assignments, und der INSERT laeuft ueber die
+    Dialektschicht, die jedem INSERT ein RETURNING id anhaengt (Fallstrick
+    16). Beides ist auf SQLite unauffaellig.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+    assert 'shift_swap_requests' in tabellen(schema_url, schema)
+
+    import db
+
+    connection = db.get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        anna = cursor.lastrowid
+        cursor.execute("INSERT INTO employees (name) VALUES ('Berta')")
+        berta = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 9, 'published')")
+        schedule_id = cursor.lastrowid
+        zuweisungen = []
+        for index, (employee_id, tag) in enumerate(
+                ((anna, '2026-09-07'), (berta, '2026-09-14'))):
+            cursor.execute(
+                'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, '
+                'slot_index, employee_id, start_time, end_time) '
+                "VALUES (?, ?, NULL, ?, ?, '06:00', '14:00')",
+                (schedule_id, tag, index, employee_id))
+            zuweisungen.append(cursor.lastrowid)
+
+        cursor.execute(
+            'INSERT INTO shift_swap_requests (requester_employee_id, '
+            'requester_assignment_id, partner_employee_id, partner_assignment_id, '
+            'status, created_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+            (anna, zuweisungen[0], berta, zuweisungen[1], 'pending'))
+        antrag_id = cursor.lastrowid
+        connection.commit()
+        assert antrag_id is not None, (
+            'lastrowid ist leer - die Dialektschicht haengt jedem INSERT ein '
+            'RETURNING id an, und dafuer braucht die Tabelle eine id-Spalte'
+        )
+
+        # ON DELETE CASCADE: ein Antrag auf einen geloeschten Platz ist kein
+        # Antrag mehr, sondern Muell.
+        cursor.execute('DELETE FROM shift_assignments WHERE id = ?', (zuweisungen[0],))
+        connection.commit()
+        cursor.execute('SELECT COUNT(*) AS n FROM shift_swap_requests WHERE id = ?',
+                       (antrag_id,))
+        assert cursor.fetchone()['n'] == 0
+    finally:
+        connection.close()
+
+    while '0015_swap_requests' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert 'shift_swap_requests' not in tabellen(schema_url, schema)
+
+    assert '0015_swap_requests' in migrations.apply_pending()
+    assert 'shift_swap_requests' in tabellen(schema_url, schema)

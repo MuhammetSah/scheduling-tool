@@ -150,6 +150,48 @@ Both now happen inside a per-username Postgres advisory lock (`security.attempt_
 
 The race is not asserted by argument but reproduced: two threads, each with its own connection and therefore its own Postgres session, with half a second between reading and writing so the race happens every time rather than occasionally. A flaky concurrency test is worse than none.
 
+## The guided swap
+
+Swapping already existed, but only through HR and only immediately: click two cells, done, warnings afterwards. Anyone who wanted to swap had to ask somebody else to do it for them.
+
+Three steps now, and each one carries weight. The requester offers a shift **of their own** and names a colleague; the partner agrees and picks which of **their** shifts goes back; HR approves. Only then does the roster move.
+
+### When a swap is refused rather than flagged
+
+A swap is the only operation in this tool that changes the load on **two** people at once, and the same check runs for both. But not every finding weighs the same, and the line runs along one question: is this compulsory law, or is it a house rule?
+
+Refused: the eleven hours of [§ 5 Abs. 1](https://www.gesetze-im-internet.de/arbzg/__5.html), the daily ceiling of § 3, the breaks of § 4, the seventh consecutive day, the yearly Sunday budget of § 11 Abs. 1 — and overlapping blocks, which are not law but physics.
+
+Flagged and passed on to HR: a blocked weekday, an availability window, a weekly-hours target, a monthly cap. Real reasons to hesitate, none of them something the state insists on.
+
+**Why refuse at all.** [§ 22 Abs. 1 ArbZG](https://www.gesetze-im-internet.de/arbzg/__22.html) makes a breach an administrative offence *for the employer*, and §§ 3 and 5 cannot be waived by individual agreement — only under § 7 by collective agreement, which this tool does not model. Two colleagues arranging an unlawful swap between themselves and handing HR the finished fact would move a liability the law puts on the employer into a process nobody supervises.
+
+**Why HR's own manual swap still only warns.** They carry the responsibility, and they may know something the tool does not — an emergency under § 14, a collective agreement under § 7. Putting the same bolt across their door would take away the decision they are answerable for.
+
+**Why a public holiday does not refuse.** § 9 forbids holiday work and § 10 exempts whole industries; which side this business is on is a fact about the business that the tool does not have. Refusing would assert it.
+
+### Why the request names a person, not one of their shifts
+
+An employee sees only their own shifts (see [Draft and published](#draft-and-published)). Letting the requester pick the other half would mean showing them everybody else's roster first — undoing a deliberate decision for the sake of a secondary one.
+
+So the request names a colleague, and the partner picks what they give in return. They know best which of their shifts they can spare, and it makes their consent substantive rather than a rubber stamp. `GET /colleagues` returns the smallest disclosure that makes this possible: **who works here, and nothing about when.**
+
+### Checked in the state the swap would create
+
+The swap is carried out and *then* examined; a request that was only asking rolls the transaction back. Judging beforehand judges the wrong state — checking the partner against the requester's date while they still hold their own shift counts a block that is about to leave their hands, and two shifts on neighbouring days would report a rest-period breach the swap actually resolves. There is a test for that, and it goes red if the order is reversed.
+
+Checked **twice**: once when the partner accepts, once when HR approves. Days pass in between, and whoever checks only once approves a swap that has since become unlawful — with the earlier check sitting in the file as proof that everything was examined.
+
+And days change more than the law. If HR reassigns one of the two shifts by hand in the meantime, approving would swap whoever stands there *now* — a swap nobody agreed to, with an acceptance on file that appears to cover it. So approval first checks that both slots still hold the people who consented.
+
+### Deliberately absent
+
+**No free-text reason.** A "why do you want to swap" box collects "doctor's appointment" and "my mother is in hospital" — health data under Art. 9 GDPR, in a table with no retention rule of its own. The change log refuses request bodies for the same reason.
+
+**No swap board.** Appealing, but it shows everyone everybody's shifts — the same rollback of data minimisation, merely volunteered.
+
+**Nothing about works-council co-determination** (§ 87 Abs. 1 Nr. 2 BetrVG). Whether and when a works council has a say in distributing working time depends on the business and on existing agreements. That is not a question a tool may answer.
+
 ## Self-service sick / vacation
 
 The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
@@ -412,7 +454,6 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **Fairness dimensions genuinely trade off.** Optimizing only total shifts can leave weekend duty lopsided (weekend spread 5 while total spread is optimal); turning on weekend equity cut it to 2 at the cost of one shift of total spread. There is no single "fair", so it's a setting rather than a hardcoded rule.
 
 **Roadmap** (not yet built):
-- **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - The ArbZG rules this tool still leaves to HR: the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
@@ -457,6 +498,7 @@ schichtplan-tool/
 │   ├── test_exports.py         # iCal escaping, CRLF, CSV for Excel
 │   ├── test_api_exports.py     # Who may download what
 │   ├── test_api_dsgvo.py       # Access, anonymisation, retention
+│   ├── test_api_schichttausch.py  # The guided swap, and where the law says no
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
@@ -485,6 +527,8 @@ schichtplan-tool/
         │   ├── CoverageEditor.jsx     # Coverage-band editor (overlap/opening-hours validation)
         │   ├── CoverageEditor.test.jsx
         │   ├── AuditLog.jsx      # The change log, deliberately raw
+        │   ├── SwapRequests.jsx  # Propose / accept / approve a shift swap
+        │   ├── SwapRequests.test.jsx
         │   ├── Employees.test.jsx
         │   └── SchedulePage.jsx  # Generate / view / edit the monthly plan
         └── components/
@@ -583,7 +627,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)). To manage by hand:
 
 ```bash
 cd backend
@@ -657,6 +701,10 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | GET    | `/employees/<id>/schedule.ics`    | One employee's shifts as iCal, `?year=&month=`; published plans only (self or HR) |
 | GET    | `/schedules/<year>/<month>/export.csv` | The month as CSV, drafts included (HR)                          |
 | GET    | `/employees/<id>/data-export`     | Everything stored about one person, as JSON (self or HR)             |
+| GET    | `/colleagues`                     | Names and ids of the active workforce, for anyone signed in          |
+| POST   | `/swap-requests`                  | Offer one of your shifts to a named colleague                        |
+| GET    | `/swap-requests`                  | Yours and those addressed to you; HR sees all                        |
+| PUT    | `/swap-requests/<id>/status`      | Accept / decline / withdraw / approve / reject                       |
 | POST   | `/retention/purge`                | Remove personal extras past the retention period, reporting counts (HR) |
 | GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
 | PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
@@ -675,7 +723,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (476 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (508 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

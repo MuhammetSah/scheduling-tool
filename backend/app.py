@@ -2575,7 +2575,7 @@ def weekday_adverb(lang, weekday_index):
     return (name.lower() if lang == 'de' else name) + 's'
 
 
-def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, schedule_id,
+def constraint_findings(cursor, employee_id, assignment_date, shift_type_id, schedule_id,
                         exclude_assignment_id=None, start_time=None, end_time=None,
                         break_minutes=None):
     """Non-blocking warnings for assigning `employee_id` to one shift.
@@ -2591,20 +2591,31 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     """
     if employee_id is None:
         return []
-    warnings = []
+    findings = []
+
+    def melde(schluessel, **werte):
+        """Eine Feststellung samt ihrer Kennung.
+
+        Die Kennung ist der i18n-Schluessel selbst - sie erlaubt einem
+        Aufrufer zu unterscheiden, welche Feststellung zwingendes Recht ist
+        und welche Hausregel. constraint_warnings() unten wirft sie wieder
+        weg und liefert nur die Texte, wie bisher.
+        """
+        findings.append((schluessel, t(g.lang, schluessel, **werte)))
+
     cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
     employee = cursor.fetchone()
     if not employee:
-        return [t(g.lang, 'employee_not_found')]
+        return [('employee_not_found', t(g.lang, 'employee_not_found'))]
 
     weekday = date.fromisoformat(assignment_date).weekday()
     cursor.execute('SELECT 1 FROM employee_unavailable_weekdays WHERE employee_id = ? AND weekday = ?', (employee_id, weekday))
     if cursor.fetchone():
-        warnings.append(t(g.lang, 'warn_not_usual_weekday', name=employee['name'], weekday=weekday_adverb(g.lang, weekday)))
+        melde('warn_not_usual_weekday', name=employee['name'], weekday=weekday_adverb(g.lang, weekday))
 
     cursor.execute('SELECT 1 FROM employee_unavailable_dates WHERE employee_id = ? AND date = ?', (employee_id, assignment_date))
     if cursor.fetchone():
-        warnings.append(t(g.lang, 'warn_marked_unavailable', name=employee['name'], date=assignment_date))
+        melde('warn_marked_unavailable', name=employee['name'], date=assignment_date)
 
     # A block without a template isn't any shift type, so a restriction on
     # which types this person may work has nothing to say about it.
@@ -2614,7 +2625,7 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             cursor.execute('SELECT 1 FROM employee_allowed_shift_types WHERE employee_id = ? AND shift_type_id = ?',
                            (employee_id, shift_type_id))
             if not cursor.fetchone():
-                warnings.append(t(g.lang, 'warn_restricted_shift_types', name=employee['name']))
+                melde('warn_restricted_shift_types', name=employee['name'])
 
     if employee['availability_mode'] == 'windows':
         # The actual hours this assignment runs, respecting the assignment's
@@ -2639,11 +2650,11 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             if not any(window_contains_shift(w, start_time_effective, end_time_effective) for w in applicable_windows):
                 if applicable_windows:
                     windows_text = ', '.join(f"{w['start_time']}–{w['end_time']}" for w in applicable_windows)
-                    warnings.append(t(g.lang, 'warn_outside_availability', name=employee['name'],
-                                     weekday=weekday_adverb(g.lang, weekday), windows=windows_text))
+                    melde('warn_outside_availability', name=employee['name'],
+                                     weekday=weekday_adverb(g.lang, weekday), windows=windows_text)
                 else:
-                    warnings.append(t(g.lang, 'warn_outside_availability_no_window', name=employee['name'],
-                                     weekday=weekday_adverb(g.lang, weekday)))
+                    melde('warn_outside_availability_no_window', name=employee['name'],
+                                     weekday=weekday_adverb(g.lang, weekday))
 
     # Everything else this person already holds that day. Until Etappe 4 the
     # mere existence of one was the warning ("already assigned that day"),
@@ -2681,13 +2692,13 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if same_day and (unknown_hours or not (proposed_start and proposed_end)):
         # No minute axis on at least one side - overlap cannot be decided, so
         # fall back to the pre-Etappe-4 wording rather than stay silent.
-        warnings.append(t(g.lang, 'warn_already_assigned_that_day', name=employee['name']))
+        melde('warn_already_assigned_that_day', name=employee['name'])
     elif proposed_start and proposed_end:
         proposed_range = _time_range_minutes(proposed_start, proposed_end)
         for row_start, row_end in same_day_hours:
             if _ranges_overlap(proposed_range, _time_range_minutes(row_start, row_end)):
-                warnings.append(t(g.lang, 'warn_overlapping_blocks', name=employee['name'],
-                                  date=assignment_date, start=row_start, end=row_end))
+                melde('warn_overlapping_blocks', name=employee['name'],
+                                  date=assignment_date, start=row_start, end=row_end)
                 break
 
     # § 3 ArbZG caps the working time of one day, and § 2 Abs. 1 defines that
@@ -2702,9 +2713,9 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             total_minutes += net_working_minutes(
                 shift_duration_minutes(row_start, row_end), row_break)
         if total_minutes > employee['max_daily_hours'] * 60:
-            warnings.append(t(g.lang, 'warn_daily_hours_exceeded', name=employee['name'],
+            melde('warn_daily_hours_exceeded', name=employee['name'],
                               date=assignment_date, hours=total_minutes / 60,
-                              cap=employee['max_daily_hours']))
+                              cap=employee['max_daily_hours'])
 
     # § 11 Abs. 3 ArbZG via the six-day rule (see MAX_CONSECUTIVE_DAYS in
     # scheduler.py). Unlike the generator, this path reads saved data and
@@ -2713,8 +2724,8 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     # generator, not laxer.
     run = consecutive_days_around(cursor, employee_id, assignment_date, exclude_assignment_id)
     if run > MAX_CONSECUTIVE_DAYS:
-        warnings.append(t(g.lang, 'warn_seventh_consecutive_day',
-                          name=employee['name'], days=run))
+        melde('warn_seventh_consecutive_day',
+                          name=employee['name'], days=run)
 
     # § 9 ArbZG forbids work on public holidays, and § 10 exempts whole
     # industries. Which side this business is on is a fact about the business,
@@ -2726,8 +2737,8 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
         holiday_region(cursor),
     )
     if feiertag:
-        warnings.append(t(g.lang, 'warn_public_holiday', date=assignment_date,
-                          name=next(iter(feiertag.values()))))
+        melde('warn_public_holiday', date=assignment_date,
+                          name=next(iter(feiertag.values())))
 
     # § 11 Abs. 1 ArbZG: at least 15 Sundays a year stay free of work.
     if date.fromisoformat(assignment_date).weekday() == 6:
@@ -2736,8 +2747,8 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                                         exclude_assignment_id) + 1
         free = sundays_in_year(year) - worked
         if free < MIN_FREE_SUNDAYS_PER_YEAR:
-            warnings.append(t(g.lang, 'warn_sunday_budget_exhausted',
-                              name=employee['name'], free=max(0, free), year=year))
+            melde('warn_sunday_budget_exhausted',
+                              name=employee['name'], free=max(0, free), year=year)
 
     # § 4 ArbZG. This is the only place the rule can be broken at all: left
     # alone, break_minutes is NULL and reads as the legal minimum, so every
@@ -2746,9 +2757,9 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
     if proposed_span is not None and break_minutes is not None:
         required = legal_break_minutes(proposed_span)
         if break_minutes < required:
-            warnings.append(t(g.lang, 'warn_break_below_minimum', name=employee['name'],
+            melde('warn_break_below_minimum', name=employee['name'],
                               hours=proposed_span / 60, minutes=break_minutes,
-                              required=required))
+                              required=required)
 
     if employee['max_shifts_per_month'] is not None:
         cursor.execute(
@@ -2756,7 +2767,7 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             (employee_id, schedule_id, exclude_assignment_id or -1),
         )
         if cursor.fetchone()['n'] >= employee['max_shifts_per_month']:
-            warnings.append(t(g.lang, 'warn_monthly_cap_reached', name=employee['name'], limit=employee['max_shifts_per_month']))
+            melde('warn_monthly_cap_reached', name=employee['name'], limit=employee['max_shifts_per_month'])
 
     if employee['weekly_hours'] is not None:
         week_start, week_end = week_bounds(assignment_date)
@@ -2784,8 +2795,8 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                 shift_duration_minutes(new_start, new_end), break_minutes)
 
         if total_minutes > employee['weekly_hours'] * 60:
-            warnings.append(t(g.lang, 'warn_weekly_hours_exceeded', name=employee['name'],
-                             hours=total_minutes / 60, target=employee['weekly_hours']))
+            melde('warn_weekly_hours_exceeded', name=employee['name'],
+                             hours=total_minutes / 60, target=employee['weekly_hours'])
 
     if proposed_start and proposed_end:
         # § 5 Abs. 1 ArbZG measures the rest period from the end of the *daily
@@ -2821,10 +2832,54 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
             gap = (rest_gap_hours(neighbor_day, this_day) if neighbor_is_earlier
                    else rest_gap_hours(this_day, neighbor_day))
             if gap < min_rest:
-                warnings.append(t(g.lang, 'warn_rest_period_too_short', name=employee['name'],
-                                 gap=gap, required=min_rest))
+                melde('warn_rest_period_too_short', name=employee['name'],
+                                 gap=gap, required=min_rest)
 
-    return warnings
+    return findings
+
+
+# The findings that are compulsory law, by their key. Everything else is house
+# policy, an individual agreement or a contract term - real reasons to hesitate,
+# but not reasons the state gets to insist on.
+#
+# The distinction exists for one purpose: an employee-initiated swap is refused
+# when it would break one of these, while HR's own edit keeps warning. § 22
+# Abs. 1 ArbZG makes a breach an administrative offence *for the employer*, and
+# §§ 3 and 5 cannot be waived by individual agreement - only under § 7 by
+# collective agreement, which this tool does not model. Two colleagues arranging
+# an unlawful swap between themselves and handing HR the finished fact would
+# move a liability the law puts on the employer into a process nobody supervises.
+ARBZG_BLOCKERS = frozenset({
+    'warn_rest_period_too_short',      # § 5 Abs. 1 - eleven hours between shifts
+    'warn_daily_hours_exceeded',       # § 3 - ten hours a working day
+    'warn_break_below_minimum',        # § 4 - 30/45 minutes
+    'warn_seventh_consecutive_day',    # § 11 Abs. 3 via the six-day rule
+    'warn_sunday_budget_exhausted',    # § 11 Abs. 1 - fifteen free Sundays
+    'warn_overlapping_blocks',         # not law but physics: one person, one place
+})
+
+# Deliberately NOT blocking, and each for its own reason:
+#
+# - warn_public_holiday: § 9 forbids holiday work, § 10 exempts whole
+#   industries, and which side this business is on is a fact about the business
+#   that the tool does not have. Refusing would assert it.
+# - warn_already_assigned_that_day: it means the hours are unknown, so overlap
+#   *cannot be decided*. An undecided question is not a known violation, and
+#   refusing on "we cannot tell" would block legitimate swaps over legacy rows.
+# - warn_weekly_hours_exceeded / warn_monthly_cap_reached: contract terms, not
+#   statute. The eight-hour average of § 3 is a separate, reported-only check.
+# - The availability findings: an individual agreement. Someone may well want
+#   to work outside their usual window for one day - that is what a swap is.
+
+
+def constraint_warnings(*args, **kwargs):
+    """The findings as plain texts, the shape every existing caller expects."""
+    return [text for _key, text in constraint_findings(*args, **kwargs)]
+
+
+def blocking_findings(findings):
+    """The subset a guided swap may not proceed over. See ARBZG_BLOCKERS."""
+    return [text for key, text in findings if key in ARBZG_BLOCKERS]
 
 
 def day_envelope_from_hours(iso_date, hours):
@@ -2906,6 +2961,358 @@ def update_assignment(assignment_id):
 
     connection.commit()
     return jsonify({'message': t(g.lang, 'assignment_updated'), 'warnings': warnings})
+
+
+# ---------- the guided swap ----------
+#
+# Swapping already existed, but only through HR and only immediately: click two
+# cells, done, warnings afterwards. Anyone who wanted to swap had to ask someone
+# else to do it for them.
+#
+# Three steps, and each one carries weight:
+#   1. the requester proposes,
+#   2. the partner agrees - without that it is not a swap but a reassignment,
+#   3. HR approves. Only then does anything move.
+#
+# The third is not a formality. The ArbZG addresses the *employer* (§ 22 Abs. 1
+# makes a breach the employer's administrative offence), and the record-keeping
+# duty of § 16 Abs. 2 lands on them too. Two colleagues rearranging the roster
+# between themselves would move a responsibility the law puts elsewhere.
+
+SWAP_PENDING = 'pending'
+SWAP_ACCEPTED = 'accepted'
+SWAP_APPROVED = 'approved'
+SWAP_DECLINED = 'declined'
+SWAP_REJECTED = 'rejected'
+SWAP_WITHDRAWN = 'withdrawn'
+SWAP_OPEN_STATES = (SWAP_PENDING, SWAP_ACCEPTED)
+SWAP_STATES = (SWAP_PENDING, SWAP_ACCEPTED, SWAP_APPROVED,
+               SWAP_DECLINED, SWAP_REJECTED, SWAP_WITHDRAWN)
+
+
+def perform_swap(cursor, a, b):
+    """Swap the two employees over, and report what that state looks like.
+
+    The findings are read *after* the swap on purpose. Judging beforehand means
+    judging the wrong state: checking the partner against the requester's date
+    while the partner still holds their own shift counts a block that is about
+    to leave their hands, and two shifts on neighbouring days would report a
+    rest-period breach that the swap actually resolves.
+
+    So the swap is carried out and then looked at. Callers that were only
+    asking - the request route below - roll the transaction back afterwards;
+    callers that meant it commit. The alternative was a second, parallel
+    eligibility calculation "as if", and a second copy of a rule is a rule that
+    drifts.
+
+    `a` and `b` are the rows as loaded *before* the update, so their times are
+    still the places' own - the hours stay with the slot, not the person.
+    """
+    cursor.execute(
+        'UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?',
+        (b['employee_id'], a['id']))
+    cursor.execute(
+        'UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?',
+        (a['employee_id'], b['id']))
+
+    # break_minutes reist mit, wie die Zeiten: sie gehoert zum Platz, nicht zur
+    # Person. Ohne sie liest die Pruefung die gesetzliche Mindestpause und
+    # rechnet damit weniger Arbeitszeit, als tatsaechlich anfaellt - eine kurz
+    # vereinbarte Pause macht den Tag laenger, nicht kuerzer, und § 4 waere gar
+    # nicht pruefbar.
+    findings = []
+    findings += constraint_findings(
+        cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'],
+        exclude_assignment_id=a['id'], start_time=a['start_time'], end_time=a['end_time'],
+        break_minutes=a['break_minutes'])
+    findings += constraint_findings(
+        cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'],
+        exclude_assignment_id=b['id'], start_time=b['start_time'], end_time=b['end_time'],
+        break_minutes=b['break_minutes'])
+    return findings
+
+
+def load_own_shift(cursor, assignment_id):
+    """One of the caller's own shifts, out of a published plan.
+
+    Returns (row, None) or (None, (response, status)). Both refusals matter:
+    a shift that is not yours is not yours to offer, and a draft does not
+    exist for employees at all (Etappe 5f) - a swap request on one would be
+    the back door through the wall next to it, confirming that a plan exists
+    and what is in it.
+    """
+    employee_id = g.user['employee_id']
+    if not assignment_id:
+        return None, (jsonify({'message': t(g.lang, 'swap_needs_own_shift')}), 400)
+    cursor.execute('SELECT * FROM shift_assignments WHERE id = ?', (assignment_id,))
+    row = cursor.fetchone()
+    if not row:
+        return None, (jsonify({'message': t(g.lang, 'assignment_not_found')}), 404)
+    row = dict(row)
+    if employee_id is None or row['employee_id'] != employee_id:
+        return None, (jsonify({'message': t(g.lang, 'swap_needs_own_shift')}), 403)
+    if not published_schedule(cursor, row['schedule_id']):
+        return None, (jsonify({'message': t(g.lang, 'no_schedule_found')}), 404)
+    return row, None
+
+
+def load_swap_pair_from(cursor, id_a, id_b):
+    """The two assignments, or a (response, status) pair to return early."""
+    if not id_a or not id_b or id_a == id_b:
+        return None, (jsonify({'message': t(g.lang, 'two_assignment_ids_required')}), 400)
+    cursor.execute('SELECT * FROM shift_assignments WHERE id IN (?, ?)', (id_a, id_b))
+    rows = {row['id']: dict(row) for row in cursor.fetchall()}
+    if id_a not in rows or id_b not in rows:
+        return None, (jsonify({'message': t(g.lang, 'assignment_not_found')}), 404)
+    a, b = rows[id_a], rows[id_b]
+    if a['schedule_id'] != b['schedule_id']:
+        return None, (jsonify({'message': t(g.lang, 'swap_same_schedule_only')}), 400)
+    return (a, b), None
+
+
+def swap_request_row(cursor, request_id):
+    cursor.execute('SELECT * FROM shift_swap_requests WHERE id = ?', (request_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def serialize_swap_request(cursor, row):
+    """One request, with enough about both shifts to be readable.
+
+    Names and hours, never why anybody is absent: `absence_type` is health data
+    under Art. 9 DSGVO and has no business in a list two colleagues both read.
+    """
+    # Die Gegenschicht steht erst ab der Zustimmung fest - bis dahin ist die
+    # Spalte NULL, und "IN (?, NULL)" trifft sie ohnehin nicht.
+    cursor.execute(
+        'SELECT sa.id, sa.date, sa.start_time, sa.end_time, st.name AS shift_type_name '
+        'FROM shift_assignments sa LEFT JOIN shift_types st ON st.id = sa.shift_type_id '
+        'WHERE sa.id IN (?, ?)',
+        (row['requester_assignment_id'], row['partner_assignment_id'] or -1))
+    shifts = {r['id']: dict(r) for r in cursor.fetchall()}
+
+    cursor.execute('SELECT id, name FROM employees WHERE id IN (?, ?)',
+                   (row['requester_employee_id'], row['partner_employee_id']))
+    names = {r['id']: r['name'] for r in cursor.fetchall()}
+
+    return {
+        'id': row['id'],
+        'status': row['status'],
+        'created_at': row['created_at'],
+        'decided_at': row['decided_at'],
+        'requester': {
+            'employee_id': row['requester_employee_id'],
+            'name': names.get(row['requester_employee_id']),
+            'shift': shifts.get(row['requester_assignment_id']),
+        },
+        'partner': {
+            'employee_id': row['partner_employee_id'],
+            'name': names.get(row['partner_employee_id']),
+            'shift': shifts.get(row['partner_assignment_id']),
+        },
+    }
+
+
+def published_schedule(cursor, schedule_id):
+    cursor.execute('SELECT status FROM schedules WHERE id = ?', (schedule_id,))
+    row = cursor.fetchone()
+    return bool(row) and row['status'] == SCHEDULE_PUBLISHED
+
+
+@app.route('/colleagues', methods=['GET'])
+@login_required
+def list_colleagues():
+    """Names and ids of the active workforce, for anyone signed in.
+
+    Needed because a swap request names a person, not a shift of theirs. The
+    disclosure is deliberately the smallest one that makes that possible: who
+    works here, and nothing about when. Employees still cannot see anybody
+    else's roster - that decision from Etappe 5f stands, and this is what
+    keeps it standing.
+
+    Anonymised rows are left out: they are records, not colleagues.
+    """
+    cursor = get_db().cursor()
+    cursor.execute(
+        'SELECT id, name FROM employees WHERE active = 1 AND anonymized_at IS NULL '
+        'ORDER BY name')
+    return jsonify([dict(row) for row in cursor.fetchall()])
+
+
+@app.route('/swap-requests', methods=['POST'])
+@login_required
+def create_swap_request():
+    """Propose a swap of one of my shifts for one of somebody else's.
+
+    Refused - not merely flagged - when the resulting roster would break
+    compulsory working-time law. See ARBZG_BLOCKERS for which findings those
+    are and why the line runs there. HR's own manual swap keeps warning
+    instead: they carry the responsibility and may know something the tool does
+    not, such as an emergency under § 14 or a collective agreement under § 7.
+    """
+    data = request.get_json(silent=True) or {}
+    connection = get_db()
+    cursor = connection.cursor()
+
+    meine, fehler = load_own_shift(cursor, data.get('my_assignment_id'))
+    if fehler:
+        return fehler
+
+    partner_id = data.get('partner_employee_id')
+    employee_id = g.user['employee_id']
+    if not partner_id or partner_id == employee_id:
+        return jsonify({'message': t(g.lang, 'swap_needs_a_partner')}), 400
+    cursor.execute('SELECT id FROM employees WHERE id = ? AND active = 1', (partner_id,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    # Nothing to weigh up yet: only one of the two shifts is known, and the
+    # working-time question needs both. It is asked the moment the partner
+    # names theirs - still before anything is agreed, which is what matters.
+    cursor.execute(
+        'INSERT INTO shift_swap_requests (requester_employee_id, requester_assignment_id, '
+        'partner_employee_id, status, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        (employee_id, meine['id'], partner_id, SWAP_PENDING))
+    request_id = cursor.lastrowid
+    connection.commit()
+
+    return jsonify(serialize_swap_request(cursor, swap_request_row(cursor, request_id))), 201
+
+
+@app.route('/swap-requests', methods=['GET'])
+@login_required
+def list_swap_requests():
+    """Mine and the ones addressed to me; HR sees all of them.
+
+    Who wants to swap with whom is nobody else's business - an uninvolved
+    colleague sees an empty list, and there is a test for that.
+    """
+    cursor = get_db().cursor()
+    if is_hr(g.user):
+        cursor.execute('SELECT * FROM shift_swap_requests ORDER BY created_at DESC')
+    else:
+        employee_id = g.user['employee_id']
+        if employee_id is None:
+            return jsonify([])
+        cursor.execute(
+            'SELECT * FROM shift_swap_requests '
+            'WHERE requester_employee_id = ? OR partner_employee_id = ? '
+            'ORDER BY created_at DESC', (employee_id, employee_id))
+    rows = [dict(row) for row in cursor.fetchall()]
+    return jsonify([serialize_swap_request(cursor, row) for row in rows])
+
+
+@app.route('/swap-requests/<int:request_id>/status', methods=['PUT'])
+@login_required
+def set_swap_request_status(request_id):
+    """Move a request along. Who may set what is the whole point.
+
+    accepted/declined belong to the partner, withdrawn to the requester,
+    approved/rejected to HR - and approved additionally requires the partner to
+    have accepted already, because without their consent it is not a swap but a
+    reassignment, and that has its own, more honest route.
+
+    A settled request stays settled. Otherwise an approved swap could be
+    rewritten into a rejected one afterwards, and the roster would then
+    contradict the record - which is exactly what § 16 Abs. 2 ArbZG keeps
+    records for.
+    """
+    data = request.get_json(silent=True) or {}
+    status = data.get('status')
+    if status not in SWAP_STATES:
+        return jsonify({'message': t(g.lang, 'unknown_swap_status',
+                                     allowed=', '.join(SWAP_STATES))}), 400
+
+    connection = get_db()
+    cursor = connection.cursor()
+    antrag = swap_request_row(cursor, request_id)
+    if not antrag:
+        return jsonify({'message': t(g.lang, 'swap_request_not_found')}), 404
+    if antrag['status'] not in SWAP_OPEN_STATES:
+        return jsonify({'message': t(g.lang, 'swap_request_already_settled',
+                                     status=antrag['status'])}), 409
+
+    employee_id = g.user['employee_id']
+    hr = is_hr(g.user)
+    erlaubt = {
+        SWAP_ACCEPTED: employee_id == antrag['partner_employee_id'],
+        SWAP_DECLINED: employee_id == antrag['partner_employee_id'],
+        SWAP_WITHDRAWN: employee_id == antrag['requester_employee_id'],
+        SWAP_APPROVED: hr,
+        SWAP_REJECTED: hr,
+        SWAP_PENDING: False,
+    }
+    if not erlaubt[status]:
+        return jsonify({'message': t(g.lang, 'forbidden')}), 403
+
+    if status in (SWAP_ACCEPTED, SWAP_DECLINED, SWAP_WITHDRAWN) and antrag['status'] != SWAP_PENDING:
+        return jsonify({'message': t(g.lang, 'swap_request_already_settled',
+                                     status=antrag['status'])}), 409
+    if status == SWAP_APPROVED and antrag['status'] != SWAP_ACCEPTED:
+        return jsonify({'message': t(g.lang, 'swap_needs_partner_consent')}), 409
+
+    warnings = []
+    if status == SWAP_ACCEPTED:
+        # Agreeing means naming what you give in return. The requester never
+        # picked it - they cannot see anybody else's roster - and the partner
+        # is the one who knows which of their shifts they can spare.
+        gegenschicht, fehler = load_own_shift(cursor, data.get('my_assignment_id'))
+        if fehler:
+            return fehler
+        meine, fehler = load_swap_pair_from(cursor, antrag['requester_assignment_id'],
+                                            gegenschicht['id'])
+        if fehler:
+            return fehler
+        angebot, gegen = meine
+
+        # First moment both shifts are known, so first moment the working-time
+        # question can be asked at all - and still before anything is agreed.
+        findings = perform_swap(cursor, angebot, gegen)
+        connection.rollback()
+        blockers = blocking_findings(findings)
+        if blockers:
+            return jsonify({'message': t(g.lang, 'swap_would_break_the_law'),
+                            'blockers': blockers}), 409
+        warnings = [text for _key, text in findings]
+        cursor.execute('UPDATE shift_swap_requests SET partner_assignment_id = ? WHERE id = ?',
+                       (gegen['id'], request_id))
+
+    if status == SWAP_APPROVED:
+        paar, fehler = load_swap_pair_from(cursor, antrag['requester_assignment_id'],
+                                           antrag['partner_assignment_id'])
+        if fehler:
+            return fehler
+        meine, fremde = paar
+
+        # Consent was given to two particular people holding two particular
+        # shifts. If HR reassigned one of them by hand in the meantime,
+        # approving would swap whoever stands there now - a swap nobody agreed
+        # to, with an acceptance in the file that appears to cover it.
+        if (meine['employee_id'] != antrag['requester_employee_id']
+                or fremde['employee_id'] != antrag['partner_employee_id']):
+            return jsonify({'message': t(g.lang, 'swap_shifts_changed_hands')}), 409
+
+        # Checked again, now. Days pass between the request and the approval,
+        # and whoever only checks at the request approves a swap that has since
+        # become unlawful - with the earlier check sitting in the file as proof
+        # that everything was examined.
+        findings = perform_swap(cursor, meine, fremde)
+        blockers = blocking_findings(findings)
+        if blockers:
+            connection.rollback()
+            return jsonify({'message': t(g.lang, 'swap_would_break_the_law'),
+                            'blockers': blockers}), 409
+        warnings = [text for _key, text in findings]
+        refresh_unfilled_count(cursor, meine['schedule_id'])
+
+    cursor.execute(
+        'UPDATE shift_swap_requests SET status = ?, decided_at = CURRENT_TIMESTAMP, '
+        'decided_by_user_id = ? WHERE id = ?', (status, g.user['id'], request_id))
+    connection.commit()
+
+    antwort = serialize_swap_request(cursor, swap_request_row(cursor, request_id))
+    antwort['warnings'] = warnings
+    return jsonify(antwort), 200
 
 
 @app.route('/assignments/swap', methods=['POST'])
