@@ -160,7 +160,9 @@ const de = {
     notWorkingWindowsHint: 'Gilt zusätzlich zu den Fenstern: ein hier markierter Wochentag bleibt gesperrt, auch wenn für ihn ein Fenster eingetragen ist. Diese Auswahl kann nur einschränken, nie zusätzliche Zeiten erlauben.',
     onlyShiftTypesLabel: 'Nur folgende Schichtarten (leer = alle erlaubt)',
     freeDaysLabel: 'Einzelne freie Tage (Urlaub, Krankheit, ...)',
-    confirmDelete: 'Diesen Mitarbeiter wirklich löschen?',
+    dataExportButton: 'Auskunft',
+    dataExportTitle: 'Alle gespeicherten Daten dieser Person als Datei (Art. 15 DSGVO)',
+    confirmDelete: 'Diesen Mitarbeiter wirklich löschen? Name, E-Mail und persönliche Angaben werden entfernt. Die vergangenen Schichten bleiben ohne Namen bestehen — § 16 Abs. 2 ArbZG verlangt, Arbeitszeitnachweise mindestens zwei Jahre aufzubewahren.',
     flashUpdated: 'Mitarbeiter aktualisiert.',
     flashCreated: 'Mitarbeiter angelegt.',
     availabilityModeLabel: 'Verfügbarkeit',
@@ -251,6 +253,15 @@ const de = {
     entryPlural: '{date}, {start}–{end}: {n} Personen fehlen',
   },
 
+  retention: {
+    title: 'Datenschutz',
+    monthsLabel: 'Aufbewahrung personenbezogener Zusatzdaten (Monate)',
+    hint: 'Betrifft Krank- und Urlaubsmeldungen sowie das Änderungsprotokoll. Der Dienstplan selbst ist ausgenommen: § 16 Abs. 2 ArbZG verlangt, Arbeitszeitnachweise mindestens zwei Jahre aufzubewahren.',
+    purgeButton: 'Jetzt aufräumen',
+    purgeConfirm: 'Alle Daten älter als die eingestellte Frist endgültig entfernen?',
+    scheduleHint: 'Das Aufräumen läuft automatisch bei jedem Neustart der Anwendung. Läuft sie lange durch, hilft dieser Knopf.',
+    purged: '{absences} Meldungen, {marks} Einträge im Plan und {entries} Protokollzeilen entfernt.',
+  },
   schedule: {
     exportCsvButton: 'CSV herunterladen',
     exportIcalButton: 'In meinen Kalender',
@@ -503,7 +514,9 @@ const en = {
     notWorkingWindowsHint: 'Applies on top of the windows: a weekday marked here stays blocked even if a window is entered for it. This selection can only restrict, never allow additional hours.',
     onlyShiftTypesLabel: 'Only the following shift types (empty = all allowed)',
     freeDaysLabel: 'Individual days off (vacation, sick leave, ...)',
-    confirmDelete: 'Really delete this employee?',
+    dataExportButton: 'Data export',
+    dataExportTitle: 'Everything stored about this person, as a file (Art. 15 GDPR)',
+    confirmDelete: 'Really delete this employee? Name, email and personal details are removed. Past shifts remain without a name — § 16 Abs. 2 ArbZG requires working-time records to be kept for at least two years.',
     flashUpdated: 'Employee updated.',
     flashCreated: 'Employee created.',
     availabilityModeLabel: 'Availability',
@@ -594,6 +607,15 @@ const en = {
     entryPlural: '{date}, {start}–{end}: {n} people missing',
   },
 
+  retention: {
+    title: 'Data protection',
+    monthsLabel: 'Retention of personal extras (months)',
+    hint: 'Covers sick and holiday reports and the change log. The roster itself is exempt: § 16 Abs. 2 ArbZG requires working-time records to be kept for at least two years.',
+    purgeButton: 'Clean up now',
+    purgeConfirm: 'Permanently remove everything older than the configured period?',
+    scheduleHint: 'The clean-up runs automatically whenever the application restarts. If it stays up for a long time, this button helps.',
+    purged: 'Removed {absences} reports, {marks} entries in the roster and {entries} log rows.',
+  },
   schedule: {
     exportCsvButton: 'Download CSV',
     exportIcalButton: 'Add to my calendar',

@@ -199,6 +199,15 @@ function Employees({ setFlash }) {
     }
   }
 
+  async function exportEmployeeData(id, name) {
+    try {
+      await api.download(`/employees/${id}/data-export`,
+                         `auskunft-${name.replace(/[^\w-]+/g, '-').toLowerCase()}.json`)
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   async function deleteEmployee(id) {
     if (!confirm(t('employees.confirmDelete'))) return
     try {
@@ -267,6 +276,7 @@ function Employees({ setFlash }) {
                 </div>
                 <div className="item-actions">
                   <button className="btn-secondary btn-small" onClick={() => startEdit(emp)}>{t('common.edit')}</button>
+                  <button className="btn-secondary btn-small" title={t('employees.dataExportTitle')} onClick={() => exportEmployeeData(emp.id, emp.name)}>{t('employees.dataExportButton')}</button>
                   <button className="btn-danger btn-small" onClick={() => deleteEmployee(emp.id)}>{t('common.delete')}</button>
                 </div>
               </li>

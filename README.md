@@ -104,6 +104,34 @@ Three details that decide whether an export works at all:
 
 **No time zone in the iCal file.** The tool works in local time throughout and stores no zone; inventing one would be a claim the data does not support. A calendar in a different zone will therefore shift the events, which is stated here rather than left to be discovered.
 
+## Data protection
+
+Two decisions came from the operator: **six months** of retention, and erasure by **anonymisation**. Both shape what follows.
+
+### Six months, and what they cannot cover
+
+The period deliberately does **not** touch assignments or schedules. [§ 16 Abs. 2 ArbZG](https://www.gesetze-im-internet.de/arbzg/__16.html) requires the employer to record working time beyond eight hours a day, and "die Nachweise sind mindestens zwei Jahre aufzubewahren". Deleting a month with ten-hour days after six would be breaking one rule in order to keep another.
+
+What the period does cover is everything personal *around* that record: sick and holiday reports, and the change-log entries.
+
+**The one that gets missed:** an absence is stored in `employee_absences` *and* denormalised into the assignment it freed (`absence_type`, `absent_employee_id`). Clearing only the table would leave the health note sitting in the roster. Both are purged, and a test pins it.
+
+There is **no scheduler** on the hosting plan in use, so the purge runs at application start — in practice on every deploy — and on demand through `POST /retention/purge`, which reports what it removed rather than a bare "done". An instance left running for months will not clean up on its own until someone presses it. That is said plainly rather than papered over with a fake automatism.
+
+### Deleting a person means anonymising the row
+
+`ON DELETE SET NULL` used to turn a deleted person's past shifts into unfilled ones. That is worse than it sounds: the past reads as understaffed, coverage gaps appear retroactively, and the working-time record § 16 requires loses the very attribution that makes it one.
+
+Instead the employee row becomes a tombstone — name replaced, email gone, inactive, and everything personal beside it (availability windows, blocked dates and their reasons, absences, allowed shift types) removed. The assignments stay exactly where they are and keep pointing at that row. Anonymised rows are hidden from the employee list: they are records, not staff.
+
+**Why that satisfies Art. 17:** paragraph 3 lit. b exempts processing needed to comply with a legal obligation, and § 16 Abs. 2 ArbZG is one. What stays is the working-time record without a person; what goes is the person. `DELETE /employees/<id>` keeps its name and changes its meaning — and says so in its response, because a route that does something other than its verb promises should at least admit it.
+
+### Access
+
+`GET /employees/<id>/data-export`, self-or-HR, returns everything the tool knows about one person as JSON: master data, constraints, windows, absences, assignments with hours, the linked account, and that account's log entries. **Never the password hash** — the one field whose disclosure would make the export itself a security problem, and a test says so.
+
+JSON rather than PDF: Art. 15 Abs. 3 asks for a commonly used electronic format, JSON is one, and the alternative would be a dependency bought for the sake of looking like paper.
+
 ## Self-service sick / vacation
 
 The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
@@ -353,7 +381,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
-- Remaining production-readiness work: GDPR housekeeping, and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
+- Remaining production-readiness work: and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
@@ -395,6 +423,7 @@ schichtplan-tool/
 │   ├── test_api_audit.py       # The change log, including that it never breaks a request
 │   ├── test_exports.py         # iCal escaping, CRLF, CSV for Excel
 │   ├── test_api_exports.py     # Who may download what
+│   ├── test_api_dsgvo.py       # Access, anonymisation, retention
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── requirements.txt
 │   └── requirements-dev.txt    # + ortools, only needed for the benchmark
@@ -517,7 +546,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)). To manage by hand:
 
 ```bash
 cd backend
@@ -590,6 +619,8 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | GET    | `/audit-log`                      | The most recent change-log entries, newest first; `?limit=` up to 500 (HR) |
 | GET    | `/employees/<id>/schedule.ics`    | One employee's shifts as iCal, `?year=&month=`; published plans only (self or HR) |
 | GET    | `/schedules/<year>/<month>/export.csv` | The month as CSV, drafts included (HR)                          |
+| GET    | `/employees/<id>/data-export`     | Everything stored about one person, as JSON (self or HR)             |
+| POST   | `/retention/purge`                | Remove personal extras past the retention period, reporting counts (HR) |
 | GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
 | PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
 | GET    | `/holiday-regions`                | The federal states to choose from                                    |
@@ -607,7 +638,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (421 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (438 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 
