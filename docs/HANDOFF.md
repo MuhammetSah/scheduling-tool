@@ -42,10 +42,20 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
-**Das Nächste ist der 07.09.2026** — die Datenbank läuft ab. Das Umstellungsblatt steht in
-[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md): Reihenfolge, Prüfungen, der Weg zurück. Der
-Sprung vom Bestandsstand `0007` auf `0017` ist geprobt (Etappe 11), die neue Instanz selbst liegt
-beim Nutzer.
+**Das Nächste ist der Datenbankzyklus.** Der Nutzer hat am 23.08.2026 entschieden: die Instanz
+ablaufen lassen und **eine neue 30-Tage-Instanz** aufziehen. Damit ist es kein Termin, sondern ein
+wiederkehrender Vorgang; der erste Durchlauf fällt auf den 07.09.2026. Das Blatt dafür steht in
+[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md).
+
+**Die Folge, die eine neue Sitzung kennen muss:** eine Datenbank, die alle 30 Tage neu anfängt,
+hält keine Arbeitszeitnachweise. § 16 Abs. 2 ArbZG verlangt zwei Jahre, und das ganze Werkzeug ist
+darauf gebaut — die Aufbewahrungsfrist nimmt Zuweisungen aus, Löschen anonymisiert. **Ein Zyklus
+ohne Rückspielen macht das zunichte.** Das ist eine Feststellung, keine Empfehlung: es aufzulösen
+heißt entweder jeden Zyklus zu sichern und zurückzuspielen oder einen bezahlten Plan zu nehmen,
+und beides ist eine Entscheidung des Betreibers.
+
+Der Sprung vom Bestandsstand `0007` auf `0017` ist geprobt (Etappe 11), die neue Instanz selbst
+liegt beim Nutzer.
 
 **Die Roadmap ist abgearbeitet.** Etappe 8 brachte den geführten Schichttausch, Etappe 9 die
 letzten beiden ArbZG-Regeln, Etappe 10 die Nachweise. Damit ist jeder Punkt umgesetzt, den das
@@ -1217,21 +1227,28 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
 behoben und gemergt (PR #15), und ein vollständiges Backup gezogen und geprüft. Was hier steht,
 ist der verbliebene Rest.
 
-### Die Datenbank läuft am 07.09.2026 ab — Entscheidung ist gefallen
+### Der Datenbankzyklus — alle 30 Tage, erster Durchlauf 07.09.2026
 
-**Der Nutzer hat am 22.08.2026 entschieden: die Instanz darf ablaufen, die Datenbank wird neu
-aufgezogen.** Kein bezahlter Plan, kein Umzug des Bestands.
+**Der Nutzer hat am 23.08.2026 entschieden: die Instanz ablaufen lassen und eine neue
+30-Tage-Instanz aufziehen.** Kein bezahlter Plan. Damit ist es kein Termin, sondern ein
+wiederkehrender Vorgang.
 
-Was daraus folgt:
+**Das Blatt dafür ist [`DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md)** — dort steht der Durchlauf,
+nicht hier. Was eine neue Sitzung wissen muss:
 
-- Ab dem 07.09. hat die Anwendung keine Datenbank mehr und braucht eine neue. Render legt sie
-  nicht von selbst an; `DATABASE_URL` muss auf die neue Instanz zeigen.
-- Der Bestand ist **nicht** verloren, falls er doch gebraucht wird: das geprüfte Backup vom
-  22.08. liegt (siehe unten) und lässt sich zurückspielen. Nach der Entscheidung ist das aber
-  nicht der Plan.
-- Migrationen `0001`–`0009` laufen auf einer leeren neuen Datenbank von selbst durch, weil
-  `app.py` sie beim Modulimport anwendet. `0007_derive_coverage` findet dort nichts zum
-  Ableiten und tut nichts — das ist der Wächter in der Migration, kein Fehler.
+- **Die Reihenfolge trägt.** Neue Instanz anlegen, *solange die alte läuft*; Schreiben beenden,
+  dann sichern; **zurückspielen, bevor** `DATABASE_URL` umgebogen wird. Wer erst deployt und
+  danach zurückspielt, läuft eine Weile gegen eine leere Datenbank — und `pg_restore --clean`
+  wischt weg, was in der Zwischenzeit dort angelegt wurde.
+- **§ 16 Abs. 2 ArbZG steht dem Zyklus entgegen**, wenn nicht jeder Durchlauf gesichert und
+  zurückgespielt wird. Siehe oben unter „Erster Schritt einer neuen Sitzung".
+- **`pg_dump`/`pg_restore` sind nicht im PATH** — das stand weiter unten schon, und trotzdem
+  riefen `DATENBANKWECHSEL.md` und das README sie bloß beim Namen auf. Eine Tatsache zu
+  notieren und sie in derselben Anleitung zu missachten ist das eigentliche Versäumnis; der
+  volle Pfad steht jetzt an beiden Stellen.
+- Auf einer leeren neuen Datenbank laufen alle Migrationen beim Modulimport von selbst durch.
+  `0007_derive_coverage` findet dort nichts zum Ableiten und tut nichts — der Wächter in der
+  Migration, kein Fehler.
 
 ### Das Backup — vorhanden und geprüft
 

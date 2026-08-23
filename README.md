@@ -575,7 +575,7 @@ schichtplan-tool/
 │   ├── test_scheduler_grenze.py # The recursion ceiling, named rather than crashed into
 │   ├── test_api_gesundheit.py   # A health check that actually checks
 ├── docs/
-│   └── DATENBANKWECHSEL.md     # The 07.09.2026 changeover, step by step
+│   └── DATENBANKWECHSEL.md     # The 30-day database cycle, one pass at a time
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
@@ -713,17 +713,23 @@ cd backend
 ./venv/bin/python migrations.py down     # roll back the most recently applied one
 ```
 
-**Backup.** Render's free Postgres plan is widely described as having no automated backups and being removed after a period of inactivity or age — but that has not been verified here against Render's current terms, so check the dashboard directly before relying on either claim. What holds regardless of the exact policy: don't treat a free-tier database as durable storage for schedules the organisation depends on, and a paid plan is a precondition for real operation, not an optional upgrade. Until that's in place, back up by hand — at least weekly:
+**Backup.** The free Postgres plan expires after 30 days, and the operator's decision is to let it expire and raise a new one. That makes the changeover **a cycle rather than a date** — [`docs/DATENBANKWECHSEL.md`](docs/DATENBANKWECHSEL.md) is the run sheet for one pass.
+
+**The consequence worth reading once:** a database that starts over every 30 days does not keep working-time records. § 16 Abs. 2 ArbZG asks for two years, and this whole tool is built around that — retention deliberately spares assignments, deleting a person anonymises rather than removes. A cycle without a restore undoes it. Two things resolve that: back up and restore every cycle, or pay for a plan. Running the cycle *and* skipping the backup is the one combination that does not work.
+
+So back up by hand, and before the instance lapses rather than weekly-ish:
 
 ```bash
-pg_dump "$DATABASE_URL" --no-owner --format=custom --file="schichtplan-$(date +%Y-%m-%d).dump"
+"/c/Program Files/PostgreSQL/18/bin/pg_dump" "$DATABASE_URL"   --no-owner --format=custom --file="schichtplan-$(date +%Y-%m-%d).dump"
 ```
 
 Restore:
 
 ```bash
-pg_restore --clean --no-owner --dbname="$DATABASE_URL" schichtplan-2026-08-16.dump
+"/c/Program Files/PostgreSQL/18/bin/pg_restore" --clean --no-owner   --dbname="$DATABASE_URL" schichtplan-2026-08-16.dump
 ```
+
+**The full path is not decoration.** Neither binary is on `PATH` on the machine this project is developed on; a bare `pg_dump` answers "command not found", which reads like a missing program rather than a missing path. That was already written down in the handoff — and this section still spelled the bare command, which is the more instructive half of the story: a fact recorded in one place and ignored in the instructions is a fact nobody has.
 
 **Environment variables.** Full list in `backend/.env.example`. Required in production:
 
