@@ -438,6 +438,7 @@ def _search(
     node_budget,
     time_budget_seconds,
     slots=None,
+    boundary=None,
 ):
     """Run one backtracking search with a fixed slot ordering.
 
@@ -474,6 +475,13 @@ def _search(
     # instead, and only an overlap is genuinely impossible - two blocks either
     # side of a break are exactly what Spec §4.4 asks for.
     day_hours = {}
+    # (employee_id, date) -> hours already held on the two dates that flank the
+    # month, out of the neighbouring months' plans. Deliberately NOT merged into
+    # day_hours: only rest_period_ok() may see them. Merging would make
+    # worked_dates() count those days too, and a boundary Sunday would then be
+    # charged twice - once here and once through sundays_worked_in_year, which
+    # scheduling_history() already counts across the whole year.
+    boundary_hours = dict(boundary.get('day_hours', {})) if boundary else {}
     # (employee_id, date) -> number of blocks assigned there whose hours are
     # unknown. Those have no minute axis, so overlap cannot be checked and the
     # old one-per-day rule keeps applying to them. This is the branch that
@@ -486,7 +494,14 @@ def _search(
     day_minutes = {}
     # (employee_id, week_start) -> minutes assigned so far that week, only
     # tracked where a weekly_hours target makes it relevant.
-    week_minutes = {}
+    #
+    # Seeded, not empty. A calendar week does not stop at the end of a month:
+    # generating September with an empty counter gives everyone a fresh weekly
+    # budget on a Tuesday, and the week straddling the boundary quietly runs to
+    # one and a half times its cap. The caller supplies what the neighbouring
+    # months already hold (see boundary_context in app.py); a caller that
+    # supplies nothing gets the old behaviour.
+    week_minutes = dict(boundary.get('week_minutes', {})) if boundary else {}
     load = {emp['id']: 0 for emp in employees}
     weekend_load = {emp['id']: 0 for emp in employees}
 
@@ -528,11 +543,13 @@ def _search(
 
         Only checked when the slot's hours are known (backward compatible with
         callers - e.g. existing tests - that only ever dealt in shift counts).
-        Like max_shifts_per_month, this is inherently scoped to the month being
-        generated: a slot on the 1st can't see what was assigned on the last
-        day of the previous month, since that's a different generation run.
-        constraint_warnings() in app.py covers that gap for manual edits, where
-        the already-saved data spans month boundaries freely.
+
+        The two dates flanking the month come from `boundary_hours`, loaded
+        from the neighbouring months' saved plans. Without them a night shift
+        ending 06:00 on the 31st and an early shift starting 06:00 on the 1st
+        were both fine on their own and left zero hours of rest between them -
+        a plan that keeps every rule inside itself and breaks § 5 Abs. 1 ArbZG
+        at exactly one point in the year.
 
         Compared day against day, never block against block: a person working
         08:00-12:00 and 16:00-20:00 has four hours in between, and no rest
@@ -551,11 +568,11 @@ def _search(
             list(day_hours.get((eid, slot['date']), ())) + [(slot['start_time'], slot['end_time'])],
         )
 
-        prev = day_hours.get((eid, previous_day))
+        prev = day_hours.get((eid, previous_day)) or boundary_hours.get((eid, previous_day))
         if prev and rest_gap_hours(day_envelope(previous_day, prev), this_day) < min_rest:
             return False
 
-        nxt = day_hours.get((eid, next_day))
+        nxt = day_hours.get((eid, next_day)) or boundary_hours.get((eid, next_day))
         if nxt and rest_gap_hours(this_day, day_envelope(next_day, nxt)) < min_rest:
             return False
 
@@ -862,6 +879,7 @@ def generate_schedule(
     node_budget=DEFAULT_NODE_BUDGET,
     time_budget_seconds=DEFAULT_TIME_BUDGET_SECONDS,
     slots=None,
+    boundary=None,
 ):
     """Build a month's schedule, choosing a search strategy to suit the month.
 
@@ -882,6 +900,17 @@ def generate_schedule(
     default - build_slots() expands `requirements` the pre-Etappe-4 way, which
     is what benchmark.py compares against and what the 23 backward-compatibility
     tests in test_scheduler.py exercise.
+
+    boundary: what the neighbouring months already hold, as
+    {'day_hours': {(employee_id, iso_date): [(start, end), ...]},
+     'week_minutes': {(employee_id, week_start_iso): minutes}}. A month is a
+    billing period, not a unit of rest: the calendar week and the eleven hours
+    between two shifts both run straight across the boundary. `day_hours` here
+    covers only the two dates flanking the month - the only ones a slot inside
+    it can be adjacent to - and `week_minutes` seeds the counter for the weeks
+    that straddle it. None - the default - reproduces the old behaviour, where
+    every run began with an empty state and the first of the month was free of
+    every history.
 
     weekly_hours and min_rest_hours are both optional, hard, best-effort caps -
     same "no guarantee, reports gaps rather than failing" philosophy as
@@ -912,7 +941,8 @@ def generate_schedule(
     """
     def run(order):
         return _search(year, month, employees, shift_types, order, fairness,
-                       weekend_weight, node_budget, time_budget_seconds, slots)
+                       weekend_weight, node_budget, time_budget_seconds, slots,
+                       boundary)
 
     if ordering != AUTO:
         result = run(ordering)

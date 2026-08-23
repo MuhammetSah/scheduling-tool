@@ -183,7 +183,7 @@ Hard constraints enforced during search: an employee can't work two blocks that 
 
 An employee can carry an optional `weekly_hours` target (e.g. "works 30h/week") instead of only the existing monthly shift-count cap. It's enforced as a hard ceiling in minutes over each Monday–Sunday week: once assigning another shift would push the employee past their target for that week, they stop being eligible for further shifts *that week* — which, combined with the existing one-shift-per-day rule, is what spreads a part-timer's hours across several distinct days each week rather than letting them bunch onto a few long ones. It's a ceiling and a best-effort target, not a guaranteed minimum — same "report gaps rather than force an answer" philosophy the rest of the scheduler already has for `max_shifts_per_month`.
 
-Both this cap and the rest-period check below are inherently scoped to the month being generated (the search only ever sees one month's slots at a time, same limitation `max_shifts_per_month` already has) — but the *manual-edit* warning path (see [Rest periods](#rest-periods)) queries the actually-saved data with no such boundary, so it correctly sees a conflict that spans two calendar months.
+This cap and the rest-period check below **used to** stop at the edge of the generated month, because the search only ever sees one month's slots at a time. They no longer do — see [Across the month boundary](#across-the-month-boundary). What remains scoped to the month is `max_shifts_per_month`, and that one is a monthly quota by definition.
 
 ### Rest periods
 
@@ -334,6 +334,22 @@ Working time is counted net of breaks, as everywhere since [Breaks and net worki
 
 **Not included: holidays below state level.** Corpus Christi is a holiday in Saxony and Thuringia only in predominantly Catholic municipalities, Assumption Day likewise in Bavaria, and the Augsburg Peace Festival only in the city of Augsburg. A state alone does not settle those, and a municipality list would be its own undertaking. The calendar is therefore incomplete in the lenient direction — it knows one holiday too few, never one too many. Anyone affected enters the day as an opening-hours exception, as before.
 
+### Across the month boundary
+
+A month is a billing period, not a unit of rest. Two rules run straight across the boundary, and until this stage they stopped at it — because both live in one search run's state, and that state started empty on the 1st.
+
+**The eleven hours between two shifts.** A night shift ending 06:00 on the 31st and an early shift starting 06:00 on the 1st are each fine within their own month, and leave zero hours of rest between them. That is a plan which keeps every rule inside itself and breaks [§ 5 Abs. 1 ArbZG](https://www.gesetze-im-internet.de/arbzg/__5.html) at exactly one point in the year — the least conspicuous fault a roster can have.
+
+**The weekly-hours target.** The calendar week does not end on the last of the month either. An empty counter hands everyone a fresh weekly budget on whatever weekday the 1st happens to be, and the straddling week quietly runs over.
+
+The six-day run and the yearly Sunday budget have crossed the boundary since the working-time stage — but those are *numbers*, and numbers can be handed in ahead of the search. Rest periods and weekly hours need *times*, so the generator now receives what the neighbouring months already hold and seeds its state with it.
+
+**Loaded from the saved plans, not guessed.** Seven days either side: the rest period only ever needs the two flanking dates, but a straddling week reaches up to six days into the neighbouring month. Assignments *inside* the month being generated are excluded — the same request is about to delete them, and counting them would dock everyone for shifts that are being replaced.
+
+**The flanking days are deliberately kept out of the search's own day state.** Merging them would be the obvious move and the wrong one: `worked_dates()` reads those keys, and a Sunday at the edge of the month would then be charged twice — once there and once through the yearly Sunday count, which already spans the whole year.
+
+**One direction only.** Regenerating August after September exists gives you an August that respects September, not the other way round. A plan that rewrites other plans would be a much larger decision.
+
 ### Fairness (v1.3)
 
 The search optimizes a **lexicographic** objective:
@@ -398,7 +414,6 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 **Roadmap** (not yet built):
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
-- Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
 - The ArbZG rules this tool still leaves to HR: the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
@@ -660,7 +675,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (467 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (476 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 
