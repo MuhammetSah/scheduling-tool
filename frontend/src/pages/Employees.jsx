@@ -18,12 +18,27 @@ const emptyForm = {
   availability: [],
 }
 
+// True while today falls inside a window's valid_from/valid_until bounds.
+// Both are optional and both are inclusive, matching the backend's
+// window_is_valid_on(). ISO dates compare correctly as plain strings, which is
+// what the backend does too.
+function windowAppliesToday(w, today) {
+  if (w.valid_from && today < w.valid_from) return false
+  if (w.valid_until && today > w.valid_until) return false
+  return true
+}
+
 // Groups a weekday/start_time-sorted availability list (as returned by the
 // API) into one entry per weekday, for the compact per-weekday badge in the
 // list view. Relies on the backend's sort order rather than re-sorting here.
-function groupByWeekday(availability) {
+//
+// Expired and not-yet-started windows are left out: the generator ignores
+// them, so showing them as badges made the list claim an availability the
+// planner would not use - and the person read as available on a day they were
+// not.
+function groupByWeekday(availability, today) {
   const groups = []
-  for (const w of availability) {
+  for (const w of availability.filter(w => windowAppliesToday(w, today))) {
     const last = groups[groups.length - 1]
     if (last && last.weekday === w.weekday) {
       last.windows.push(w)
@@ -36,6 +51,10 @@ function groupByWeekday(availability) {
 
 function Employees({ setFlash }) {
   const { t, weekdayLabels, weekdayNames } = useTranslation()
+  // Computed once per render rather than per badge, and as a local ISO date -
+  // toISOString() would hand back UTC and shift the day for anyone east of
+  // Greenwich in the evening.
+  const today = new Date().toLocaleDateString('sv-SE')
   const [employees, setEmployees] = useState([])
   const [shiftTypes, setShiftTypes] = useState([])
   const [form, setForm] = useState(emptyForm)
@@ -264,7 +283,14 @@ function Employees({ setFlash }) {
                     {emp.availability_mode === 'windows' && emp.availability.length === 0 && (
                       <span className="badge">{t('employees.windowsModeNoWindowsBadge')}</span>
                     )}
-                    {emp.availability_mode === 'windows' && groupByWeekday(emp.availability).map(g => (
+                    {/* Hinterlegt, aber heute ohne Wirkung - das ist etwas anderes
+                        als gar kein Fenster, und der Unterschied entscheidet, ob
+                        jemand ein Fenster anlegen oder eine Grenze aendern muss. */}
+                    {emp.availability_mode === 'windows' && emp.availability.length > 0
+                      && groupByWeekday(emp.availability, today).length === 0 && (
+                      <span className="badge">{t('employees.windowsAllExpiredBadge')}</span>
+                    )}
+                    {emp.availability_mode === 'windows' && groupByWeekday(emp.availability, today).map(g => (
                       <span key={g.weekday} className="badge">
                         {t('employees.windowBadge', {
                           weekday: weekdayLabels[g.weekday],
@@ -332,7 +358,8 @@ function Employees({ setFlash }) {
               <input
                 id="emp-daily"
                 type="number"
-                min="0"
+                min="0.5"
+                max="10"
                 step="0.5"
                 value={form.max_daily_hours}
                 onChange={e => setForm(f => ({ ...f, max_daily_hours: e.target.value }))}

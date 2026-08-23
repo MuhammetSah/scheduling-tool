@@ -179,6 +179,7 @@ const de = {
     validUntilLabel: 'Gültig bis',
     windowBadge: '{weekday} {times}',
     windowsModeNoWindowsBadge: 'Feste Zeiten (keine Fenster hinterlegt)',
+    windowsAllExpiredBadge: 'Kein Fenster gilt heute',
   },
 
   shiftTypes: {
@@ -533,6 +534,7 @@ const en = {
     validUntilLabel: 'Valid until',
     windowBadge: '{weekday} {times}',
     windowsModeNoWindowsBadge: 'Fixed hours (no windows set)',
+    windowsAllExpiredBadge: 'No window applies today',
   },
 
   shiftTypes: {

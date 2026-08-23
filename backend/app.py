@@ -645,9 +645,17 @@ def me():
 # ---------- serialization helpers ----------
 
 def parse_int_list(value):
+    """Whole numbers, rejecting the booleans int() quietly accepts.
+
+    int(True) is 1: a stray `true` in allowed_shift_types becomes whichever
+    shift type happens to hold id 1, and in unavailable_weekdays it blocks
+    Tuesday. Both land inside the valid range, so nothing downstream objects.
+    """
     if not value:
         return []
     try:
+        if any(isinstance(v, bool) for v in value):
+            raise ValueError
         return [int(v) for v in value]
     except (TypeError, ValueError):
         # int(None), int({...}), int([...]) etc. all raise TypeError rather than
@@ -700,6 +708,69 @@ def serialize_employee(cursor, row):
     }
 
 
+def parse_iso_date(value, error_key='invalid_date_value'):
+    """Validate a date and return its canonical YYYY-MM-DD form.
+
+    Validating without normalising is the trap here. Since Python 3.11
+    date.fromisoformat() also accepts the basic format ('20260901'), which
+    passes the check and is then stored verbatim - and this tool compares dates
+    as plain strings throughout, where '2026-09-15' sorts before '20260901'.
+    The row exists, looks right in the database, and loses every later
+    comparison: a blocked day that blocks nothing, a sick note that frees no
+    shift, a closing day the business stays open on.
+
+    Raises ValueError with a translated message, so callers that already catch
+    ValueError need no new branch.
+    """
+    try:
+        return date.fromisoformat(value).isoformat()
+    except (TypeError, ValueError):
+        raise ValueError(t(g.lang, error_key, date=value))
+
+
+def parse_weekday(value):
+    """A weekday 0-6, rejecting the two values int() quietly accepts.
+
+    int(True) is 1, so a stray boolean becomes Tuesday; int(3.9) is 3, so a
+    rounding error one field upstream becomes Thursday instead of an error.
+    Both produce a valid-looking row for a weekday nobody named.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(t(g.lang, 'weekday_out_of_range'))
+    try:
+        weekday = int(value)
+        if float(value) != weekday:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError(t(g.lang, 'weekday_out_of_range'))
+    if not 0 <= weekday <= 6:
+        raise ValueError(t(g.lang, 'weekday_out_of_range'))
+    return weekday
+
+
+# § 3 ArbZG: eight hours a working day, extendable to ten only if the
+# six-month average stays at eight. Ten is the ceiling this tool knows - § 7
+# (collective agreement) and § 14 (emergencies) are not modelled, and a number
+# above ten would be a promise the planner cannot keep anyway: block_planner's
+# MAX_BLOCK_MINUTES caps a block at 600 minutes regardless.
+MAX_DAILY_HOURS_CEILING = 10
+
+
+def parse_daily_hours(value):
+    """The per-employee daily ceiling: a number above 0 and at most ten.
+
+    Zero passed the old check and was not a working-time limit but a disguised
+    deactivation - the employee could never be scheduled, and nothing said so.
+    """
+    hours = parse_optional_hours(value, 'max_daily_hours_label')
+    if hours is None:
+        return None
+    if not 0 < hours <= MAX_DAILY_HOURS_CEILING:
+        raise ValueError(t(g.lang, 'max_daily_hours_out_of_range',
+                           max=MAX_DAILY_HOURS_CEILING))
+    return hours
+
+
 def parse_optional_hours(value, field_key):
     """A non-negative number, or None if the field was omitted/blank.
 
@@ -707,6 +778,12 @@ def parse_optional_hours(value, field_key):
     'weekly_hours_label') rather than a literal string, so the message comes
     out in the request's language regardless of which field failed.
     """
+    # float(True) is 1.0, so an unchecked boolean becomes a one-hour daily
+    # limit or a one-hour weekly target - inside every valid range, and
+    # therefore silent. Checked here rather than in the callers so the rule
+    # holds for every field that goes through this parser.
+    if isinstance(value, bool):
+        raise ValueError(t(g.lang, 'field_must_be_number', field=t(g.lang, field_key)))
     if value is None or value == '':
         return None
     try:
@@ -770,19 +847,15 @@ def replace_employee_constraints(connection, employee_id, data):
     cursor = connection.cursor()
 
     cursor.execute('DELETE FROM employee_unavailable_weekdays WHERE employee_id = ?', (employee_id,))
-    for weekday in parse_int_list(data.get('unavailable_weekdays')):
-        if not 0 <= weekday <= 6:
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+    for weekday in data.get('unavailable_weekdays') or []:
+        weekday = parse_weekday(weekday)
         cursor.execute('INSERT INTO employee_unavailable_weekdays (employee_id, weekday) VALUES (?, ?)', (employee_id, weekday))
 
     cursor.execute('DELETE FROM employee_unavailable_dates WHERE employee_id = ?', (employee_id,))
     for entry in data.get('unavailable_dates') or []:
         iso_date = entry['date'] if isinstance(entry, dict) else entry
         reason = entry.get('reason') if isinstance(entry, dict) else None
-        try:
-            date.fromisoformat(iso_date)
-        except (TypeError, ValueError):
-            raise ValueError(t(g.lang, 'invalid_date_value', date=iso_date))
+        iso_date = parse_iso_date(iso_date)
         cursor.execute('INSERT INTO employee_unavailable_dates (employee_id, date, reason) VALUES (?, ?, ?)', (employee_id, iso_date, reason))
 
     cursor.execute('DELETE FROM employee_allowed_shift_types WHERE employee_id = ?', (employee_id,))
@@ -806,12 +879,7 @@ def replace_employee_availability(cursor, employee_id, entries):
     for entry in entries or []:
         if not isinstance(entry, dict):
             raise ValueError(t(g.lang, 'availability_entry_invalid'))
-        try:
-            weekday = int(entry.get('weekday'))
-        except (TypeError, ValueError):
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
-        if not 0 <= weekday <= 6:
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        weekday = parse_weekday(entry.get('weekday'))
 
         start_time = entry.get('start_time')
         end_time = entry.get('end_time')
@@ -822,24 +890,11 @@ def replace_employee_availability(cursor, employee_id, entries):
         if start_time == end_time:
             raise ValueError(t(g.lang, 'availability_window_empty'))
 
-        # Store the canonical YYYY-MM-DD form, not whatever came in: since
-        # Python 3.11 date.fromisoformat() also accepts the basic format
-        # ('20260901'), which passes this validation but is then dead weight -
-        # scheduler.window_is_valid_on() compares the bounds as plain strings
-        # against an ISO slot date, and '2026-09-15' < '20260901' makes such a
-        # window silently never apply. Normalising is also what keeps the
-        # valid_until < valid_from comparison below honest, since it compares
-        # the same two strings.
-        bounds = []
-        for bound in (entry.get('valid_from'), entry.get('valid_until')):
-            if bound is None:
-                bounds.append(None)
-                continue
-            try:
-                bounds.append(date.fromisoformat(bound).isoformat())
-            except (TypeError, ValueError):
-                raise ValueError(t(g.lang, 'invalid_date_value', date=bound))
-        valid_from, valid_until = bounds
+        # Normalising is also what keeps the valid_until < valid_from
+        # comparison below honest, since it compares the same two strings.
+        valid_from, valid_until = (
+            parse_iso_date(bound) if bound is not None else None
+            for bound in (entry.get('valid_from'), entry.get('valid_until')))
         if valid_from and valid_until and valid_until < valid_from:
             raise ValueError(t(g.lang, 'availability_valid_range_invalid'))
 
@@ -899,7 +954,7 @@ def create_employee():
         cursor = connection.cursor()
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
-        max_daily_hours = parse_optional_hours(data.get('max_daily_hours'), 'max_daily_hours_label')
+        max_daily_hours = parse_daily_hours(data.get('max_daily_hours'))
         availability_mode = data.get('availability_mode') or 'anytime'
         if availability_mode not in ('anytime', 'windows'):
             raise ValueError(t(g.lang, 'availability_mode_invalid'))
@@ -950,7 +1005,7 @@ def update_employee(employee_id):
     try:
         weekly_hours = parse_optional_hours(data.get('weekly_hours'), 'weekly_hours_label')
         min_rest_hours = parse_optional_hours(data.get('min_rest_hours'), 'min_rest_hours_label')
-        max_daily_hours = parse_optional_hours(data.get('max_daily_hours'), 'max_daily_hours_label')
+        max_daily_hours = parse_daily_hours(data.get('max_daily_hours'))
         availability_mode = data.get('availability_mode') or 'anytime'
         if availability_mode not in ('anytime', 'windows'):
             raise ValueError(t(g.lang, 'availability_mode_invalid'))
@@ -1017,7 +1072,11 @@ def put_employee_availability(employee_id):
     if not cursor.fetchone():
         return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    # A JSON array parses fine and then has no .get, which used to surface as a
+    # 500 - "the server is broken" for something the caller got wrong.
+    if not isinstance(data, dict):
+        return jsonify({'message': t(g.lang, 'request_body_must_be_object')}), 400
     availability_mode = data.get('availability_mode') or 'anytime'
     if availability_mode not in ('anytime', 'windows'):
         return jsonify({'message': t(g.lang, 'availability_mode_invalid')}), 400
@@ -1288,8 +1347,8 @@ def report_absence(employee_id):
     absence_type = data.get('type')
 
     try:
-        date.fromisoformat(iso_date)
-    except (TypeError, ValueError):
+        iso_date = parse_iso_date(iso_date)
+    except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_date')}), 400
     if absence_type not in ABSENCE_TYPES:
         return jsonify({'message': t(g.lang, 'absence_type_invalid')}), 400
@@ -1348,7 +1407,7 @@ def cancel_absence(employee_id, iso_date):
         return error
 
     try:
-        date.fromisoformat(iso_date)
+        iso_date = parse_iso_date(iso_date)
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_date')}), 400
 
@@ -2198,8 +2257,8 @@ def set_shift_times(year, month):
     end_time = data.get('end_time')
 
     try:
-        date.fromisoformat(iso_date)
-    except (TypeError, ValueError):
+        iso_date = parse_iso_date(iso_date)
+    except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_date')}), 400
 
     connection = get_db()
@@ -2262,9 +2321,10 @@ def add_slot(year, month):
         return jsonify({'message': t(g.lang, 'assignment_without_shift_type_needs_times')}), 400
 
     try:
-        parsed = date.fromisoformat(iso_date)
-    except (TypeError, ValueError):
+        iso_date = parse_iso_date(iso_date)
+    except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_date')}), 400
+    parsed = date.fromisoformat(iso_date)
     if (parsed.year, parsed.month) != (year, month):
         return jsonify({'message': t(g.lang, 'date_not_in_month')}), 400
 
@@ -2914,12 +2974,7 @@ def replace_business_hours(connection, entries):
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError(t(g.lang, 'business_hours_entry_invalid'))
-        try:
-            weekday = int(entry.get('weekday'))
-        except (TypeError, ValueError):
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
-        if not 0 <= weekday <= 6:
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        weekday = parse_weekday(entry.get('weekday'))
         if weekday in by_weekday:
             raise ValueError(t(g.lang, 'business_hours_weekday_duplicate'))
 
@@ -2988,11 +3043,7 @@ def parse_business_hours_exception(data):
     coverage bands to, so a special opening really does change the demand
     reported for its date rather than only its open/closed state.
     """
-    iso_date = data.get('date')
-    try:
-        date.fromisoformat(iso_date)
-    except (TypeError, ValueError):
-        raise ValueError(t(g.lang, 'invalid_date_value', date=iso_date))
+    iso_date = parse_iso_date(data.get('date'))
 
     closed = 1 if data.get('closed') else 0
     open_time = data.get('open_time')
@@ -3143,12 +3194,7 @@ def parse_coverage_requirements(entries):
         if not isinstance(entry, dict):
             raise ValueError(t(g.lang, 'coverage_requirement_entry_invalid'))
 
-        try:
-            weekday = int(entry.get('weekday'))
-        except (TypeError, ValueError):
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
-        if not 0 <= weekday <= 6:
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+        weekday = parse_weekday(entry.get('weekday'))
 
         start_time = entry.get('start_time')
         end_time = entry.get('end_time')
