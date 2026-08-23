@@ -61,16 +61,23 @@ weitermachen.
 ### 4. Prüfen, dass sie steht
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://schichtplan-api.onrender.com/
+curl -s https://schichtplan-api.onrender.com/health
 ```
 
-200 erwartet. Und eine geschützte Route ohne Anmeldung:
+Erwartet:
 
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" https://schichtplan-api.onrender.com/employees
+```json
+{"status":"ok","database":"ok","migrations":{"applied":17,"latest":"0017_qualifications"}}
 ```
 
-401 erwartet — **nicht** 200 und nicht 500. Ein 500 heißt, die Datenbank antwortet nicht.
+**Diese eine Abfrage beantwortet beide Fragen**: kommt die Datenbank an, und welcher Stand liegt
+dort. Kommt stattdessen ein **503** mit `"database":"unreachable"`, zeigt `DATABASE_URL` auf
+nichts Erreichbares — dann nicht weitermachen, sondern Schritt 2 prüfen.
+
+`healthCheckPath` in `render.yaml` zeigt seit Etappe 14 ebenfalls hierher. Vorher zeigte es auf
+`/`, und die Route beweist nur, dass Python läuft: Render hätte einen Dienst ohne Datenbank für
+gesund gehalten.
+
 
 ### 5. Den ersten Tag durchlaufen
 

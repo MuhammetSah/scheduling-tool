@@ -63,7 +63,11 @@ services:
     startCommand: >-
       gunicorn app:app --bind 0.0.0.0:$PORT --preload
       --threads 4 --timeout 60 --access-logfile -
-    healthCheckPath: /
+    # /health statt /: die Wurzel beweist nur, dass Python laeuft. Zeigte die
+    # Pruefung dorthin, hielte Render einen Dienst fuer gesund, dessen
+    # saemtliche Anfragen mit 500 enden, weil die Datenbank fehlt - genau der
+    # wahrscheinlichste Fehler beim Datenbankwechsel.
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.0

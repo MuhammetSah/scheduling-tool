@@ -573,6 +573,7 @@ schichtplan-tool/
 │   ├── test_api_tag_eins.py     # What day one on an empty database tells the operator
 │   ├── test_api_einrichtung.py  # What is still missing, and what is only worth knowing
 │   ├── test_scheduler_grenze.py # The recursion ceiling, named rather than crashed into
+│   ├── test_api_gesundheit.py   # A health check that actually checks
 ├── docs/
 │   └── DATENBANKWECHSEL.md     # The 07.09.2026 changeover, step by step
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
@@ -740,7 +741,7 @@ pg_restore --clean --no-owner --dbname="$DATABASE_URL" schichtplan-2026-08-16.du
 
 ## API Endpoints
 
-Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes and reading `/employees/<id>/availability`, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
+Everything except `/`, `/health`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one) — `/health` is public because a health check behind a login is one nobody can use, and it reports the schema version rather than anything about the workforce. Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes and reading `/employees/<id>/availability`, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
 
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
@@ -787,6 +788,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | PUT    | `/swap-requests/<id>/status`      | Accept / decline / withdraw / approve / reject                       |
 | POST   | `/retention/purge`                | Remove personal extras past the retention period, reporting counts (HR) |
 | GET    | `/setup-status`                   | What still prevents a usable plan, and what is only worth knowing (HR) |
+| GET    | `/health`                         | Reads the database and reports the migration state; 503 when it cannot (public) |
 | GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
 | PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
 | GET    | `/holiday-regions`                | The federal states to choose from                                    |
@@ -804,7 +806,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (574 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (579 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

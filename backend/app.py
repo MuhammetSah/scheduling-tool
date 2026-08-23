@@ -4625,7 +4625,59 @@ def handle_unexpected_error(error):
 
 @app.route('/')
 def index():
-    return jsonify({'message': t(g.lang, 'api_root'), 'status': 'ok'})
+    """Die Begruessung der API.
+
+    Sie sagte bis Etappe 14 'status': 'ok' und hat die Datenbank dabei nie
+    angefasst - eine Zusage, die sie nicht einloesen konnte. Wer wissen will,
+    ob der Dienst arbeitsfaehig ist, fragt /health; hier steht nur noch, wo.
+    """
+    return jsonify({'message': t(g.lang, 'api_root'), 'health': '/health'})
+
+
+@app.route('/health')
+def health():
+    """Ist der Dienst arbeitsfaehig - nicht nur erreichbar?
+
+    Die Unterscheidung ist der ganze Punkt. render.yaml verdrahtet
+    healthCheckPath hierher; zeigte sie auf eine Route, die nur beweist, dass
+    Python laeuft, haelt Render einen Dienst fuer gesund, dessen saemtliche
+    Anfragen mit 500 enden. Am Tag des Datenbankwechsels ist genau das der
+    wahrscheinlichste Fehler: DATABASE_URL zeigt auf nichts, die Anwendung
+    startet, alles sieht gut aus.
+
+    Deshalb wird wirklich gelesen, und zwar aus schema_migrations - das
+    beantwortet in einem Zug beide Fragen des Umstellungsblattes: kommt die
+    Datenbank an, und welcher Stand liegt dort.
+
+    503 statt 200 mit einem Feld darin: eine Ueberwachung liest den Status,
+    nicht den Rumpf. Der Preis ist gesagt statt verschwiegen - eine kurz
+    stolpernde Datenbank laesst Render den Dienst als ungesund fuehren, und
+    das kann einen Neustart ausloesen. Bei einer Datenbank, die nicht
+    antwortet, ist ein Neustart aber ohnehin nicht das Problem.
+
+    Oeffentlich und ohne Anmeldung: eine Gesundheitspruefung, die eine
+    Anmeldung braucht, kann niemand als solche benutzen. Was sie preisgibt,
+    ist eine Aussage ueber den Code, keine ueber die Belegschaft.
+    """
+    try:
+        cursor = get_db().cursor()
+        cursor.execute('SELECT version FROM schema_migrations ORDER BY version')
+        versionen = [row['version'] for row in cursor.fetchall()]
+    except Exception:
+        # Absichtlich jeder Fehler: was die Datenbank unerreichbar macht -
+        # falsche URL, TLS, Netz, abgelaufene Instanz - aendert nichts an der
+        # Antwort, und ein Filter nach Ausnahmeklassen waere eine Liste, die
+        # beim naechsten Treiber unvollstaendig ist.
+        app.logger.exception('Gesundheitspruefung: Datenbank nicht erreichbar')
+        return jsonify({'status': 'degraded', 'database': 'unreachable',
+                        'migrations': {'applied': 0, 'latest': None}}), 503
+
+    return jsonify({
+        'status': 'ok',
+        'database': 'ok',
+        'migrations': {'applied': len(versionen),
+                       'latest': versionen[-1] if versionen else None},
+    })
 
 
 def _purge_at_startup():
