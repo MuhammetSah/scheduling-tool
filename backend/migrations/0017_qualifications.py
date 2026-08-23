@@ -29,6 +29,15 @@ ausdruecklich weg, und dazu gehoert auch das hier.
 
 TEXT fuer valid_until, wie jedes Datum in diesem Schema: das ganze Werkzeug
 vergleicht ISO-Daten als Zeichenkette.
+
+Beide Verknuepfungstabellen tragen eine eigene id-Spalte, obwohl das Paar
+schon eindeutig ist - Fallstrick 16: die Dialektschicht haengt jedem INSERT
+ohne RETURNING ein RETURNING id an, und eine Tabelle ohne id-Spalte scheitert
+auf Postgres mit UndefinedColumn. Der erste Entwurf hatte hier einen
+zusammengesetzten Primaerschluessel und lief auf SQLite einwandfrei; der
+Schreibtest in test_migrations_postgres.py hat es gefangen. Die Eindeutigkeit
+sagt jetzt UNIQUE, genau wie bei employee_allowed_shift_types in
+0001_baseline.py.
 """
 
 from db import use_postgres
@@ -45,22 +54,24 @@ def up(cursor):
             name TEXT NOT NULL UNIQUE
         )
     ''')
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS employee_qualifications(
+            id {_auto_id()},
             employee_id INTEGER NOT NULL REFERENCES employees(id),
             qualification_id INTEGER NOT NULL
                 REFERENCES qualifications(id) ON DELETE CASCADE,
             valid_until TEXT,
-            PRIMARY KEY (employee_id, qualification_id)
+            UNIQUE(employee_id, qualification_id)
         )
     ''')
-    cursor.execute('''
+    cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS shift_type_qualifications(
+            id {_auto_id()},
             shift_type_id INTEGER NOT NULL
                 REFERENCES shift_types(id) ON DELETE CASCADE,
             qualification_id INTEGER NOT NULL
                 REFERENCES qualifications(id) ON DELETE CASCADE,
-            PRIMARY KEY (shift_type_id, qualification_id)
+            UNIQUE(shift_type_id, qualification_id)
         )
     ''')
 

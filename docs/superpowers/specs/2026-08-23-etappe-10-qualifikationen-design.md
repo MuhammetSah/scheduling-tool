@@ -86,6 +86,17 @@ passiert — bewusst. Der Test nennt jetzt den neuen Schlüssel *und* den Unters
 Bedarfszahlen sagten, **wie viele** gebraucht werden (das gehört in die Bänder), die Nachweise
 sagen, **wer** die Arbeit machen darf.
 
+**Und der Postgres-Schreibtest hat getan, wofür er da ist.** Der erste Entwurf gab beiden
+Verknüpfungstabellen einen zusammengesetzten Primärschlüssel statt einer eigenen `id` — sauber
+modelliert, auf SQLite einwandfrei, und auf Postgres ein 500er in jeder schreibenden Route.
+Fallstrick 16: die Dialektschicht hängt jedem `INSERT` ohne `RETURNING` ein `RETURNING id` an, und
+eine Tabelle ohne `id`-Spalte scheitert daran mit `UndefinedColumn`.
+
+**Der lokale Lauf war grün, der `backend-postgres`-Job rot** — genau die Konstellation, für die
+Fallstrick 21 im Handoff steht. Beide Tabellen tragen jetzt eine `id` und sagen die Eindeutigkeit
+mit `UNIQUE`, wie `employee_allowed_shift_types` seit `0001_baseline.py`. Dem vorhandenen Muster zu
+folgen wäre von Anfang an richtig gewesen.
+
 Ein Frontend-Test-Helfer wurde ebenfalls angefasst: seine Zusage antwortete auf jeden Pfad mit
 derselben Liste, und die Seite lädt jetzt zwei. Ohne die Unterscheidung erschienen die Schichtarten
 ein zweites Mal als Nachweise.
