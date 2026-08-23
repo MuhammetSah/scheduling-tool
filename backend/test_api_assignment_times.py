@@ -1257,18 +1257,24 @@ def test_ohne_gesetzte_pause_warnt_nichts(hr_client):
 
 
 def test_die_tagesgrenze_der_handkorrektur_rechnet_netto(hr_client):
-    """Zwei Siebenstundenbloecke sind vierzehn Stunden Anwesenheit und
-    dreizehn Stunden Arbeitszeit. Bei einer Grenze von dreizehn Stunden darf
-    keine Warnung kommen - brutto gerechnet kaeme eine."""
+    """Zwei Fuenfstundenbloecke sind elf Stunden Anwesenheit und zehn Stunden
+    Arbeitszeit. Bei einer Grenze von zehn Stunden darf keine Warnung kommen -
+    brutto gerechnet kaeme eine.
+
+    Die Zahlen lagen frueher bei 13 und 14; seit Etappe 6a deckelt
+    parse_daily_hours() das Feld bei zehn Stunden (Paragraph 3 ArbZG). Der
+    Punkt des Tests ist unveraendert der Unterschied zwischen Anwesenheit und
+    Arbeitszeit.
+    """
     anna = hr_client.post('/employees', json={
-        'name': 'Anna', 'unavailable_weekdays': [1], 'max_daily_hours': 13,
+        'name': 'Anna', 'unavailable_weekdays': [1], 'max_daily_hours': 10,
     }).json
     schicht = hr_client.post('/shift-types', json={
-        'name': 'Lang', 'start_time': '06:00', 'end_time': '21:00',
+        'name': 'Lang', 'start_time': '06:00', 'end_time': '17:00',
     }).json
     hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
 
-    for start, ende in (('06:00', '13:00'), ('14:00', '21:00')):
+    for start, ende in (('06:00', '11:00'), ('12:00', '17:00')):
         platz = hr_client.post('/schedules/2026/9/slots', json={
             'date': '2026-09-01', 'shift_type_id': schicht['id'],
         }).json
@@ -1280,17 +1286,17 @@ def test_die_tagesgrenze_der_handkorrektur_rechnet_netto(hr_client):
 
 
 def test_die_tagesgrenze_der_handkorrektur_bindet_trotzdem(hr_client):
-    """Gegenprobe: dieselben zwei Bloecke, Grenze zwoelf Stunden. Auch netto
-    sind es dreizehn."""
+    """Gegenprobe: dieselben zwei Bloecke, Grenze neun Stunden. Auch netto
+    sind es zehn."""
     anna = hr_client.post('/employees', json={
-        'name': 'Anna', 'unavailable_weekdays': [1], 'max_daily_hours': 12,
+        'name': 'Anna', 'unavailable_weekdays': [1], 'max_daily_hours': 9,
     }).json
     schicht = hr_client.post('/shift-types', json={
-        'name': 'Lang', 'start_time': '06:00', 'end_time': '21:00',
+        'name': 'Lang', 'start_time': '06:00', 'end_time': '17:00',
     }).json
     hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
 
-    for start, ende in (('06:00', '13:00'), ('14:00', '21:00')):
+    for start, ende in (('06:00', '11:00'), ('12:00', '17:00')):
         platz = hr_client.post('/schedules/2026/9/slots', json={
             'date': '2026-09-01', 'shift_type_id': schicht['id'],
         }).json

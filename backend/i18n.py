@@ -123,6 +123,16 @@ TRANSLATIONS = {
         'de': 'Die tägliche Höchstarbeitszeit',
         'en': 'The maximum daily working hours',
     },
+    'max_daily_hours_out_of_range': {
+        'de': 'Die tägliche Höchstarbeitszeit muss über 0 liegen und darf {max} Stunden '
+              'nicht überschreiten (§ 3 ArbZG)',
+        'en': 'The maximum daily working hours must be above 0 and may not exceed {max} '
+              'hours (§ 3 ArbZG)',
+    },
+    'request_body_must_be_object': {
+        'de': 'Der Anfragerumpf muss ein JSON-Objekt sein',
+        'en': 'The request body must be a JSON object',
+    },
     'field_must_be_number': {
         'de': '{field} muss eine Zahl sein',
         'en': '{field} must be a number',
