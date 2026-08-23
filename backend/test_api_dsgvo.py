@@ -95,6 +95,69 @@ def test_das_persoenliche_daneben_ist_geloescht(hr_client):
     assert hr_client.get(f'/employees/{anna["id"]}/absences').json == []
 
 
+def test_der_abwesenheitsgrund_wird_auch_in_der_zuweisung_anonymisiert(hr_client):
+    """Derselbe doppelte Speicherort wie beim Raeumen - hier beim Loeschen.
+
+    Der Grund steht in employee_absences UND denormalisiert in der Zuweisung,
+    die er freigemacht hat. Nur die Tabelle zu leeren liesse die
+    Gesundheitsangabe samt Personenbezug im Dienstplan stehen, bis Monate
+    spaeter die Aufbewahrungsfrist greift.
+    """
+    from app import get_db
+
+    anna = _mitarbeiter_mit_schichten(hr_client)
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 9, 'published')")
+        schedule_id = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            'employee_id, start_time, end_time, absence_type, absent_employee_id) '
+            "VALUES (?, '2026-09-15', NULL, 0, NULL, '08:00', '16:00', 'sick', ?)",
+            (schedule_id, anna['id']))
+        connection.commit()
+
+    hr_client.delete(f'/employees/{anna["id"]}')
+
+    with hr_client.application.app_context():
+        cursor = get_db().cursor()
+        cursor.execute(
+            'SELECT COUNT(*) AS anzahl FROM shift_assignments '
+            'WHERE absent_employee_id = ? OR (absence_type IS NOT NULL '
+            "AND date = '2026-09-15')", (anna['id'],))
+        assert cursor.fetchone()['anzahl'] == 0
+
+
+def test_die_zuweisung_selbst_bleibt_dabei_stehen(hr_client):
+    """Gegenprobe: die Vertretungsschicht zu loeschen waere Geschichtsklitterung
+    - und ein Verstoss gegen Paragraph 16 Abs. 2 ArbZG."""
+    from app import get_db
+
+    anna = _mitarbeiter_mit_schichten(hr_client)
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 9, 'published')")
+        schedule_id = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            'employee_id, start_time, end_time, absence_type, absent_employee_id) '
+            "VALUES (?, '2026-09-15', NULL, 0, NULL, '08:00', '16:00', 'sick', ?)",
+            (schedule_id, anna['id']))
+        connection.commit()
+
+    hr_client.delete(f'/employees/{anna["id"]}')
+
+    with hr_client.application.app_context():
+        cursor = get_db().cursor()
+        cursor.execute(
+            "SELECT COUNT(*) AS anzahl FROM shift_assignments WHERE date = '2026-09-15'")
+        assert cursor.fetchone()['anzahl'] == 1
+
+
 # ---------- Auskunft (Art. 15) ----------
 
 

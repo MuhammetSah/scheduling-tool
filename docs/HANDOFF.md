@@ -44,7 +44,7 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 | `main` | Etappe 5 vollständig gemergt und deployt (PR #16–#25); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 438 passed / 36 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 440 passed / 36 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -681,6 +681,12 @@ Arbeitszeitaufzeichnung hinausgeht: Krank- und Urlaubsmeldungen und das Änderun
 in der Zuweisung, die er freigemacht hat (`absence_type`, `absent_employee_id`). Nur die eine
 Tabelle zu räumen ließe die Gesundheitsangabe im Dienstplan stehen — genau der Punkt, den man
 übersieht. Beide Orte werden geräumt, mit eigenem Test.
+
+**Und beim Löschen genauso** — das hat erst das CodeRabbit-Review in PR #25 gefunden. Die
+Anonymisierung leerte `employee_absences` und ließ den Grund in der Zuweisung stehen, samt
+`absent_employee_id`. Die Gesundheitsangabe hätte die gelöschte Person um Monate überlebt, bis
+die Aufbewahrungsfrist sie eingeholt hätte. **Die Lehre:** ein doppelter Speicherort ist an
+*jedem* Löschweg doppelt, nicht nur an dem, an dem man ihn bemerkt hat.
 
 **Löschen heißt anonymisieren.** Vorher setzte `ON DELETE SET NULL` die Schichten der gelöschten
 Person auf „unbesetzt": die Vergangenheit sah rückwirkend unterbesetzt aus, Deckungslücken

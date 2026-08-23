@@ -1072,6 +1072,17 @@ def delete_employee(employee_id):
     ):
         cursor.execute(statement, (employee_id,))
 
+    # The absence reason lives in two places: employee_absences, cleared above,
+    # and denormalised into the assignment it freed. Clearing only the table
+    # would leave the health note - with the person attached - sitting in the
+    # roster until the retention period catches it months later.
+    #
+    # The assignment itself stays. Deleting the cover shift would rewrite the
+    # working-time record § 16 Abs. 2 ArbZG requires.
+    cursor.execute(
+        'UPDATE shift_assignments SET absence_type = NULL, absent_employee_id = NULL '
+        'WHERE absent_employee_id = ?', (employee_id,))
+
     cursor.execute(
         'UPDATE employees SET name = ?, email = NULL, active = 0, '
         'anonymized_at = CURRENT_TIMESTAMP WHERE id = ?',
