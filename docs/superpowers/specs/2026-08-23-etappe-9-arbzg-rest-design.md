@@ -56,6 +56,13 @@ eher eine Meldung als zu wenige. Das gehört gesagt, nicht verschwiegen.
 **Der Verstoß blockiert einen Mitarbeitertausch** (`ARBZG_BLOCKERS`), wie die übrigen zwingenden
 Regeln — aus demselben Grund wie in Etappe 8.
 
+**Und genau dort habe ich die Lehre der Vorgängeretappe direkt wiederholt.** `perform_swap()`
+reichte `break_minutes` weiter, `break_start` aber nicht — die Sperre stand in der Liste und griff
+nie. Eine Sperre, die nie greift, ist schlimmer als keine, weil die Liste sie wie eine aussehen
+lässt. Gefunden im Review zu PR #31, eine Etappe nachdem dieselbe Sache mit `break_minutes`
+passiert war. **Was zum Platz gehört, reist ganz mit — und „ganz" heißt jedes Feld, nicht das
+zuletzt hinzugefügte.**
+
 ## 3. § 9 / § 10 — fällt der Betrieb unter die Ausnahme
 
 § 9 Abs. 1 verbietet Sonn- und Feiertagsarbeit; § 10 nimmt ganze Branchen aus. Auf welcher Seite

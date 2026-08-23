@@ -26,6 +26,7 @@ function BusinessHours({ setFlash }) {
   const [region, setRegion] = useState('')
   const [retentionMonths, setRetentionMonths] = useState('6')
   const [sundayWork, setSundayWork] = useState(false)
+  const [savingSundayWork, setSavingSundayWork] = useState(false)
 
   async function load() {
     try {
@@ -119,12 +120,20 @@ function BusinessHours({ setFlash }) {
   }
 
   async function saveSundayWork(erlaubt) {
+    // Gesperrt, solange geschrieben wird. Zwei schnelle Klicks schickten sonst
+    // zwei PUTs los, und käme das erste als zweites an, stünde in der
+    // Datenbank "ja", während das Kreuzchen leer aussieht. Bei einer
+    // Einstellung, die entscheidet, ob § 9 überhaupt gemeldet wird, ist das
+    // die falsche Art von Kleinigkeit.
+    setSavingSundayWork(true)
     setSundayWork(erlaubt)
     try {
       await api.put('/settings', { sunday_work_permitted: erlaubt ? 'yes' : null })
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
       setSundayWork(!erlaubt)
+    } finally {
+      setSavingSundayWork(false)
     }
   }
 
@@ -165,6 +174,7 @@ function BusinessHours({ setFlash }) {
             id="sunday-work"
             type="checkbox"
             checked={sundayWork}
+            disabled={savingSundayWork}
             onChange={e => saveSundayWork(e.target.checked)}
           />
           <label htmlFor="sunday-work">{t('sundayWork.label')}</label>

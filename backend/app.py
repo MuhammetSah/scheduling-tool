@@ -3085,20 +3085,21 @@ def perform_swap(cursor, a, b):
         'UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?',
         (a['employee_id'], b['id']))
 
-    # break_minutes reist mit, wie die Zeiten: sie gehoert zum Platz, nicht zur
-    # Person. Ohne sie liest die Pruefung die gesetzliche Mindestpause und
-    # rechnet damit weniger Arbeitszeit, als tatsaechlich anfaellt - eine kurz
-    # vereinbarte Pause macht den Tag laenger, nicht kuerzer, und § 4 waere gar
-    # nicht pruefbar.
+    # The break travels with the times, both parts of it: duration *and*
+    # position belong to the slot, not to the person. Without the duration the
+    # check reads the legal minimum and counts less working time than actually
+    # falls due; without the position § 4 Satz 3 cannot be asked at all, and
+    # the entry for it in ARBZG_BLOCKERS would be a bolt that never engages -
+    # worse than none, because the list makes it look like one.
     findings = []
     findings += constraint_findings(
         cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'],
         exclude_assignment_id=a['id'], start_time=a['start_time'], end_time=a['end_time'],
-        break_minutes=a['break_minutes'])
+        break_minutes=a['break_minutes'], break_start=a['break_start'])
     findings += constraint_findings(
         cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'],
         exclude_assignment_id=b['id'], start_time=b['start_time'], end_time=b['end_time'],
-        break_minutes=b['break_minutes'])
+        break_minutes=b['break_minutes'], break_start=b['break_start'])
     return findings
 
 
