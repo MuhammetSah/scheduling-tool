@@ -182,6 +182,8 @@ The swap is carried out and *then* examined; a request that was only asking roll
 
 Checked **twice**: once when the partner accepts, once when HR approves. Days pass in between, and whoever checks only once approves a swap that has since become unlawful — with the earlier check sitting in the file as proof that everything was examined.
 
+And days change more than the law. If HR reassigns one of the two shifts by hand in the meantime, approving would swap whoever stands there *now* — a swap nobody agreed to, with an acceptance on file that appears to cover it. So approval first checks that both slots still hold the people who consented.
+
 ### Deliberately absent
 
 **No free-text reason.** A "why do you want to swap" box collects "doctor's appointment" and "my mother is in hospital" — health data under Art. 9 GDPR, in a table with no retention rule of its own. The change log refuses request bodies for the same reason.
@@ -721,7 +723,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (504 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (508 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

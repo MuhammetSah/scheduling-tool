@@ -179,6 +179,13 @@ TRANSLATIONS = {
         'de': 'Dieser Tauschantrag ist bereits entschieden ({status}).',
         'en': 'This swap request has already been settled ({status}).',
     },
+    'swap_shifts_changed_hands': {
+        'de': 'Eine der beiden Schichten ist inzwischen anders besetzt. '
+              'Zugestimmt wurde einem anderen Tausch als dem, der jetzt '
+              'zustande käme.',
+        'en': 'One of the two shifts has changed hands since. What was agreed '
+              'to is not the swap that would happen now.',
+    },
     'swap_needs_partner_consent': {
         'de': 'Ohne die Zustimmung der Tauschpartnerin oder des Tauschpartners '
               'wäre es kein Tausch, sondern eine Umsetzung.',

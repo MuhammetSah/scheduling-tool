@@ -100,6 +100,24 @@ describe('SwapRequests: wer welchen Knopf sieht', () => {
     expect(screen.queryByRole('button', { name: 'Nicht genehmigen' })).not.toBeInTheDocument()
   })
 
+  it('nennt eine fehlende Gegenschicht "noch nicht gewählt", nicht "entfallen"', async () => {
+    // Aus dem Review zu PR #30: geprüft wurde nur auf "pending", aber ein
+    // zurückgezogener Antrag hat ebenso wenig eine Gegenschicht - und
+    // "entfallen" behauptete dort, es habe eine gegeben.
+    await zeigen({ role: 'hr', employee_id: null }, [antrag({ status: 'withdrawn' })])
+
+    expect(screen.getByText(/noch nicht gewählt/)).toBeInTheDocument()
+    expect(screen.queryByText(/entfallen/)).not.toBeInTheDocument()
+  })
+
+  it('nennt eine wirklich entfallene Gegenschicht entfallen', async () => {
+    // Gegenprobe: nach der Zustimmung stand eine fest. Fehlt sie danach, ist
+    // die Zuweisung gelöscht worden - und das ist etwas anderes.
+    await zeigen({ role: 'hr', employee_id: null }, [antrag({ status: 'approved' })])
+
+    expect(screen.getByText(/entfallen/)).toBeInTheDocument()
+  })
+
   it('nennt beide Seiten mit Namen und Zeiten', async () => {
     await zeigen({ role: 'hr', employee_id: null })
 

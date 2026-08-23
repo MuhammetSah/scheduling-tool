@@ -3015,13 +3015,20 @@ def perform_swap(cursor, a, b):
         'UPDATE shift_assignments SET employee_id = ?, manually_edited = 1 WHERE id = ?',
         (a['employee_id'], b['id']))
 
+    # break_minutes reist mit, wie die Zeiten: sie gehoert zum Platz, nicht zur
+    # Person. Ohne sie liest die Pruefung die gesetzliche Mindestpause und
+    # rechnet damit weniger Arbeitszeit, als tatsaechlich anfaellt - eine kurz
+    # vereinbarte Pause macht den Tag laenger, nicht kuerzer, und § 4 waere gar
+    # nicht pruefbar.
     findings = []
     findings += constraint_findings(
         cursor, b['employee_id'], a['date'], a['shift_type_id'], a['schedule_id'],
-        exclude_assignment_id=a['id'], start_time=a['start_time'], end_time=a['end_time'])
+        exclude_assignment_id=a['id'], start_time=a['start_time'], end_time=a['end_time'],
+        break_minutes=a['break_minutes'])
     findings += constraint_findings(
         cursor, a['employee_id'], b['date'], b['shift_type_id'], b['schedule_id'],
-        exclude_assignment_id=b['id'], start_time=b['start_time'], end_time=b['end_time'])
+        exclude_assignment_id=b['id'], start_time=b['start_time'], end_time=b['end_time'],
+        break_minutes=b['break_minutes'])
     return findings
 
 
@@ -3276,6 +3283,14 @@ def set_swap_request_status(request_id):
         if fehler:
             return fehler
         meine, fremde = paar
+
+        # Consent was given to two particular people holding two particular
+        # shifts. If HR reassigned one of them by hand in the meantime,
+        # approving would swap whoever stands there now - a swap nobody agreed
+        # to, with an acceptance in the file that appears to cover it.
+        if (meine['employee_id'] != antrag['requester_employee_id']
+                or fremde['employee_id'] != antrag['partner_employee_id']):
+            return jsonify({'message': t(g.lang, 'swap_shifts_changed_hands')}), 409
 
         # Checked again, now. Days pass between the request and the approval,
         # and whoever only checks at the request approves a swap that has since

@@ -94,6 +94,19 @@ Zwischen beiden liegen Tage. Wer nur einmal prüft, genehmigt später einen Taus
 rechtswidrig geworden ist — und die Prüfung von damals steht als Beleg dafür in der Akte, dass
 alles geprüft worden sei.
 
+**Das Review zu PR #30 hat gezeigt, dass „dazwischen liegen Tage" weiter reicht, als ich bedacht
+hatte.** Nicht nur die Rechtslage kann sich ändern, sondern die Besetzung selbst: setzt die
+Personalabteilung eine der beiden Schichten zwischendurch von Hand um, tauschte die Genehmigung
+anschließend, *wer gerade dort steht* — ein Tausch, dem niemand zugestimmt hat, mit einer
+Zustimmung in der Akte, die ihn zu decken scheint. Die Genehmigung prüft jetzt zuerst, ob beide
+Plätze noch dieselben Menschen halten.
+
+Dasselbe Review fand, dass `perform_swap()` die Zeiten des Platzes weiterreichte, aber nicht seine
+`break_minutes`. Ohne sie liest die Prüfung die gesetzliche Mindestpause statt der vereinbarten —
+und rechnet weniger Arbeitszeit, als anfällt. Eine kurz vereinbarte Pause macht den Tag länger,
+nicht kürzer, und § 4 wäre gar nicht prüfbar gewesen. **Die Pause gehört zum Platz, wie die Zeiten
+— und was mitreist, reist ganz mit.**
+
 ## 6. Was bewusst fehlt
 
 - **Ein Begründungsfeld.** Ein Kasten „warum möchtest du tauschen" holt sich „Arzttermin" und
@@ -122,8 +135,13 @@ Zwei Dinge, die kein Unit-Test gezeigt hätte:
 
 ## 8. Tests
 
-`backend/test_api_schichttausch.py` (26), `frontend/src/pages/SwapRequests.test.jsx` (7), dazu der
+`backend/test_api_schichttausch.py` (30), `frontend/src/pages/SwapRequests.test.jsx` (9), dazu der
 Rundlauf von `0015_swap_requests` in SQLite und Postgres samt `ON DELETE CASCADE`.
+
+Der Pausentest war zuerst grün **ohne** die Behebung — er unterschied nicht. Geschärft auf genau
+die Kippe: acht Stunden dreißig Anwesenheit sind mit der gesetzlichen Pause exakt acht Stunden
+Arbeitszeit (Grenze erreicht, nicht überschritten) und mit den vereinbarten fünf Minuten acht
+Stunden fünfundzwanzig.
 
 Die Gegenproben sind auch hier die eigentliche Arbeit: ohne sie wären eine Umsetzung, die *jeden*
 Tausch ablehnt, eine, die die Absprachen mitblockiert, und eine Oberfläche ganz ohne Knöpfe

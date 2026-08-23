@@ -713,3 +713,152 @@ def test_ein_antrag_auf_eine_person_ohne_schicht_bleibt_offen(hr_client):
     assert antwort.status_code == 201, antwort.json
     assert antwort.json['status'] == 'pending'
     assert antwort.json['partner']['shift'] is None
+
+
+# ---------- Zwischen Zustimmung und Genehmigung ----------
+
+
+def test_eine_umbesetzte_schicht_laesst_sich_nicht_mehr_genehmigen(hr_client):
+    """Aus dem Review zu PR #30, und der ernsteste der drei Befunde.
+
+    Zugestimmt haben zwei bestimmte Menschen zu zwei bestimmten Schichten.
+    Setzt die Personalabteilung eine davon zwischendurch von Hand um, tauschte
+    die Genehmigung anschliessend, wer gerade dort steht - ein Tausch, dem
+    niemand zugestimmt hat, mit einer Zustimmung in der Akte, die ihn zu
+    decken scheint.
+    """
+    from app import get_db
+
+    anna, berta = _betrieb(hr_client)
+    clara = hr_client.post('/employees', json={
+        'name': 'Clara', 'email': 'clara@example.com', 'min_rest_hours': 11}).json
+    a, b = _plan_mit(hr_client, [
+        (anna['id'], '2026-09-07', '06:00', '14:00'),
+        (berta['id'], '2026-09-14', '06:00', '14:00'),
+    ])
+    anna_konto = _konto(hr_client, anna, 'anna')
+    berta_konto = _konto(hr_client, berta, 'berta')
+
+    _als(hr_client, anna_konto)
+    antrag = hr_client.post('/swap-requests', json={
+        'my_assignment_id': a, 'partner_employee_id': berta['id']}).json
+    _als(hr_client, berta_konto)
+    hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                  json={'status': 'accepted', 'my_assignment_id': b})
+
+    # Die Personalabteilung setzt Annas Schicht von Hand auf Clara um.
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute('UPDATE shift_assignments SET employee_id = ? WHERE id = ?',
+                       (clara['id'], a))
+        connection.commit()
+
+    _als_hr(hr_client)
+    antwort = hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                            json={'status': 'approved'})
+
+    assert antwort.status_code == 409, antwort.json
+
+
+def test_die_umbesetzte_schicht_bleibt_bei_der_neuen_person(hr_client):
+    """Gegenprobe: eine Ablehnung, die trotzdem tauscht, waere das Schlimmste
+    von beidem."""
+    from app import get_db
+
+    anna, berta = _betrieb(hr_client)
+    clara = hr_client.post('/employees', json={
+        'name': 'Clara', 'email': 'clara@example.com', 'min_rest_hours': 11}).json
+    a, b = _plan_mit(hr_client, [
+        (anna['id'], '2026-09-07', '06:00', '14:00'),
+        (berta['id'], '2026-09-14', '06:00', '14:00'),
+    ])
+    anna_konto = _konto(hr_client, anna, 'anna')
+    berta_konto = _konto(hr_client, berta, 'berta')
+
+    _als(hr_client, anna_konto)
+    antrag = hr_client.post('/swap-requests', json={
+        'my_assignment_id': a, 'partner_employee_id': berta['id']}).json
+    _als(hr_client, berta_konto)
+    hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                  json={'status': 'accepted', 'my_assignment_id': b})
+
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute('UPDATE shift_assignments SET employee_id = ? WHERE id = ?',
+                       (clara['id'], a))
+        connection.commit()
+
+    _als_hr(hr_client)
+    hr_client.put('/swap-requests/%d/status' % antrag['id'], json={'status': 'approved'})
+
+    plan = hr_client.get('/schedules/2026/9').json
+    nach_tag = {z['date']: z['employee_id'] for z in plan['assignments']}
+    assert nach_tag['2026-09-07'] == clara['id']
+    assert nach_tag['2026-09-14'] == berta['id']
+
+
+def test_die_unveraenderte_genehmigung_geht_weiterhin_durch(hr_client):
+    """Gegenprobe zur Gegenprobe: eine Pruefung, die immer 409 liefert, waere
+    ebenfalls gruen."""
+    anna, berta = _betrieb(hr_client)
+    a, b = _plan_mit(hr_client, [
+        (anna['id'], '2026-09-07', '06:00', '14:00'),
+        (berta['id'], '2026-09-14', '06:00', '14:00'),
+    ])
+    anna_konto = _konto(hr_client, anna, 'anna')
+    berta_konto = _konto(hr_client, berta, 'berta')
+
+    _als(hr_client, anna_konto)
+    antrag = hr_client.post('/swap-requests', json={
+        'my_assignment_id': a, 'partner_employee_id': berta['id']}).json
+    _als(hr_client, berta_konto)
+    hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                  json={'status': 'accepted', 'my_assignment_id': b})
+
+    _als_hr(hr_client)
+    assert hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                         json={'status': 'approved'}).status_code == 200
+
+
+# ---------- Die vereinbarte Pause zaehlt mit ----------
+
+
+def test_eine_kurze_pause_zaehlt_in_die_tagesarbeitszeit(hr_client):
+    """Ebenfalls aus dem Review zu PR #30.
+
+    perform_swap() reichte die Zeiten des Platzes weiter, aber nicht seine
+    break_minutes. Ohne sie liest die Pruefung die gesetzliche Mindestpause -
+    und rechnet damit weniger Arbeitszeit, als tatsaechlich anfaellt. Eine
+    kurze vereinbarte Pause macht den Tag laenger, nicht kuerzer.
+    """
+    from app import get_db
+
+    anna, berta = _betrieb(hr_client, max_daily_hours=8)
+    a, b = _plan_mit(hr_client, [
+        (anna['id'], '2026-09-07', '06:00', '14:30'),
+        (berta['id'], '2026-09-14', '06:00', '14:00'),
+    ])
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        # Genau auf der Kippe, und deshalb aussagekraeftig: acht Stunden
+        # dreissig Anwesenheit. Mit der gesetzlichen Pause von dreissig Minuten
+        # sind das exakt acht Stunden Arbeitszeit - die Grenze wird erreicht,
+        # nicht ueberschritten, und die Pruefung schwiege. Mit den tatsaechlich
+        # vereinbarten fuenf Minuten sind es acht Stunden fuenfundzwanzig.
+        cursor.execute('UPDATE shift_assignments SET break_minutes = 5 WHERE id = ?', (a,))
+        connection.commit()
+
+    anna_konto = _konto(hr_client, anna, 'anna')
+    berta_konto = _konto(hr_client, berta, 'berta')
+
+    _als(hr_client, anna_konto)
+    antrag = hr_client.post('/swap-requests', json={
+        'my_assignment_id': a, 'partner_employee_id': berta['id']}).json
+    _als(hr_client, berta_konto)
+    antwort = hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                            json={'status': 'accepted', 'my_assignment_id': b})
+
+    assert antwort.status_code == 409, antwort.json

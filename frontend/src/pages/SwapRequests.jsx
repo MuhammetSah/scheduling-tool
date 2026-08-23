@@ -18,12 +18,20 @@ import { useTranslation } from '../i18n/context'
 // Falle.
 
 const OFFEN = new Set(['pending', 'accepted'])
+// Die Stände, in denen die Gegenschicht feststeht: sie wird mit der
+// Zustimmung gesetzt und bleibt danach stehen.
+const MIT_GEGENSCHICHT = new Set(['accepted', 'approved'])
 
 function Schicht({ shift, t, nochOffen }) {
   // Zwei verschiedene Sachverhalte, und beim Bauen zuerst zusammengeworfen:
-  // solange niemand zugestimmt hat, ist die Gegenschicht noch nicht GEWÄHLT;
-  // danach kann sie ENTFALLEN sein, weil die Zuweisung gelöscht wurde. Eine
-  // Meldung für beides erzählt im ersten Fall etwas Falsches.
+  // vor der Zustimmung ist die Gegenschicht noch nicht GEWÄHLT; danach kann
+  // sie ENTFALLEN sein, weil die Zuweisung gelöscht wurde. Eine Meldung für
+  // beides erzählt im ersten Fall etwas Falsches.
+  //
+  // "Vor der Zustimmung" heißt jeder Stand außer den beiden, in denen sie
+  // feststeht - aus dem Review zu PR #30: ein zurückgezogener oder
+  // abgelehnter Antrag hat ebenfalls keine, und "entfallen" wäre auch dort
+  // gelogen.
   if (!shift) {
     return (
       <span className="muted">
@@ -186,7 +194,7 @@ function SwapRequests({ user, setFlash }) {
               {' ⇄ '}
               <strong>{antrag.partner.name}</strong>{' '}
               <Schicht shift={antrag.partner.shift} t={t}
-                       nochOffen={antrag.status === 'pending'} />
+                       nochOffen={!MIT_GEGENSCHICHT.has(antrag.status)} />
               <div>
                 <span className={`badge badge-${antrag.status}`}>
                   {t(`swaps.status.${antrag.status}`)}
