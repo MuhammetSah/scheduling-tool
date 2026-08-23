@@ -38,9 +38,15 @@ Schleifenkörper alle `"HH:MM"`-Zeichenketten neu. Beide tragen seit ihrer Aufna
 „erst angehen, wenn der Benchmark es zeigt". Er zeigt es nicht, und eine Optimierung ohne Messung
 wäre geraten.
 
+**Etappe 7 hat davon die Prüfungen über die Monatsgrenze erledigt** — der Punkt mit dem größten
+Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
+Zusicherung.
+
 **Was jetzt kommt, ist eine Festlegung des Nutzers, keine Fortsetzung.** Die Roadmap nennt noch
-einen geführten Schichttausch (die Tauschfunktion selbst gibt es bereits), Qualifikations-Zuordnung
-und Prüfungen über die Monatsgrenze hinweg. Nichts davon ist begonnen.
+einen geführten Schichttausch (die Tauschfunktion selbst gibt es bereits), Qualifikations-Zuordnung,
+und die beiden ArbZG-Regeln, die das Tool bewusst der Personalabteilung überlässt: die Lage der
+Pause innerhalb eines Blocks (§ 4 Satz 3) und die Frage, ob der Betrieb überhaupt unter die
+Sonntagsruhe fällt (§ 9, § 10). Nichts davon ist begonnen.
 
 **Eine Erfahrung aus drei Aufräum-Etappen, die eine neue Sitzung sich sparen kann:** von den rund
 dreißig Einträgen dieser Liste waren **vier bereits erledigt**, ohne dass es jemand notiert hatte.
@@ -60,10 +66,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 und 6 gemergt und deployt (PR #16–#28); die API antwortet mit 200 |
+| `main` | Etappe 5, 6 und 7 gemergt und deployt (PR #16–#29); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 467 passed / 38 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 476 passed / 38 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -821,6 +827,32 @@ die Rücksetz-Prüfung stand *davor*, also fiel `""` in ein `INSERT` mit NULL-Ze
 eine andere ersetzt, verschiebt damit auch, wann Werte normalisiert werden — die Reihenfolge der
 Zweige dahinter gehört zum Umbau, nicht zur Umgebung.**
 
+## Etappe 7 — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-7-monatsgrenze-design.md`](superpowers/specs/2026-08-23-etappe-7-monatsgrenze-design.md)
+
+**Ein Monat ist ein Abrechnungszeitraum, keine Einheit der Ruhe.** Die elf Stunden aus § 5 Abs. 1
+ArbZG und das Wochenstundenziel liefen quer über die Monatsgrenze und hörten an ihr auf: beide
+leben nur im Suchzustand eines Laufs, und der begann am Ersten leer. Ein Nachtdienst bis 06:00 am
+31. und ein Frühdienst ab 06:00 am 1. waren jeder für sich in Ordnung und ließen null Stunden Ruhe.
+
+Der Sechs-Tage-Lauf und das Sonntagsbudget sahen die Grenze schon seit 5b — **weil das Zahlen
+sind, und Zahlen lassen sich vorab reichen.** Ruhezeit und Wochenstunden brauchen Zeiten.
+
+**Die Stelle, an der die naheliegende Lösung falsch gewesen wäre:** die flankierenden Tage liegen
+*neben* `day_hours`, nicht darin. Sie zu verschmelzen wäre der offensichtliche Schritt —
+`worked_dates()` liest genau diese Schlüssel, und ein Sonntag am Monatsrand wäre dann doppelt
+belastet worden, einmal dort und einmal über `sundays_worked_in_year`.
+
+**Und die Stelle, an der ich falsch abgekürzt habe.** Die erste Fassung las `start_time`/`end_time`
+direkt aus der Zeile. Eine gespeicherte Zuweisung muss ihre Zeiten aber nicht selbst tragen — sie
+kann sie aus einer Tagesausnahme oder aus der Schichtart beziehen, und `assignment_hours()` löst
+genau diese drei Ebenen auf. Eine Nachtschicht aus der Vorlage war damit unsichtbar. Gefunden im
+Review, nicht von mir.
+
+**`boundary=None` stellt das alte Verhalten her.** Das ist es, was die 23 Kompatibilitätstests und
+den Benchmark unverändert lässt.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -926,6 +958,13 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     übersprungenen Tests meldet Erfolg. Wer etwas anfasst, dessen Nachweis dort liegt — die
     Dialektschicht, die Migrationen, die beiden Advisory-Locks —, sieht im Joblog nach, dass die
     betreffenden Tests wirklich `PASSED` melden. Bei PR #27 waren es 474 passed, 0 skipped.
+
+22. **Wer eine bestehende Datenstruktur neu ausliest, muss die Ebenen mitlesen, die ihre
+    vorhandenen Leser schon kennen.** Die Zeiten einer Zuweisung stehen an drei Stellen — in der
+    Zeile selbst, in `shift_time_overrides`, in der Schichtart —, und `assignment_hours()` löst
+    das auf. Zwei Spalten zu nehmen, wo eine Funktion drei Ebenen auflöst, ist kein Abkürzen,
+    sondern ein anderes Datenmodell. Dasselbe gilt für die Pause
+    (`effective_break_minutes`/`legal_break_minutes`).
 
 ## Offen — liegt beim Nutzer
 
