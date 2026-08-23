@@ -13,6 +13,7 @@ const emptyForm = {
   max_daily_hours: 10,
   unavailable_weekdays: [],
   allowed_shift_types: [],
+  qualifications: [],
   unavailable_dates: [],
   availability_mode: 'anytime',
   availability: [],
@@ -57,6 +58,7 @@ function Employees({ setFlash }) {
   const today = new Date().toLocaleDateString('sv-SE')
   const [employees, setEmployees] = useState([])
   const [shiftTypes, setShiftTypes] = useState([])
+  const [qualifications, setQualifications] = useState([])
   const [form, setForm] = useState(emptyForm)
   const [showForm, setShowForm] = useState(false)
   const [newDate, setNewDate] = useState('')
@@ -67,9 +69,11 @@ function Employees({ setFlash }) {
 
   async function load() {
     try {
-      const [emps, types] = await Promise.all([api.get('/employees'), api.get('/shift-types')])
+      const [emps, types, nachweise] = await Promise.all([
+        api.get('/employees'), api.get('/shift-types'), api.get('/qualifications')])
       setEmployees(emps)
       setShiftTypes(types)
+      setQualifications(nachweise)
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }
@@ -96,6 +100,8 @@ function Employees({ setFlash }) {
       max_daily_hours: emp.max_daily_hours ?? 10,
       unavailable_weekdays: emp.unavailable_weekdays,
       allowed_shift_types: emp.allowed_shift_types,
+      qualifications: (emp.qualifications || []).map(q => ({
+        qualification_id: q.qualification_id, valid_until: q.valid_until })),
       unavailable_dates: emp.unavailable_dates,
       availability_mode: emp.availability_mode || 'anytime',
       availability: emp.availability.map(w => ({
@@ -115,6 +121,23 @@ function Employees({ setFlash }) {
       unavailable_weekdays: f.unavailable_weekdays.includes(wd)
         ? f.unavailable_weekdays.filter(x => x !== wd)
         : [...f.unavailable_weekdays, wd],
+    }))
+  }
+
+  function toggleQualification(id) {
+    setForm(f => ({
+      ...f,
+      qualifications: f.qualifications.some(q => q.qualification_id === id)
+        ? f.qualifications.filter(q => q.qualification_id !== id)
+        : [...f.qualifications, { qualification_id: id, valid_until: null }],
+    }))
+  }
+
+  function setValidUntil(id, bis) {
+    setForm(f => ({
+      ...f,
+      qualifications: f.qualifications.map(
+        q => (q.qualification_id === id ? { ...q, valid_until: bis } : q)),
     }))
   }
 
@@ -204,13 +227,20 @@ function Employees({ setFlash }) {
       })),
     }
     try {
-      if (form.id) {
-        await api.put(`/employees/${form.id}`, payload)
+      // Die Nachweise hängen an einer eigenen Route: sie sind eine Liste mit
+      // eigenen Feldern, und sie in den Mitarbeiter-Rumpf zu falten hieße,
+      // ihn zu einem Sammelbecken zu machen — dasselbe, was den
+      // Arbeitszeitfenstern in Etappe 4 eine eigene Route gebracht hat.
+      let ziel = form.id
+      if (ziel) {
+        await api.put(`/employees/${ziel}`, payload)
         setFlash({ type: 'success', text: t('employees.flashUpdated') })
       } else {
-        await api.post('/employees', payload)
+        ziel = (await api.post('/employees', payload)).id
         setFlash({ type: 'success', text: t('employees.flashCreated') })
       }
+      await api.put(`/employees/${ziel}/qualifications`,
+                    { qualifications: form.qualifications })
       setShowForm(false)
       load()
     } catch (err) {
@@ -491,6 +521,40 @@ function Employees({ setFlash }) {
                 <p className="hint">{t('employees.notWorkingWindowsHint')}</p>
               )}
             </div>
+            {qualifications.length > 0 && (
+              <div className="field">
+                <label>{t('employees.qualificationsLabel')}</label>
+                <p className="hint">{t('employees.qualificationsHint')}</p>
+                {qualifications.map(q => {
+                  const gehalten = form.qualifications.find(
+                    x => x.qualification_id === q.id)
+                  return (
+                    <div key={q.id} className="toolbar">
+                      <button
+                        type="button"
+                        className={`weekday-chip ${gehalten ? 'selected' : ''}`}
+                        onClick={() => toggleQualification(q.id)}
+                      >
+                        {q.name}
+                      </button>
+                      {/* Das Ablaufdatum ist die eigentliche Hälfte: ein
+                          Nachweis ohne Ablauf wird noch Jahre nach seinem Ende
+                          beachtet. Leer heißt "läuft nicht ab" — das ist eine
+                          Aussage, keine fehlende Angabe, und deshalb steht der
+                          Hinweis oben. */}
+                      {gehalten && (
+                        <input
+                          type="date"
+                          aria-label={t('employees.validUntilAria', { name: q.name })}
+                          value={gehalten.valid_until || ''}
+                          onChange={e => setValidUntil(q.id, e.target.value || null)}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             {shiftTypes.length > 0 && (
               <div className="field">
                 <label>{t('employees.onlyShiftTypesLabel')}</label>

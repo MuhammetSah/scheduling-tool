@@ -1405,3 +1405,51 @@ def test_die_pausenlage_laeuft_auf_postgres_rund(pg_db):
 
     assert '0016_break_position' in migrations.apply_pending()
     assert 'break_start' in spalten(schema_url, schema, 'shift_assignments')
+
+
+def test_die_nachweise_laufen_auf_postgres_rund(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0017_qualifications.
+
+    Mit Schreibtest, weil drei Tabellen mit Fremdschluesseln dazukommen und
+    zwei davon einen zusammengesetzten Primaerschluessel haben - die
+    Dialektschicht haengt jedem INSERT ein RETURNING id an (Fallstrick 16),
+    und eine Tabelle ohne id-Spalte ist genau der Fall, an dem das scheitert.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+    vorhanden = tabellen(schema_url, schema)
+    assert {'qualifications', 'employee_qualifications',
+            'shift_type_qualifications'} <= vorhanden
+
+    import db
+
+    connection = db.get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO qualifications (name) VALUES ('Ersthelfer')")
+        nachweis = cursor.lastrowid
+        cursor.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        anna = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO employee_qualifications (employee_id, qualification_id, valid_until) '
+            "VALUES (?, ?, '2027-01-31')", (anna, nachweis))
+        connection.commit()
+
+        cursor.execute('SELECT valid_until FROM employee_qualifications')
+        assert cursor.fetchone()['valid_until'] == '2027-01-31'
+
+        # ON DELETE CASCADE: was es nicht mehr gibt, kann niemand halten.
+        cursor.execute('DELETE FROM qualifications WHERE id = ?', (nachweis,))
+        connection.commit()
+        cursor.execute('SELECT COUNT(*) AS n FROM employee_qualifications')
+        assert cursor.fetchone()['n'] == 0
+    finally:
+        connection.close()
+
+    while '0017_qualifications' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert not ({'qualifications', 'employee_qualifications',
+                 'shift_type_qualifications'} & tabellen(schema_url, schema))
+
+    assert '0017_qualifications' in migrations.apply_pending()
+    assert 'qualifications' in tabellen(schema_url, schema)

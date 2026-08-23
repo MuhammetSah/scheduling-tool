@@ -50,6 +50,24 @@ The tool is usable in **German or English** – see [Language](#language) below.
 - **Self-service sick/vacation** – an employee can report their own sick or vacation days for the current month; a shift they were already assigned frees up automatically for HR to cover, and HR gets ranked replacement suggestions for it (see below)
 - **Bilingual UI** – every label, message and validation error is available in German and English (see below)
 
+## Certificates a shift requires
+
+A shift can require a certificate — first aid, medication handling, a forklift licence — and only somebody who holds it gets scheduled on it.
+
+**The interesting half is the expiry date.** The matching itself is a link table; what makes it hold up is `valid_until`. A first-aid certificate expires after two years (DGUV Vorschrift 1 § 26 asks for the refresher), a forklift licence likewise. **A certificate without an expiry is one the roster keeps honouring years after it ended** — the same fault availability windows already avoid with their validity bounds.
+
+Three decisions follow, each with its own test: a missing date means *does not expire*, not *expired*; the bound is **inclusive**, matching how availability windows read "until", because two neighbouring rules that read it differently are a trap; and the date is normalised on the way in, not merely validated — `20261115` passes validation and then loses every string comparison, so the certificate would simply never run out.
+
+**Hard in the generator, a warning on the manual path** — the split the rest of the tool uses. Two different messages, because they call for different things: "does not hold it" and "theirs expired on the 31st".
+
+**Not a blocker for a swap.** Whether a given certificate is legally required or a house rule is something only the business knows, and refusing on that basis would assert it. The same restraint as with public holidays; `ARBZG_BLOCKERS` stays what its name says.
+
+**The requirement lives on the shift type** and applies to everybody on it — "at least one first-aider per shift" would be a headcount inside a headcount and needs its own model. The price, said rather than discovered: a block **without** a template inherits nothing, and since block planning trims blocks free of any template, those carry no requirement. Hanging it on the coverage band instead would fix that and lose the unit HR actually names and recognises.
+
+**The counterpart to per-employee shift restrictions:** those hang on the *person* ("Anna only works early shifts") and are an arrangement. A certificate requirement hangs on the *work* and says why. Both stay, because they mean different things.
+
+**Deleting a certificate clears it everywhere**, and the confirmation says so — from everyone holding it and from every shift requiring it. A shift requiring something nobody can hold would be unstaffable forever.
+
 ## Draft and published
 
 `schedules.status` existed from the first commit: set to `generated` when a plan was built, written into the response — and read by nothing. **Every plan was visible the moment it was generated**, including the half-finished one HR was rebuilding for the third time.
@@ -474,7 +492,6 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **Fairness dimensions genuinely trade off.** Optimizing only total shifts can leave weekend duty lopsided (weekend spread 5 while total spread is optimal); turning on weekend equity cut it to 2 at the cost of one shift of total spread. There is no single "fair", so it's a setting rather than a hardcoded rule.
 
 **Roadmap** (not yet built):
-- Skill/qualification matching, so a shift can require a specific certification
 
 ## Tech Stack
 
@@ -504,7 +521,7 @@ schichtplan-tool/
 │   ├── exports.py              # iCal and CSV formatting (no DB)
 │   ├── security.py             # Login throttling, backed by the login_attempts table
 │   ├── timeutil.py             # "Current month" in the operating timezone
-│   ├── migrations/              # Versioned schema migrations, 0001-0016 (see Operations below)
+│   ├── migrations/              # Versioned schema migrations, 0001-0017 (see Operations below)
 │   ├── baselines.py            # Alternative algorithms, for comparison only
 │   ├── benchmark.py            # Head-to-head comparison run
 │   ├── test_scheduler.py       # Unit tests for the algorithm (the compatibility guarantee)
@@ -519,6 +536,7 @@ schichtplan-tool/
 │   ├── test_api_dsgvo.py       # Access, anonymisation, retention
 │   ├── test_api_schichttausch.py  # The guided swap, and where the law says no
 │   ├── test_api_arbzg_rest.py  # Break position (§ 4 Satz 3) and the § 10 exemption
+│   ├── test_api_qualifikationen.py  # Certificates, and above all their expiry
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
@@ -647,7 +665,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)), `0016_break_position` (adds `shift_assignments.break_start`, nullable — see [Where the break falls](#where-the-break-falls-and-whether-sunday-work-is-allowed-at-all)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)), `0016_break_position` (adds `shift_assignments.break_start`, nullable), `0017_qualifications` (the certificate catalogue and its two link tables — see [Certificates a shift requires](#certificates-a-shift-requires)). To manage by hand:
 
 ```bash
 cd backend
@@ -722,6 +740,10 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | GET    | `/schedules/<year>/<month>/export.csv` | The month as CSV, drafts included (HR)                          |
 | GET    | `/employees/<id>/data-export`     | Everything stored about one person, as JSON (self or HR)             |
 | GET    | `/colleagues`                     | Names and ids of the active workforce, for anyone signed in          |
+| GET/POST | `/qualifications`               | The certificate catalogue (read: signed in; write: HR)               |
+| DELETE | `/qualifications/<id>`            | Remove a certificate everywhere it appears (HR)                      |
+| PUT    | `/employees/<id>/qualifications`  | What this person holds, expiry dates included (HR)                   |
+| PUT    | `/shift-types/<id>/qualifications`| What this shift requires (HR)                                        |
 | POST   | `/swap-requests`                  | Offer one of your shifts to a named colleague                        |
 | GET    | `/swap-requests`                  | Yours and those addressed to you; HR sees all                        |
 | PUT    | `/swap-requests/<id>/status`      | Accept / decline / withdraw / approve / reject                       |
@@ -743,7 +765,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (528 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (546 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 
