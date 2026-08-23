@@ -518,6 +518,17 @@ def _search(
     # by benchmark.py as a comparison basis and by the 23 backward-compatibility
     # tests in test_scheduler.py.
     raw_slots = build_slots(year, month, shift_types) if slots is None else slots
+
+    # Hier und nicht in generate_schedule(): der erste Riegel griff nur, wenn
+    # Plaetze mitgegeben wurden, und liess ausgerechnet den Pfad ungeschuetzt,
+    # der sie selbst baut (build_slots, der Bestandspfad des Benchmarks und der
+    # 23 Kompatibilitaetstests). An dieser Stelle sind beide Faelle aufgeloest.
+    #
+    # Vor der ersten Rekursion, nicht mittendrin: eine Ausnahme nach vier
+    # Sekunden Rechnen waere dieselbe Nachricht, nur teurer.
+    if len(raw_slots) > max_plannable_slots():
+        raise PlanTooLarge(len(raw_slots), max_plannable_slots())
+
     slots = order_slots(raw_slots, employees, ordering)
 
     total_slots = len(slots)
@@ -1039,11 +1050,6 @@ def generate_schedule(
     better. Normal months therefore cost one cheap pass, and difficult months get
     the extra effort where it actually buys something.
     """
-    # Vor dem ersten Suchlauf, nicht mittendrin: eine Ausnahme nach vier
-    # Sekunden Rechnen waere dieselbe Nachricht, nur teurer.
-    if slots is not None and len(slots) > max_plannable_slots():
-        raise PlanTooLarge(len(slots), max_plannable_slots())
-
     def run(order):
         return _search(year, month, employees, shift_types, order, fairness,
                        weekend_weight, node_budget, time_budget_seconds, slots,

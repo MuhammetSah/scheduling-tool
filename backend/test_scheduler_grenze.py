@@ -96,3 +96,29 @@ def test_die_grenze_haengt_an_der_rekursionsgrenze(hr_client=None):
         assert max_plannable_slots() == vorher + 500
     finally:
         sys.setrecursionlimit(alt)
+
+
+def test_auch_der_alte_pfad_ist_geschuetzt(hr_client=None):
+    """Aus dem Review zu PR #35.
+
+    Der erste Riegel griff nur, wenn Plaetze mitgegeben wurden. Ohne sie baut
+    _search() sie selbst aus den Bedarfszahlen der Schichtart - und rekursiert
+    danach genauso tief. Das ist der Pfad, an dem die 23 Bestandstests und der
+    Benchmark haengen; er darf nicht der sein, der weiterhin abstuerzt.
+    """
+    viele = max_plannable_slots() + 50
+    art = [{'id': 1, 'requirements': {wd: viele // 7 + 1 for wd in range(7)},
+            'start_time': '08:00', 'end_time': '16:00'}]
+
+    with pytest.raises(PlanTooLarge):
+        generate_schedule(2026, 8, _leute(5), art)
+
+
+def test_der_alte_pfad_mit_normaler_groesse_laeuft(hr_client=None):
+    """Gegenprobe: der Riegel darf den Bestandspfad nicht verengen."""
+    art = [{'id': 1, 'requirements': {wd: 2 for wd in range(7)},
+            'start_time': '08:00', 'end_time': '16:00'}]
+
+    ergebnis = generate_schedule(2026, 8, _leute(10), art)
+
+    assert ergebnis['assignments']
