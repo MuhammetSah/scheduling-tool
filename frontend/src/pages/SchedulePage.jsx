@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
 import ScheduleGrid from '../components/ScheduleGrid'
 import CalendarView from '../components/CalendarView'
@@ -20,6 +21,7 @@ function SchedulePage({ setFlash, user }) {
   const [employees, setEmployees] = useState([])
   const [shiftTypes, setShiftTypes] = useState([])
   const [loading, setLoading] = useState(true)
+  const [setup, setSetup] = useState(null)
   const [warnings, setWarnings] = useState([])
   const [swapSelection, setSwapSelection] = useState(null)
   const [view, setView] = useState('calendar')
@@ -40,6 +42,10 @@ function SchedulePage({ setFlash, user }) {
       setShiftTypes(types)
       if (user?.role === 'hr') {
         setEmployees(await api.get('/employees'))
+        // Was dem Betrieb noch fehlt, bevor ein Plan entstehen kann. Nur für
+        // HR: ein Mitarbeiter kann nichts davon ändern, und die API lehnt es
+        // ohnehin ab.
+        setSetup(await api.get('/setup-status'))
       }
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
@@ -334,6 +340,35 @@ function SchedulePage({ setFlash, user }) {
 
   return (
     <>
+      {/* Nur solange wirklich etwas fehlt. Eine Tafel, die immer da ist, ist
+          Möblierung; eine, die verschwindet, ist eine Antwort. Die Hinweise
+          (Bundesland) stehen daneben, nicht darin — sie verhindern nichts. */}
+      {canEdit && setup && !setup.ready && (
+        <div className="panel">
+          <div className="panel-header">
+            <h2>{t('setup.title')}</h2>
+          </div>
+          <p className="hint">{t('setup.intro')}</p>
+          <ul className="item-list">
+            {setup.missing.map(eintrag => (
+              <li key={eintrag.key} className="item-row">
+                <span className="item-main">{eintrag.text}</span>
+                <div className="item-actions">
+                  <Link className="btn-secondary btn-small" to={eintrag.route}>
+                    {t('setup.goThere')}
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {setup.notes.length > 0 && (
+            <p className="hint">
+              {setup.notes.map(hinweis => hinweis.text).join(' ')}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="panel">
         <div className="panel-header">
           <h2>{t('schedule.title')}</h2>

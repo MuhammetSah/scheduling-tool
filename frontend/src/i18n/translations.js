@@ -310,6 +310,11 @@ const de = {
       withdrawn: 'Zurückgezogen',
     },
   },
+  setup: {
+    title: 'Bevor der erste Plan entstehen kann',
+    intro: 'Diese Angaben fehlen noch. Sobald sie da sind, verschwindet dieser Kasten.',
+    goThere: 'Dorthin',
+  },
   schedule: {
     exportCsvButton: 'CSV herunterladen',
     exportIcalButton: 'In meinen Kalender',
@@ -713,6 +718,11 @@ const en = {
       rejected: 'Not approved',
       withdrawn: 'Withdrawn',
     },
+  },
+  setup: {
+    title: 'Before the first plan can be made',
+    intro: 'These are still missing. This box disappears once they are there.',
+    goThere: 'Go there',
   },
   schedule: {
     exportCsvButton: 'Download CSV',

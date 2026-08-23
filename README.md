@@ -68,6 +68,18 @@ Three decisions follow, each with its own test: a missing date means *does not e
 
 **Deleting a certificate clears it everywhere**, and the confirmation says so — from everyone holding it and from every shift requiring it. A shift requiring something nobody can hold would be unstaffable forever.
 
+## What is still missing
+
+An empty database and an empty schedule look the same: "no plan has been generated for November yet." True, and useless on day one — it does not say what to do about it.
+
+`GET /setup-status` reports what actually stands between an empty database and a usable plan, and the schedule page shows it **only while something is missing**. A panel that is always there is furniture; one that disappears is an answer.
+
+**Only what genuinely prevents a plan.** Three things qualify: no active employee (every block would be a gap), no shift type (the route refuses outright), no coverage band (since block planning, that is the only thing the planner builds from). A list that also enumerated everything configurable would be a to-do list that never empties — and a list that never empties gets ignored.
+
+**`notes` is the other kind:** worth knowing, prevents nothing. Without a federal state the tool knows no public holiday and stays silent about them; the plan still comes out. So it sits beside the list, not in it, and *ready* stays *ready*.
+
+**Deliberately in neither:** the § 10 question. "Not exempt" is not a missing answer — it is exactly what § 9 Abs. 1 says. Listing it as a defect would declare the normal case a failing.
+
 ## Draft and published
 
 `schedules.status` existed from the first commit: set to `generated` when a plan was built, written into the response — and read by nothing. **Every plan was visible the moment it was generated**, including the half-finished one HR was rebuilding for the third time.
@@ -539,6 +551,7 @@ schichtplan-tool/
 │   ├── test_api_qualifikationen.py  # Certificates, and above all their expiry
 │   ├── test_migrations_bestand.py  # A filled 0007 database lifted to 0017, real Postgres
 │   ├── test_api_tag_eins.py     # What day one on an empty database tells the operator
+│   ├── test_api_einrichtung.py  # What is still missing, and what is only worth knowing
 ├── docs/
 │   └── DATENBANKWECHSEL.md     # The 07.09.2026 changeover, step by step
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
@@ -752,6 +765,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 | GET    | `/swap-requests`                  | Yours and those addressed to you; HR sees all                        |
 | PUT    | `/swap-requests/<id>/status`      | Accept / decline / withdraw / approve / reject                       |
 | POST   | `/retention/purge`                | Remove personal extras past the retention period, reporting counts (HR) |
+| GET    | `/setup-status`                   | What still prevents a usable plan, and what is only worth knowing (HR) |
 | GET    | `/settings`                       | Business-wide settings as an object (HR)                             |
 | PUT    | `/settings`                       | Sets the keys given, leaves the rest; unknown key is a `400` (HR)     |
 | GET    | `/holiday-regions`                | The federal states to choose from                                    |
@@ -769,7 +783,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (555 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (566 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

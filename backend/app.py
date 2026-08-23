@@ -3110,6 +3110,63 @@ def update_assignment(assignment_id):
     return jsonify({'message': t(g.lang, 'assignment_updated'), 'warnings': warnings})
 
 
+# ---------- what is still missing ----------
+
+
+@app.route('/setup-status', methods=['GET'])
+@hr_required
+def setup_status():
+    """What still stands between an empty database and a usable plan.
+
+    Etappe 11 showed that "generate" on an empty database quietly did nothing.
+    That is fixed, but only *after* somebody pressed it - and the empty state
+    before it says "no plan has been generated yet", which is true and useless
+    on day one.
+
+    **Only what actually prevents a usable plan.** A list that also enumerates
+    everything configurable is a to-do list that never empties, and a list that
+    never empties gets ignored. Three things qualify:
+
+    - no active employee: every block would be a gap
+    - no shift type: the route refuses outright
+    - no coverage band: since Etappe 4 the planner builds from nothing else
+
+    `notes` is the other kind: worth knowing, prevents nothing. A missing
+    federal state means the tool knows no holiday and stays silent about them -
+    the plan still comes out.
+
+    Deliberately absent from both: the § 10 question. "Not exempt" is not a
+    missing answer, it is exactly what § 9 Abs. 1 says. Listing it as a defect
+    would declare the normal case a failing.
+
+    HR-only: what the business still lacks is not an employee's business.
+    """
+    cursor = get_db().cursor()
+
+    def zaehle(sql):
+        cursor.execute(sql)
+        return cursor.fetchone()['n']
+
+    fehlt = []
+    if not zaehle('SELECT COUNT(*) AS n FROM employees '
+                  'WHERE active = 1 AND anonymized_at IS NULL'):
+        fehlt.append({'key': 'employees', 'route': '/employees',
+                      'text': t(g.lang, 'setup_needs_employees')})
+    if not zaehle('SELECT COUNT(*) AS n FROM shift_types'):
+        fehlt.append({'key': 'shift_types', 'route': '/shift-types',
+                      'text': t(g.lang, 'setup_needs_shift_types')})
+    if not zaehle('SELECT COUNT(*) AS n FROM coverage_requirements'):
+        fehlt.append({'key': 'coverage_requirements', 'route': '/coverage-requirements',
+                      'text': t(g.lang, 'setup_needs_coverage')})
+
+    hinweise = []
+    if not holiday_region(cursor):
+        hinweise.append({'key': 'holiday_region', 'route': '/business-hours',
+                         'text': t(g.lang, 'setup_note_holiday_region')})
+
+    return jsonify({'ready': not fehlt, 'missing': fehlt, 'notes': hinweise})
+
+
 # ---------- qualifications ----------
 #
 # What a shift requires, and who holds it. The interesting column is
