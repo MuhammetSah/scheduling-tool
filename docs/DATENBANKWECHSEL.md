@@ -34,6 +34,11 @@ Werkzeug echte Dienstpläne trägt oder noch erprobt wird.
 
 ## Der Durchlauf
 
+**Die Reihenfolge ist der Punkt.** Zurückgespielt wird, *bevor* die Anwendung auf die neue
+Instanz zeigt — sonst läuft sie eine Weile gegen eine leere Datenbank, jemand legt dort das erste
+Konto an, und das anschließende `pg_restore --clean` wischt es wieder weg. Und die alte Instanz
+wird erst gesichert, wenn niemand mehr hineinschreibt.
+
 ### 0. Vorher wissen
 
 | | Stand |
@@ -48,47 +53,80 @@ Werkzeug echte Dienstpläne trägt oder noch erprobt wird.
 antwortet die Eingabeaufforderung nur mit „Befehl nicht gefunden", und das sieht aus wie ein
 fehlendes Programm statt wie ein fehlender Pfad.
 
-### 1. Sichern, **bevor** die Instanz abläuft
-
-Der wichtigste Schritt, und der einzige mit einer Frist. Eine abgelaufene Instanz lässt sich
-nicht mehr auslesen.
+Für den ganzen Durchlauf einmal festlegen:
 
 ```bash
-"/c/Program Files/PostgreSQL/18/bin/pg_dump" "$DATABASE_URL" \
-  --no-owner --format=custom \
-  --file="schichtplan-$(date +%Y-%m-%d).dump"
+DUMP="$HOME/sicherungen/schichtplan-$(date +%Y-%m-%d).dump"
+PGBIN="/c/Program Files/PostgreSQL/18/bin"
+ALT_DBURL="…"      # die noch laufende Instanz
+```
+
+`$DUMP` wird unten überall benutzt, damit nicht gesichert und danach eine andere Datei
+zurückgespielt wird. **Der Ordner gehört an einen Ort, der in keinem Git-Arbeitsverzeichnis
+liegt** — `C:\Users\muham` ist selbst eines, und ein unbedachtes `git add -A` sammelt die Datei
+dort ein.
+
+### 1. Neue Instanz anlegen — **solange die alte noch läuft**
+
+Beide existieren dann eine Weile nebeneinander, und genau das ist gewollt: Sichern und
+Zurückspielen brauchen beide gleichzeitig. Wer wartet, bis die alte abgelaufen ist, hat nichts
+mehr zu sichern.
+
+In Render, gleiche Region wie der Webdienst. **Nenne sie wieder `schichtplan-db`** —
+`render.yaml` verdrahtet `DATABASE_URL` über `fromDatabase: name: schichtplan-db`; ein anderer
+Name heißt, die Verdrahtung von Hand nachzuziehen.
+
+**Das Passwort ist neu und gehört nirgendwo sonst hin.** Die Verbindungszeichenkette der neuen
+Instanz für die folgenden Schritte:
+
+```bash
+NEU_DBURL="…"      # aus dem Render-Dashboard der neuen Instanz
+```
+
+### 2. Schreiben beenden, dann sichern
+
+Der Schritt mit der Frist. Eine abgelaufene Instanz lässt sich nicht mehr auslesen.
+
+**Erst dafür sorgen, dass niemand mehr schreibt** — Absprache genügt, das Werkzeug hat keinen
+Wartungsmodus. Was nach dem Dump noch eingetragen wird, ist danach fort, und niemand merkt es.
+
+```bash
+mkdir -p "$(dirname "$DUMP")"
+"$PGBIN/pg_dump" "$ALT_DBURL" --no-owner --format=custom --file="$DUMP"
 ```
 
 Prüfen, dass wirklich etwas drin ist:
 
 ```bash
-"/c/Program Files/PostgreSQL/18/bin/pg_restore" --list schichtplan-*.dump | grep -c "TABLE DATA"
+"$PGBIN/pg_restore" --list "$DUMP" | grep -c "TABLE DATA"
 ```
 
-**Die Datei enthält Betriebsdaten im Klartext** — Namen, Schichten, Krankmeldungen. Sie gehört an
-einen Ort, der in **keinem** Git-Arbeitsverzeichnis liegt. `C:\Users\muham` ist selbst eines; ein
-unbedachtes `git add -A` sammelt sie dort ein, und aus einer Historie ist sie schwer wieder
-herauszubekommen.
+Null Treffer heißt: leerer Dump. Dann nicht weitermachen.
 
-### 2. Neue Instanz anlegen
+### 3. Zurückspielen — oder bewusst neu anfangen
 
-In Render, gleiche Region wie der Webdienst.
+**Mit Bestand** (der Weg, der § 16 erfüllt), und zwar **bevor** die Anwendung die neue Instanz
+sieht:
 
-**Nenne sie wieder `schichtplan-db`.** `render.yaml` verdrahtet `DATABASE_URL` über
-`fromDatabase: name: schichtplan-db`; ein anderer Name heißt, die Verdrahtung von Hand
-nachzuziehen.
+```bash
+"$PGBIN/pg_restore" --clean --no-owner --dbname="$NEU_DBURL" "$DUMP"
+```
 
-**Das Passwort ist neu und gehört nirgendwo sonst hin.**
+Die Anwendung findet die Migrationen des Dumps danach als angewandt vor und wendet beim nächsten
+Start nur noch die neueren an. Liegen Sicherung und Rückspielen im selben Zyklus, gibt es keine —
+der Stand ist derselbe. Der Sprung über zehn Migrationen ist trotzdem geprobt, weil der Dump vom
+22.08.2026 auf einem älteren Stand steht (siehe Schritt 0).
 
-### 3. `DATABASE_URL` zeigen lassen
+**Ohne Bestand**: diesen Schritt auslassen. Der bisherige Plan ist dann fort — siehe den
+Abschnitt oben, warum das eine Entscheidung mit rechtlicher Folge ist.
+
+### 4. `DATABASE_URL` umbiegen und deployen
 
 Über die Blueprint-Verdrahtung (wenn der Name stimmt) oder von Hand in den Umgebungsvariablen des
 Webdienstes. **`PGSSLMODE` nicht setzen** — `db.py` verlangt ohne diese Variable von sich aus
 `sslmode=require`, und das ist für eine gehostete Datenbank das Richtige.
 
-### 4. Deploy auslösen und prüfen
-
-Die Anwendung wendet die Migrationen beim Start selbst an. Danach:
+### 5. Prüfen
 
 ```bash
 curl -s https://schichtplan-api.onrender.com/health
@@ -101,27 +139,23 @@ Erwartet:
 ```
 
 **Diese eine Abfrage beantwortet beide Fragen**: kommt die Datenbank an, und welcher Stand liegt
-dort. Ein **503** mit `"database":"unreachable"` heißt, `DATABASE_URL` zeigt auf nichts
-Erreichbares — dann nicht weitermachen, sondern Schritt 3 prüfen.
+dort.
+
+Kommt ein **503** mit `"database":"unreachable"`, sagt das nur: die Anwendung erreicht die
+Datenbank nicht. Es unterscheidet **nicht** zwischen einer neuen Instanz, die noch hochfährt,
+einer falschen `DATABASE_URL`, einer gesetzten `PGSSLMODE` und einem Netzproblem. Erst ein paar
+Minuten geben, dann Schritt 4 prüfen, dann das Deploy-Log lesen.
 
 `healthCheckPath` in `render.yaml` zeigt ebenfalls hierher, damit Render einen Dienst ohne
 Datenbank nicht für gesund hält.
 
-### 5. Zurückspielen — oder bewusst neu anfangen
-
-**Mit Bestand** (der Weg, der § 16 erfüllt):
+Mit zurückgespieltem Bestand zusätzlich prüfen, dass der Inhalt da ist — `/health` sagt darüber
+nichts:
 
 ```bash
-"/c/Program Files/PostgreSQL/18/bin/pg_restore" --clean --no-owner \
-  --dbname="$NEUE_DBURL" schichtplan-2026-09-06.dump
+curl -s -H "Authorization: Bearer …" \
+  https://schichtplan-api.onrender.com/schedules/2026/8 | head -c 200
 ```
-
-Danach findet die Anwendung die Migrationen des Dumps als angewandt vor und wendet beim nächsten
-Start nur noch die neueren an. Solange Sicherung und Rückspielen im selben Zyklus liegen, gibt es
-keine — der Stand ist derselbe. Der Sprung über zehn Migrationen ist trotzdem geprobt, weil der
-Dump vom 22.08.2026 auf einem älteren Stand steht (siehe Schritt 0).
-
-**Ohne Bestand**: nichts tun, mit Schritt 6 weitermachen. Der bisherige Plan ist dann fort.
 
 ### 6. Nur beim Neuanfang: einrichten
 
@@ -139,7 +173,8 @@ etwas fehlt (siehe `GET /setup-status`).
 
 ### 7. Für den nächsten Zyklus
 
-- **Datum notieren.** Dreißig Tage ab Schritt 2, und das Sichern gehört ein paar Tage davor.
+- **Datum notieren.** Dreißig Tage ab Schritt 1, und Schritt 2 gehört ein paar Tage davor.
+- **Die alte Instanz** kann jetzt ablaufen. Nichts weiter zu tun.
 - **Die alte Dump-Datei** ist nach erfolgreichem Rückspielen Bestand ohne Zweck und enthält
   Namen. Löschen oder bewusst archivieren, nicht liegen lassen.
 - **Die IP-Freigabe** der neuen Instanz, falls sie eingeschränkt werden soll.
@@ -150,8 +185,9 @@ etwas fehlt (siehe `GET /setup-status`).
 
 | Symptom | Wahrscheinlich |
 |---|---|
-| `/health` antwortet 503, `database: unreachable` | `DATABASE_URL` falsch, Instanz noch nicht bereit, oder `PGSSLMODE` gesetzt |
+| `/health` antwortet 503, `database: unreachable` | Die Anwendung erreicht die Datenbank nicht — mehr sagt die Meldung nicht. Instanz fährt noch hoch, `DATABASE_URL` falsch, `PGSSLMODE` gesetzt oder ein Netzproblem |
 | `/health` antwortet gar nicht | Der Dienst startet nicht — das Deploy-Log lesen, dort steht der Migrationsfehler |
 | `applied` kleiner als erwartet | Migrationen nur teilweise angewandt; jede läuft in eigener Transaktion, die fehlgeschlagene steht im Log |
 | Plan leer nach dem Rückspielen | Rückspielen lief gegen die falsche Datenbank; `/health` zeigt den Stand, `GET /schedules/<jahr>/<monat>` den Inhalt |
 | `pg_dump: command not found` | Kein fehlendes Programm, sondern ein fehlender Pfad — siehe Schritt 0 |
+| Nichts mehr zu sichern | Die alte Instanz war schon abgelaufen. Schritt 1 gehört vor ihr Ende, nicht danach |

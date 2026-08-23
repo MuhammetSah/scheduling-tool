@@ -729,7 +729,7 @@ Restore:
 "/c/Program Files/PostgreSQL/18/bin/pg_restore" --clean --no-owner   --dbname="$DATABASE_URL" schichtplan-2026-08-16.dump
 ```
 
-**The full path is not decoration.** Neither binary is on `PATH` on the machine this project is developed on; a bare `pg_dump` answers "command not found", which reads like a missing program rather than a missing path.
+**The full path is not decoration.** Neither binary is on `PATH` on the machine this project is developed on; a bare `pg_dump` answers "command not found", which reads like a missing program rather than a missing path. That was already written down in the handoff — and this section still spelled the bare command, which is the more instructive half of the story: a fact recorded in one place and ignored in the instructions is a fact nobody has.
 
 **Environment variables.** Full list in `backend/.env.example`. Required in production:
 
