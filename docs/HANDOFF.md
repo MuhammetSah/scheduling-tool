@@ -24,12 +24,22 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. **Etappe 5 ist vollständig** — 5a bis 5i sind gemergt, deployt und
-dokumentiert; es gibt keine offenen Branches und keine offenen Pull Requests.
+Es ist nichts halb fertig. **Etappe 5 ist vollständig**, und **Etappe 6a** hat den ersten Teil
+der zurückgestellten Befunde abgearbeitet. Alles ist gemergt und deployt; es gibt keine offenen
+Branches und keine offenen Pull Requests.
 
-Damit ist die Roadmap bis hierher abgearbeitet. Was als Nächstes kommt, ist keine Fortsetzung,
-sondern eine neue Festlegung des Nutzers. Was sich aus der Arbeit selbst aufdrängt, steht unter
-„Zurückgestellte Befunde"; nichts davon ist dringend.
+Die Roadmap ist abgearbeitet. Was jetzt noch offen liegt, sind die **restlichen zurückgestellten
+Befunde** — siehe den eigenen Abschnitt. Sie sind gruppiert, nicht einzeln abzuarbeiten:
+
+| Bündel | Was drin ist |
+|---|---|
+| **Sperren am Anmeldeweg** | `is_locked_out`/`record_attempt` ohne Zeilensperre, der `password_not_set_yet`-Zweig ohne Zählung |
+| **Testschulden** | fester `10/9/11` statt `security.MAX_FAILED_ATTEMPTS`, ungepinntes `ortools`, Cache-Schlüssel in `ci.yml`, `Project Structure` im README, Lücken in zwei Rundlauftests |
+| **Eindeutigkeit auf `employee_availability`** | dasselbe Fenster zweimal ist doppelt gemeldet |
+| **Leistung** | zwei Befunde, beide mit „erst angehen, wenn der Benchmark es zeigt" markiert — er zeigt es nicht |
+
+**Bevor du daraus etwas nimmst: prüfe, ob es noch stimmt.** In Etappe 6a war einer der Befunde
+längst behoben, und ungeprüft danach zu arbeiten hieße, Vorhandenes zu „reparieren".
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -41,10 +51,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 vollständig gemergt und deployt (PR #16–#25); die API antwortet mit 200 |
+| `main` | Etappe 5 und 6a gemergt und deployt (PR #16–#26); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 440 passed / 36 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 456 passed / 36 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -718,6 +728,35 @@ kein Programmteil), und ein Löschen der Arbeitszeitaufzeichnung nach zwei Jahre
 Minimum, kein Maximum — wann darüber hinaus gelöscht wird, ist wieder eine Festlegung des
 Betreibers).
 
+## Etappe 6a — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-6a-eingaben-design.md`](superpowers/specs/2026-08-23-etappe-6a-eingaben-design.md)
+
+Die erste Etappe aus den zurückgestellten Befunden. Genommen wurde die Teilmenge mit einer
+gemeinsamen Eigenschaft: **eine Eingabe passiert die Prüfung und tut danach nichts.** Kein
+Fehler, keine Meldung — die Zeile steht da, sieht richtig aus und verliert jeden späteren
+Vergleich. Die schlechteste Fehlerart, die eine Anwendung haben kann, weil sie wie Erfolg
+aussieht.
+
+**Der Datumsfehler stand an sechs Stellen.** `date.fromisoformat()` akzeptiert seit Python 3.11
+auch `'20260901'`; wer damit nur *prüft* und die rohe Zeichenkette speichert, legt eine Zeile an,
+die nie zutrifft — das Tool vergleicht Daten durchgehend als Zeichenketten, und `-` kommt vor
+`0`. Ein gesperrter Tag sperrte nichts, eine Krankmeldung machte keine Schicht frei, ein
+Schließtag ließ den Betrieb offen. `parse_iso_date()` prüft **und** normalisiert; die
+Fenstergrenzen aus Etappe 1 benutzen ihn jetzt auch.
+
+**`max_daily_hours` hatte keine Obergrenze.** Der Handoff notierte den Widerspruch zu
+`MAX_BLOCK_MINUTES = 600` und schlug vor, den Deckel einstellbar zu machen. Das war die falsche
+Richtung: § 3 ArbZG erlaubt höchstens zehn Stunden, der Planer hat also recht. Jetzt `0 < Wert
+<= 10`. Null war keine Arbeitszeitgrenze, sondern eine getarnte Deaktivierung.
+
+**Die Lehre dieser Etappe steht im Review, nicht im Plan.** Ich hatte `int(True) == 1` an drei
+Stellen behoben — genau den drei, für die ich Tests geschrieben hatte. CodeRabbit fand zwei
+weitere: `parse_int_list()` (`unavailable_weekdays`, `allowed_shift_types`) und
+`parse_optional_hours()`, wo `float(True)` eine Tagesgrenze von einer Stunde ergibt, also
+innerhalb jeder gültigen Spanne und deshalb stumm. **Wer eine Fehlerklasse findet, behebt sie im
+Parser, nicht an den Aufrufstellen, die ihm gerade eingefallen sind.**
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -805,6 +844,18 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     `anonymized_at IS NULL` mitführen — sonst tauchen Grabsteine als Personal auf, im
     Auswahlfeld, in Statistiken, im Generator. Wer über `shift_assignments` joint, will das
     Gegenteil: dort gehört der Grabstein dazu, sonst sieht die Vergangenheit unbesetzt aus.
+
+19. **Ein Datum wird geprüft *und* normalisiert, nie nur geprüft.** `date.fromisoformat()`
+    akzeptiert seit Python 3.11 auch `'20260901'`. Wer damit nur prüft und die Eingabe roh
+    speichert, legt eine Zeile an, die jeden Vergleich verliert — das Tool vergleicht Daten
+    durchgehend als Zeichenketten, und `'2026-09-15' < '20260901'`. Dafür gibt es
+    `parse_iso_date()`; jede neue Route, die ein Datum entgegennimmt, benutzt ihn.
+
+20. **`int()` und `float()` nehmen Wahrheitswerte an.** `int(True)` ist `1`, `float(True)` ist
+    `1.0`, `int(3.9)` ist `3`. Alle drei ergeben eine gültig aussehende Zeile für etwas, das
+    niemand genannt hat, und keine Prüfung dahinter schlägt an. `parse_weekday()`,
+    `parse_int_list()` und `parse_optional_hours()` lehnen das ab — **neue Eingabefelder gehen
+    durch einen dieser Parser, nicht durch ein nacktes `int()`.**
 
 ## Offen — liegt beim Nutzer
 
@@ -905,7 +956,7 @@ Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 - Drosselungstests verdrahten `10/9/11` fest statt `security.MAX_FAILED_ATTEMPTS`
 - `is_locked_out`/`record_attempt` sind check-then-act ohne Zeilensperre
 - `HTTPException`-Fallback liefert für andere Codes als 404/405 einen unübersetzten Literal (aktuell unerreichbar)
-- `handleMonthChange` setzt den geladenen Plan nicht zurück; Erzeugen-Knopf nicht gesperrt während des Ladens
+- ~~`handleMonthChange` setzt den geladenen Plan nicht zurück~~ — **war bereits behoben**, in Etappe 6a nachgeprüft
 - `fetchSchedule()` schluckt jeden GET-Fehler zu `null`
 - `MIGRATIONS_DIR.iterdir()` wirft, wenn das Verzeichnis fehlt
 - Zwei Validierungstests in `test_api_availability.py` prüfen nur den Status, nicht die Meldung
@@ -914,17 +965,18 @@ Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 
 Neu aus dem Abschluss-Review von Etappe 1:
 
-- `unavailable_dates` hat denselben Normalisierungsfehler, der für `valid_from`/`valid_until`
-  behoben wurde: `date.fromisoformat()` akzeptiert ab Python 3.11 auch `'20260901'`, und der
-  Wert wird wörtlich gespeichert, obwohl später als Zeichenkette verglichen wird. Kleiner
-  Folge-Commit, gleiche Zeile Logik
+- ~~`unavailable_dates` hat denselben Normalisierungsfehler wie `valid_from`/`valid_until`~~ —
+  **erledigt in Etappe 6a**, und der Befund war breiter als hier notiert: dieselbe Stelle stand
+  sechsmal im Code, nicht einmal
 - keine CHECK-Constraints auf `employee_availability` (`weekday`, `start_time`, `end_time`);
   konsistent mit den anderen Tabellen, die API ist der einzige Schreiber. Wieder aufgreifen,
   sobald ein zweiter Schreibpfad entsteht (Import/Seed in Etappe 5)
 - keine Eindeutigkeit und keine Überlappungsprüfung auf `employee_availability` — dasselbe
   Fenster zweimal gesendet steht zweimal in der Warnung
-- die Fenster-Abzeichen in der Mitarbeiterliste filtern nicht nach `valid_from`/`valid_until`;
-  ein abgelaufenes Fenster liest sich wie ein aktives. `constraint_warnings()` filtert korrekt
+- ~~die Fenster-Abzeichen in der Mitarbeiterliste filtern nicht nach `valid_from`/`valid_until`~~
+  — **erledigt in Etappe 6a**. Abgelaufene Fenster bekommen einen eigenen Hinweis statt der
+  Meldung für „gar keine Fenster": der Unterschied entscheidet, ob jemand ein Fenster anlegen
+  oder eine Grenze ändern muss
 - die Fensterprüfung rechnet im innersten Schleifenkörper von `eligible_candidates()` alle
   `"HH:MM"`-Strings pro Kandidat und Knoten neu. Datenbankseitig ist alles vorgeladen, nur
   rechnerisch. Erst angehen, wenn der Benchmark es zeigt
@@ -986,8 +1038,8 @@ Weiterhin offen aus den Reviews von Etappe 3:
   vergleicht aber ganze Tupel
 - für `0007_derive_coverage.py` gibt es nur einen Postgres-Test (die Ableitung selbst), keine
   Postgres-Gegenprobe für den Leer-Bestand-Wächter oder den Rundlauf
-- `int(entry.get('weekday'))` in `replace_business_hours()`/`parse_coverage_requirements()`
-  (`backend/app.py`) schluckt `True`/`False` als `1`/`0` und kürzt `3.9` zu `3`
+- ~~`int(entry.get('weekday'))` schluckt `True`/`False` als `1`/`0` und kürzt `3.9` zu `3`~~ —
+  **erledigt in Etappe 6a**, an fünf Stellen statt der hier genannten zwei
 - die Datumsprüfung beim Anlegen einer `business_hours_exceptions`-Zeile
   (`create_business_hours_exception()`) ist check-then-act ohne Sperre
 - kein eigener HTTP-Test für den Abwesenheitsfall bei den Deckungslücken (code-seitig korrekt,
@@ -1008,12 +1060,11 @@ Neu aus Etappe 4:
 - `day_envelope()` gibt es zweimal: einmal in `scheduler._search()` über den Suchzustand,
   einmal als `app.day_envelope_from_hours()` über gespeicherte Zeilen. Die gemeinsame Rechnung
   steckt in `shift_datetimes()` und wird importiert, die Hülle ist doppelt
-- `MAX_BLOCK_MINUTES` ist als 600 fest verdrahtet, obwohl `max_daily_hours` je Mitarbeiter
-  einstellbar ist. Wer die Tagesgrenze auf 12 setzt, bekommt trotzdem keinen Block über zehn
-  Stunden
-- die Bedarfszahlen der Schichtart werden vom Frontend weiterhin mitgeschickt, damit der
-  Bestand nicht still auf 0 fällt. Mit dem Entfernen von `shift_requirements` in Etappe 5 fällt
-  das weg
+- ~~`MAX_BLOCK_MINUTES` ist als 600 fest verdrahtet, obwohl `max_daily_hours` einstellbar ist~~
+  — **erledigt in Etappe 6a, in der anderen Richtung**: § 3 ArbZG erlaubt höchstens zehn
+  Stunden, also wurde das Feld gedeckelt statt der Block gelockert
+- ~~die Bedarfszahlen der Schichtart werden vom Frontend weiterhin mitgeschickt~~ —
+  **erledigt in Etappe 5e** mit dem Entfernen von `shift_requirements`
 - für `0008_max_daily_hours` gibt es zwei Postgres-Tests, die lokal übersprungen werden; sie
   sind bislang nur im CI gelaufen — **beim Abschluss-Review prüfen, dass `backend-postgres`
   wirklich grün war**
