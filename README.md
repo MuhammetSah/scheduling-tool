@@ -539,6 +539,8 @@ schichtplan-tool/
 │   ├── test_api_qualifikationen.py  # Certificates, and above all their expiry
 │   ├── test_migrations_bestand.py  # A filled 0007 database lifted to 0017, real Postgres
 │   ├── test_api_tag_eins.py     # What day one on an empty database tells the operator
+├── docs/
+│   └── DATENBANKWECHSEL.md     # The 07.09.2026 changeover, step by step
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers

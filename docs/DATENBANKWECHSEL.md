@@ -112,8 +112,15 @@ dabei passiert:
 - Vier Tabellen kommen leer dazu (Einstellungen, Protokoll, Tauschanträge, Nachweise)
 
 Die Dump-Datei liegt unter `C:\Users\muham\schichtplan-2026-08-22.dump` und **enthält
-Betriebsdaten im Klartext** — bewusst außerhalb des Repository-Verzeichnisses, aber beachte, dass
-`C:\Users\muham` selbst ein Git-Repository ist.
+Betriebsdaten im Klartext**.
+
+**Sie liegt dort schlecht.** Der Ablageort wurde gewählt, weil er außerhalb des
+Projektverzeichnisses liegt — aber `C:\Users\muham` ist selbst ein Git-Repository, und die Datei
+steht dort unversioniert mitten drin. Ein unbedachtes `git add -A` sammelt sie ein, und ein Dump
+mit Namen und zweiundsechzig Schichten ist aus einer Historie schwer wieder herauszubekommen.
+
+**Vor dem Wechsel:** verschiebe sie an einen Ort, der in keinem Arbeitsverzeichnis liegt — oder
+lösche sie, sobald die neue Datenbank steht und ein frisches Backup existiert.
 
 ---
 

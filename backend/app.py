@@ -2170,8 +2170,8 @@ def generate_schedule_route():
     # Gefragt wird, ob es Baender GIBT, nicht ob Bloecke herauskommen: ein
     # gepflegtes Band mit Anzahl 0 ist eine Aussage, und wer sie trifft, soll
     # dafuer keinen Hinweis bekommen.
-    cursor.execute('SELECT COUNT(*) AS n FROM coverage_requirements')
-    ohne_bedarf = not cursor.fetchone()['n']
+    baender = coverage_requirements_by_weekday(cursor)
+    ohne_bedarf = not baender
 
     employees = load_employees_for_scheduling(cursor, year, month)
 
@@ -2202,7 +2202,8 @@ def generate_schedule_route():
     # 3 midday, 2 late" - but their per-weekday counts are no longer read.
     try:
         slots = build_month_blocks(
-            year, month, shift_types, effective_bands_by_date(cursor, year, month), employees)
+            year, month, shift_types,
+            effective_bands_by_date(cursor, year, month, baender), employees)
         # The requirement lives on the shift type, so a block inherits it from
         # its template. A block *without* a template carries none - since
         # Etappe 4 the planner trims blocks free of any template, and there is
@@ -4451,7 +4452,7 @@ def average_hours_exceeded(cursor, year, month):
     return over
 
 
-def effective_bands_by_date(cursor, year, month):
+def effective_bands_by_date(cursor, year, month, bands_by_weekday=None):
     """Every date of the month mapped to the demand bands that actually apply.
 
     Loaded once for the whole month rather than per day, and shared by the two
@@ -4470,8 +4471,15 @@ def effective_bands_by_date(cursor, year, month):
     derived by migration 0007 never passed the API's validation at all, and any
     database edited before /business-hours started cross-checking can hold the
     same thing. A date whose bands are all trimmed away is left out entirely.
+
+    `bands_by_weekday` may be handed in by a caller that already loaded it -
+    generate_schedule_route() does, because it also has to say whether any band
+    exists at all. Two separate reads could disagree if somebody edits the
+    demand in between, and the plan would then be built from one set while the
+    hint spoke about another.
     """
-    bands_by_weekday = coverage_requirements_by_weekday(cursor)
+    if bands_by_weekday is None:
+        bands_by_weekday = coverage_requirements_by_weekday(cursor)
     if not bands_by_weekday:
         return {}
 

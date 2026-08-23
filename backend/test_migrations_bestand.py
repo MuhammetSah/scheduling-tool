@@ -265,7 +265,7 @@ def test_die_anwendung_liest_den_gehobenen_bestand(gehobener_bestand):
     zurechtkommt - serialize_employee() liest inzwischen Spalten und Tabellen,
     die es am 22.08. nicht gab.
     """
-    _migrations, schema_url, _schema, _neu = gehobener_bestand
+    _migrations, _schema_url, _schema, _neu = gehobener_bestand
 
     for modul in ('db', 'app'):
         sys.modules.pop(modul, None)
