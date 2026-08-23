@@ -537,6 +537,8 @@ schichtplan-tool/
 │   ├── test_api_schichttausch.py  # The guided swap, and where the law says no
 │   ├── test_api_arbzg_rest.py  # Break position (§ 4 Satz 3) and the § 10 exemption
 │   ├── test_api_qualifikationen.py  # Certificates, and above all their expiry
+│   ├── test_migrations_bestand.py  # A filled 0007 database lifted to 0017, real Postgres
+│   ├── test_api_tag_eins.py     # What day one on an empty database tells the operator
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
@@ -765,7 +767,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (551 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (555 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

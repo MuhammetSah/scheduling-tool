@@ -2155,6 +2155,24 @@ def generate_schedule_route():
     if not shift_types:
         return jsonify({'message': t(g.lang, 'need_a_shift_type_first')}), 400
 
+    # Ohne ein einziges Bedarfsband gibt es nichts zu planen: seit Etappe 4
+    # baut der Blockplaner ausschliesslich daraus. Die Route antwortete dann
+    # mit 201, null Bloecken, null gemeldeten Luecken und keinem Wort - aus
+    # Sicht des Betreibers am ersten Tag: gedrueckt, "in Ordnung" bekommen,
+    # nichts da.
+    #
+    # Gesagt, nicht verboten. Der erste Entwurf lehnte mit 400 ab, und die
+    # Testsuite hat gezeigt, warum das zu weit geht: einen leeren Plan
+    # anzulegen und ihn von Hand zu fuellen ist ein gaengiger Weg, den ein
+    # Riegel abschneiden wuerde. Die Beschwerde war das Schweigen, nicht die
+    # Erlaubnis.
+    #
+    # Gefragt wird, ob es Baender GIBT, nicht ob Bloecke herauskommen: ein
+    # gepflegtes Band mit Anzahl 0 ist eine Aussage, und wer sie trifft, soll
+    # dafuer keinen Hinweis bekommen.
+    cursor.execute('SELECT COUNT(*) AS n FROM coverage_requirements')
+    ohne_bedarf = not cursor.fetchone()['n']
+
     employees = load_employees_for_scheduling(cursor, year, month)
 
     cursor.execute('SELECT id FROM schedules WHERE year = ? AND month = ?', (year, month))
@@ -2234,7 +2252,10 @@ def generate_schedule_route():
         )
 
     connection.commit()
-    return jsonify(fetch_schedule(year, month)), 201
+    antwort = fetch_schedule(year, month)
+    if ohne_bedarf:
+        antwort['notice'] = t(g.lang, 'no_coverage_defined')
+    return jsonify(antwort), 201
 
 
 @app.route('/schedules/<int:year>/<int:month>', methods=['GET'])
