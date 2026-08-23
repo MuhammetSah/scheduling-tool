@@ -255,6 +255,12 @@ const de = {
     entryPlural: '{date}, {start}–{end}: {n} Personen fehlen',
   },
 
+  sundayWork: {
+    title: 'Sonn- und Feiertagsarbeit',
+    label: 'Der Betrieb fällt unter eine Ausnahme nach § 10 ArbZG',
+    hint: '§ 9 Abs. 1 ArbZG verbietet Sonn- und Feiertagsarbeit. § 10 nimmt ganze Branchen aus — Kliniken, Gaststätten, Verkehr und weitere. Auf welcher Seite dieser Betrieb steht, kann nur er selbst sagen; das Tool meldet ohne diese Angabe jede Sonntags- und Feiertagsschicht.',
+    stillApplies: 'Nicht betroffen: die fünfzehn freien Sonntage nach § 11 Abs. 1 und der Ersatzruhetag nach § 11 Abs. 3. Beide sind das Gegengewicht zu § 10 und gelten gerade dann, wenn er greift.',
+  },
   retention: {
     title: 'Datenschutz',
     monthsLabel: 'Aufbewahrung personenbezogener Zusatzdaten (Monate)',
@@ -347,6 +353,8 @@ const de = {
     breakShort: 'Pause {minutes} Min.',
     breakTitle: 'Abweichende Ruhepause dieser Person',
     breakAria: 'Ruhepause in Minuten',
+    breakStartAria: 'Beginn der Ruhepause',
+    breakFrom: 'ab',
     editBreakTitle: 'Ruhepause dieser Person ändern',
     resetBreakTitle: 'Zurück auf die gesetzliche Mindestpause',
     confirmButton: 'Übernehmen',
@@ -639,6 +647,12 @@ const en = {
     entryPlural: '{date}, {start}–{end}: {n} people missing',
   },
 
+  sundayWork: {
+    title: 'Sunday and holiday work',
+    label: 'This business falls under an exemption in § 10 ArbZG',
+    hint: '§ 9 Abs. 1 ArbZG forbids work on Sundays and public holidays. § 10 exempts whole industries — hospitals, restaurants, transport and more. Only the business itself can say which side it is on; without this, the tool flags every Sunday and holiday shift.',
+    stillApplies: 'Not affected: the fifteen free Sundays of § 11 Abs. 1 and the replacement rest day of § 11 Abs. 3. Both are the counterweight to § 10 and apply precisely when it does.',
+  },
   retention: {
     title: 'Data protection',
     monthsLabel: 'Retention of personal extras (months)',
@@ -731,6 +745,8 @@ const en = {
     breakShort: '{minutes} min break',
     breakTitle: "This person's break, differing from the legal minimum",
     breakAria: 'Break in minutes',
+    breakStartAria: 'Start of the break',
+    breakFrom: 'from',
     editBreakTitle: "Change this person's break",
     resetBreakTitle: 'Back to the legal minimum break',
     confirmButton: 'Apply',

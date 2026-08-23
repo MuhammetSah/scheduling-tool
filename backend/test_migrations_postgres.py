@@ -1362,3 +1362,46 @@ def test_tauschantraege_laufen_auf_postgres_rund(pg_db):
 
     assert '0015_swap_requests' in migrations.apply_pending()
     assert 'shift_swap_requests' in tabellen(schema_url, schema)
+
+
+def test_die_pausenlage_laeuft_auf_postgres_rund(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0016_break_position.
+
+    Wie bei 0008 und 0014 laesst down() die Spalte stehen; up() ist ueber
+    table_columns() wiederholbar. Der Schreibtest gehoert dazu, weil die
+    Spalte TEXT ist und nicht TIME - alle Uhrzeiten dieses Schemas werden als
+    Zeichenkette verglichen, und eine einzelne abweichende Spalte waere die
+    Ausnahme, die jede Abfrage kennen muesste.
+    """
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+    assert 'break_start' in spalten(schema_url, schema, 'shift_assignments')
+
+    import db
+
+    connection = db.get_db_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("INSERT INTO employees (name) VALUES ('Anna')")
+        anna = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 10, 'published')")
+        schedule_id = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            'employee_id, start_time, end_time, break_minutes, break_start) '
+            "VALUES (?, '2026-10-05', NULL, 0, ?, '08:00', '16:00', 30, '12:00')",
+            (schedule_id, anna))
+        connection.commit()
+
+        cursor.execute('SELECT break_start FROM shift_assignments')
+        assert cursor.fetchone()['break_start'] == '12:00'
+    finally:
+        connection.close()
+
+    while '0016_break_position' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert 'break_start' in spalten(schema_url, schema, 'shift_assignments')
+
+    assert '0016_break_position' in migrations.apply_pending()
+    assert 'break_start' in spalten(schema_url, schema, 'shift_assignments')

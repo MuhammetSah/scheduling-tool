@@ -25,6 +25,8 @@ function BusinessHours({ setFlash }) {
   const [regions, setRegions] = useState([])
   const [region, setRegion] = useState('')
   const [retentionMonths, setRetentionMonths] = useState('6')
+  const [sundayWork, setSundayWork] = useState(false)
+  const [savingSundayWork, setSavingSundayWork] = useState(false)
 
   async function load() {
     try {
@@ -39,6 +41,7 @@ function BusinessHours({ setFlash }) {
       setRegions(moeglicheRegionen)
       setRegion(settings.holiday_region || '')
       setRetentionMonths(settings.retention_months || '6')
+      setSundayWork(settings.sunday_work_permitted === 'yes')
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }
@@ -116,6 +119,24 @@ function BusinessHours({ setFlash }) {
     }
   }
 
+  async function saveSundayWork(erlaubt) {
+    // Gesperrt, solange geschrieben wird. Zwei schnelle Klicks schickten sonst
+    // zwei PUTs los, und käme das erste als zweites an, stünde in der
+    // Datenbank "ja", während das Kreuzchen leer aussieht. Bei einer
+    // Einstellung, die entscheidet, ob § 9 überhaupt gemeldet wird, ist das
+    // die falsche Art von Kleinigkeit.
+    setSavingSundayWork(true)
+    setSundayWork(erlaubt)
+    try {
+      await api.put('/settings', { sunday_work_permitted: erlaubt ? 'yes' : null })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+      setSundayWork(!erlaubt)
+    } finally {
+      setSavingSundayWork(false)
+    }
+  }
+
   async function saveRetention(months) {
     setRetentionMonths(months)
     try {
@@ -144,6 +165,24 @@ function BusinessHours({ setFlash }) {
 
   return (
     <>
+      <div className="panel">
+        <div className="panel-header">
+          <h2>{t('sundayWork.title')}</h2>
+        </div>
+        <div className="field checkbox-field">
+          <input
+            id="sunday-work"
+            type="checkbox"
+            checked={sundayWork}
+            disabled={savingSundayWork}
+            onChange={e => saveSundayWork(e.target.checked)}
+          />
+          <label htmlFor="sunday-work">{t('sundayWork.label')}</label>
+        </div>
+        <p className="hint">{t('sundayWork.hint')}</p>
+        <p className="hint">{t('sundayWork.stillApplies')}</p>
+      </div>
+
       <div className="panel">
         <div className="panel-header">
           <h2>{t('retention.title')}</h2>

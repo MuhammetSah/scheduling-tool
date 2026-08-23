@@ -200,6 +200,7 @@ function AssignmentSlot({
   const [editingTime, setEditingTime] = useState(false)
   const [editingBreak, setEditingBreak] = useState(false)
   const [breakDraft, setBreakDraft] = useState('')
+  const [breakStartDraft, setBreakStartDraft] = useState('')
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
 
@@ -229,6 +230,7 @@ function AssignmentSlot({
       slot.assignment_time_set ? slot.start_time : null,
       slot.assignment_time_set ? slot.end_time : null,
       slot.break_minutes ?? null,
+      slot.break_start ?? null,
     )
   }
 
@@ -255,16 +257,19 @@ function AssignmentSlot({
   }
 
   function saveTime() {
-    onReassign(slot.id, slot.employee_id ?? '', start, end, slot.break_minutes ?? null)
+    onReassign(slot.id, slot.employee_id ?? '', start, end, slot.break_minutes ?? null,
+               slot.break_start ?? null)
     setEditingTime(false)
   }
 
   function resetTime() {
-    onReassign(slot.id, slot.employee_id ?? '', null, null, slot.break_minutes ?? null)
+    // Ohne eigene Zeiten gibt es keinen Block, in dem eine Pausenlage
+    // liegen koennte - sie faellt mit ihnen weg.
+    onReassign(slot.id, slot.employee_id ?? '', null, null, slot.break_minutes ?? null, null)
     setEditingTime(false)
   }
 
-  function saveBreak(rohwert) {
+  function saveBreak(rohwert, lage = slot.break_start ?? null) {
     // Leer heisst zurueck auf die gesetzliche Mindestpause, nicht null Minuten.
     const minuten = rohwert === '' ? null : Math.max(0, Number(rohwert) || 0)
     onReassign(
@@ -273,6 +278,9 @@ function AssignmentSlot({
       slot.assignment_time_set ? slot.start_time : null,
       slot.assignment_time_set ? slot.end_time : null,
       minuten,
+      // Ohne Dauer beschreibt eine Uhrzeit keine Pause; das Backend lehnt sie
+      // ab, und hier fällt sie deshalb gleich mit weg.
+      minuten ? lage : null,
     )
     setEditingBreak(false)
   }
@@ -291,6 +299,7 @@ function AssignmentSlot({
         {breakDeviates && (
           <span className="slot-break" title={t('shiftCell.breakTitle')}>
             {t('shiftCell.breakShort', { minutes: slot.break_minutes })}
+            {slot.break_start ? ` ${t('shiftCell.breakFrom')} ${slot.break_start}` : ''}
           </span>
         )}
       </div>
@@ -344,6 +353,7 @@ function AssignmentSlot({
           {breakDeviates && (
             <span className="slot-break" title={t('shiftCell.breakTitle')}>
               {t('shiftCell.breakShort', { minutes: slot.break_minutes })}
+              {slot.break_start ? ` ${t('shiftCell.breakFrom')} ${slot.break_start}` : ''}
             </span>
           )}
         </>
@@ -360,7 +370,20 @@ function AssignmentSlot({
             aria-label={t('shiftCell.breakAria')}
             placeholder={String(slot.effective_break_minutes ?? 0)}
           />
-          <button type="button" className="btn-small" onClick={() => saveBreak(breakDraft)}>
+          {/* Die Lage, nicht nur die Dauer: § 4 Satz 3 ArbZG erlaubt
+              höchstens sechs Stunden am Stück, und ohne Uhrzeit lässt sich
+              der Satz gar nicht prüfen. Nur anzeigen, wenn es eine Dauer
+              gibt — eine Uhrzeit ohne sie beschreibt keine Pause. */}
+          {Number(breakDraft) > 0 && (
+            <input
+              type="time"
+              value={breakStartDraft}
+              onChange={e => setBreakStartDraft(e.target.value)}
+              aria-label={t('shiftCell.breakStartAria')}
+            />
+          )}
+          <button type="button" className="btn-small"
+                  onClick={() => saveBreak(breakDraft, breakStartDraft || null)}>
             {t('shiftCell.confirmButton')}
           </button>
           {/* Empty means back to the legal minimum, which is a different
@@ -370,7 +393,7 @@ function AssignmentSlot({
             type="button"
             className="btn-secondary btn-small"
             title={t('shiftCell.resetBreakTitle')}
-            onClick={() => saveBreak('')}
+            onClick={() => saveBreak('', null)}
           >
             {t('shiftCell.defaultButton')}
           </button>
@@ -383,7 +406,11 @@ function AssignmentSlot({
           type="button"
           className="cell-icon"
           title={t('shiftCell.editBreakTitle')}
-          onClick={() => { setBreakDraft(String(slot.break_minutes ?? '')); setEditingBreak(true) }}
+          onClick={() => {
+            setBreakDraft(String(slot.break_minutes ?? ''))
+            setBreakStartDraft(slot.break_start || '')
+            setEditingBreak(true)
+          }}
         >
           ☕
         </button>

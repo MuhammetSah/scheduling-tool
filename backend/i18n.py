@@ -192,6 +192,31 @@ TRANSLATIONS = {
         'en': 'Without the swap partner’s consent this would not be a swap but '
               'a reassignment.',
     },
+    'break_start_needs_minutes': {
+        'de': 'Eine Uhrzeit ohne Pausendauer beschreibt keine Pause.',
+        'en': 'A time without a break duration does not describe a break.',
+    },
+    'break_start_needs_times': {
+        'de': 'Die Lage der Pause braucht einen Block mit bekannten Zeiten.',
+        'en': 'A break position needs a block with known hours.',
+    },
+    'break_start_outside_block': {
+        'de': 'Die Pause muss innerhalb des Blocks {start}–{end} liegen.',
+        'en': 'The break has to fall inside the block {start}–{end}.',
+    },
+    'warn_stretch_without_break': {
+        'de': '{name} arbeitet {hours:.1f} Std. am Stück ohne Pause – '
+              '§ 4 Satz 3 ArbZG erlaubt höchstens sechs',
+        'en': '{name} works {hours:.1f} hrs in one go without a break – '
+              '§ 4 Satz 3 ArbZG allows at most six',
+    },
+    'warn_sunday_work': {
+        'de': 'Der {date} ist ein Sonntag – § 9 Abs. 1 ArbZG verbietet '
+              'Sonntagsarbeit, sofern der Betrieb nicht unter § 10 fällt '
+              '(unter Öffnungszeiten einstellbar)',
+        'en': 'The {date} is a Sunday – § 9 Abs. 1 ArbZG forbids Sunday work '
+              'unless the business falls under § 10 (set under opening hours)',
+    },
     'invalid_date_value': {
         'de': 'Ungültiges Datum: {date}',
         'en': 'Invalid date: {date}',

@@ -862,3 +862,72 @@ def test_eine_kurze_pause_zaehlt_in_die_tagesarbeitszeit(hr_client):
                             json={'status': 'accepted', 'my_assignment_id': b})
 
     assert antwort.status_code == 409, antwort.json
+
+
+def test_die_lage_der_pause_reist_beim_tausch_mit(hr_client):
+    """Aus dem Review zu PR #31, und dieselbe Lehre wie eine Etappe zuvor.
+
+    perform_swap() reichte break_minutes weiter, break_start aber nicht. Damit
+    war die Pruefung nach Paragraph 4 Satz 3 im Tauschweg wirkungslos, obwohl
+    der Verstoss in ARBZG_BLOCKERS steht - eine Sperre, die nie greift, ist
+    schlimmer als keine, weil sie in der Liste aussieht wie eine.
+    """
+    from app import get_db
+
+    anna, berta = _betrieb(hr_client)
+    a, b = _plan_mit(hr_client, [
+        (anna['id'], '2026-09-07', '06:00', '14:00'),
+        (berta['id'], '2026-09-14', '06:00', '14:00'),
+    ])
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        # Pause ganz am Anfang: danach siebeneinhalb Stunden am Stueck.
+        cursor.execute(
+            "UPDATE shift_assignments SET break_minutes = 30, break_start = '06:00' "
+            'WHERE id = ?', (a,))
+        connection.commit()
+
+    anna_konto = _konto(hr_client, anna, 'anna')
+    berta_konto = _konto(hr_client, berta, 'berta')
+
+    _als(hr_client, anna_konto)
+    antrag = hr_client.post('/swap-requests', json={
+        'my_assignment_id': a, 'partner_employee_id': berta['id']}).json
+    _als(hr_client, berta_konto)
+    antwort = hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                            json={'status': 'accepted', 'my_assignment_id': b})
+
+    assert antwort.status_code == 409, antwort.json
+    assert any('Satz 3' in g for g in antwort.json['blockers']), antwort.json
+
+
+def test_eine_mittige_pause_haelt_den_tausch_nicht_auf(hr_client):
+    """Gegenprobe: eine Umsetzung, die jede gesetzte Pausenlage blockiert,
+    waere sonst ebenfalls gruen."""
+    from app import get_db
+
+    anna, berta = _betrieb(hr_client)
+    a, b = _plan_mit(hr_client, [
+        (anna['id'], '2026-09-07', '06:00', '14:00'),
+        (berta['id'], '2026-09-14', '06:00', '14:00'),
+    ])
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE shift_assignments SET break_minutes = 30, break_start = '10:00' "
+            'WHERE id = ?', (a,))
+        connection.commit()
+
+    anna_konto = _konto(hr_client, anna, 'anna')
+    berta_konto = _konto(hr_client, berta, 'berta')
+
+    _als(hr_client, anna_konto)
+    antrag = hr_client.post('/swap-requests', json={
+        'my_assignment_id': a, 'partner_employee_id': berta['id']}).json
+    _als(hr_client, berta_konto)
+    antwort = hr_client.put('/swap-requests/%d/status' % antrag['id'],
+                            json={'status': 'accepted', 'my_assignment_id': b})
+
+    assert antwort.status_code == 200, antwort.json
