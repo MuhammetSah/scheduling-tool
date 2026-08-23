@@ -97,6 +97,22 @@ Fallstrick 21 im Handoff steht. Beide Tabellen tragen jetzt eine `id` und sagen 
 mit `UNIQUE`, wie `employee_allowed_shift_types` seit `0001_baseline.py`. Dem vorhandenen Muster zu
 folgen wäre von Anfang an richtig gewesen.
 
+**Das Review zu PR #32 fand vier weitere Dinge, und eines davon ist eine Datenschutzlücke:**
+`delete_employee()` räumt seit Etappe 5i Fenster, gesperrte Tage, Abwesenheiten und erlaubte
+Schichtarten weg — die Nachweise kamen später dazu und standen nicht auf der Liste. **Ein Grabstein
+mit Ersthelferschein ist genau das, was die Anonymisierung verhindern soll.** Wer eine
+personenbezogene Tabelle anlegt, trägt sie in diese Liste ein; sie ist der Ort, an dem das
+Vergessen steht.
+
+Dazu drei kleinere: `{"qualifications": false}` fiel über ein `or []` in ein leeres Ersetzen und
+löschte damit alles (dieselbe Klasse wie Etappe 6a — eine Eingabe, die etwas anderes tut, als sie
+aussieht); `parse_int_list('12')` läuft über die *Zeichen* und ergäbe die Nachweise 1 und 2; und
+die Bestätigung benutzte einen i18n-Schlüssel, den es nicht gibt — `t()` fällt dann auf den
+Schlüssel selbst zurück, und in der Oberfläche stünde `shift_type_updated`.
+
+Im Frontend legte ein fehlgeschlagener zweiter Aufruf nach erfolgreichem `POST` bei einem zweiten
+Versuch einen zweiten Mitarbeiter an. Die neue Kennung wandert jetzt sofort ins Formular.
+
 Ein Frontend-Test-Helfer wurde ebenfalls angefasst: seine Zusage antwortete auf jeden Pfad mit
 derselben Liste, und die Seite lädt jetzt zwei. Ohne die Unterscheidung erschienen die Schichtarten
 ein zweites Mal als Nachweise.

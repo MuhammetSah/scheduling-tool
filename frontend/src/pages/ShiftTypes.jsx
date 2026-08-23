@@ -58,6 +58,10 @@ function ShiftTypes({ setFlash }) {
         setFlash({ type: 'success', text: t('shiftTypes.flashUpdated') })
       } else {
         ziel = (await api.post('/shift-types', payload)).id
+        // Dieselbe Vorsicht wie bei den Mitarbeitern: der zweite Aufruf kann
+        // fehlschlagen, und ein zweiter Versuch darf die Vorlage nicht noch
+        // einmal anlegen.
+        setForm(f => ({ ...f, id: ziel }))
         setFlash({ type: 'success', text: t('shiftTypes.flashCreated') })
       }
       // Eigene Route, wie bei den Mitarbeitern: die Anforderung ist eine

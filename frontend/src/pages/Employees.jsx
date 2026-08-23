@@ -234,13 +234,17 @@ function Employees({ setFlash }) {
       let ziel = form.id
       if (ziel) {
         await api.put(`/employees/${ziel}`, payload)
-        setFlash({ type: 'success', text: t('employees.flashUpdated') })
       } else {
         ziel = (await api.post('/employees', payload)).id
-        setFlash({ type: 'success', text: t('employees.flashCreated') })
+        // Die neue Kennung sofort ins Formular. Schlägt der zweite Aufruf
+        // fehl, steht der Mitarbeiter bereits in der Datenbank — ohne das
+        // hier legte ein zweiter Versuch ihn ein zweites Mal an.
+        setForm(f => ({ ...f, id: ziel }))
       }
       await api.put(`/employees/${ziel}/qualifications`,
                     { qualifications: form.qualifications })
+      setFlash({ type: 'success',
+                 text: t(form.id ? 'employees.flashUpdated' : 'employees.flashCreated') })
       setShowForm(false)
       load()
     } catch (err) {

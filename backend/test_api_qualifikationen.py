@@ -290,3 +290,83 @@ def test_ein_mitarbeiter_sieht_seine_eigenen_nachweise(hr_client):
     daten = hr_client.get('/employees/%d/data-export' % anna['id']).json
 
     assert [q['name'] for q in daten['qualifications']] == ['Ersthelfer']
+
+
+# ---------- Aus dem Review zu PR #32 ----------
+
+
+def test_ein_nicht_listenwert_loescht_nichts(hr_client):
+    """`{"qualifications": false}` lief ueber `or []` in ein leeres Ersetzen -
+    also loeschte ein Tippfehler still alle Nachweise der Person.
+
+    Dieselbe Klasse wie in Etappe 6a: eine Eingabe, die die Pruefung passiert
+    und danach etwas anderes tut, als sie aussieht.
+    """
+    nachweis = _nachweis(hr_client)
+    anna = _anna(hr_client)
+    _gib(hr_client, anna, nachweis)
+
+    antwort = hr_client.put('/employees/%d/qualifications' % anna['id'],
+                            json={'qualifications': False})
+
+    assert antwort.status_code == 400, antwort.json
+    assert hr_client.get('/employees/%d' % anna['id']).json['qualifications']
+
+
+def test_eine_leere_liste_loescht_weiterhin(hr_client):
+    """Gegenprobe: das Ersetzen mit nichts ist eine Aussage und bleibt sie."""
+    nachweis = _nachweis(hr_client)
+    anna = _anna(hr_client)
+    _gib(hr_client, anna, nachweis)
+
+    antwort = hr_client.put('/employees/%d/qualifications' % anna['id'],
+                            json={'qualifications': []})
+
+    assert antwort.status_code == 200, antwort.json
+    assert hr_client.get('/employees/%d' % anna['id']).json['qualifications'] == []
+
+
+def test_eine_zeichenkette_ist_keine_kennungsliste(hr_client):
+    """parse_int_list('12') laeuft ueber die Zeichen und ergibt [1, 2] -
+    zwei Nachweise, die niemand genannt hat."""
+    _nachweis(hr_client)
+    art = _schichtart(hr_client)
+
+    antwort = hr_client.put('/shift-types/%d/qualifications' % art['id'],
+                            json={'qualification_ids': '12'})
+
+    assert antwort.status_code == 400, antwort.json
+
+
+def test_die_bestaetigung_ist_uebersetzt(hr_client):
+    """t() faellt bei einem unbekannten Schluessel auf den Schluessel selbst
+    zurueck - die Meldung stuende dann als "shift_type_updated" da."""
+    art = _schichtart(hr_client)
+
+    antwort = hr_client.put('/shift-types/%d/qualifications' % art['id'],
+                            json={'qualification_ids': []})
+
+    assert antwort.json['message'] != 'shift_type_updated'
+
+
+def test_das_anonymisieren_nimmt_die_nachweise_mit(hr_client):
+    """Ein Nachweis ist eine persoenliche Angabe.
+
+    Etappe 5i raeumt beim Loeschen Fenster, gesperrte Tage, Abwesenheiten und
+    erlaubte Schichtarten weg - die Nachweise kamen spaeter dazu und standen
+    nicht auf der Liste. Ein Grabstein mit Ersthelferschein ist genau das, was
+    die Anonymisierung verhindern soll.
+    """
+    from app import get_db
+
+    nachweis = _nachweis(hr_client)
+    anna = _anna(hr_client)
+    _gib(hr_client, anna, nachweis, valid_until='2027-01-01')
+
+    hr_client.delete('/employees/%d' % anna['id'])
+
+    with hr_client.application.app_context():
+        cursor = get_db().cursor()
+        cursor.execute('SELECT COUNT(*) AS n FROM employee_qualifications '
+                       'WHERE employee_id = ?', (anna['id'],))
+        assert cursor.fetchone()['n'] == 0

@@ -221,6 +221,14 @@ TRANSLATIONS = {
         'de': 'Den Nachweis „{name}" gibt es bereits.',
         'en': 'The certificate “{name}” already exists.',
     },
+    'qualification_list_required': {
+        'de': 'Es wird eine Liste erwartet.',
+        'en': 'A list is expected.',
+    },
+    'qualification_requirements_saved': {
+        'de': 'Verlangte Nachweise gespeichert',
+        'en': 'Required certificates saved',
+    },
     'qualification_not_found': {
         'de': 'Nachweis nicht gefunden',
         'en': 'Certificate not found',

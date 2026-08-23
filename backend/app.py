@@ -1204,6 +1204,10 @@ def delete_employee(employee_id):
         'DELETE FROM employee_unavailable_dates WHERE employee_id = ?',
         'DELETE FROM employee_allowed_shift_types WHERE employee_id = ?',
         'DELETE FROM employee_absences WHERE employee_id = ?',
+        # Ein Nachweis ist eine persoenliche Angabe. Sie kamen nach 5i dazu
+        # und standen deshalb nicht auf dieser Liste - ein Grabstein mit
+        # Ersthelferschein ist genau das, was die Anonymisierung verhindert.
+        'DELETE FROM employee_qualifications WHERE employee_id = ?',
     ):
         cursor.execute(statement, (employee_id,))
 
@@ -3197,9 +3201,14 @@ def set_employee_qualifications(employee_id):
     if not cursor.fetchone():
         return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
 
-    eintraege = (request.get_json(silent=True) or {}).get('qualifications') or []
-    if not isinstance(eintraege, list):
-        return jsonify({'message': t(g.lang, 'request_body_must_be_object')}), 400
+    # Vor dem DELETE geprueft, und ohne `or []`: `{"qualifications": false}`
+    # faellt sonst auf eine leere Liste durch und loescht alles, was diese
+    # Person hat - ein Tippfehler, der wie eine Absicht aussieht. Eine leere
+    # Liste bleibt ausdruecklich erlaubt, sie ist eine Aussage.
+    rumpf = request.get_json(silent=True)
+    if not isinstance(rumpf, dict) or not isinstance(rumpf.get('qualifications'), list):
+        return jsonify({'message': t(g.lang, 'qualification_list_required')}), 400
+    eintraege = rumpf['qualifications']
 
     gesehen = set()
     zeilen = []
@@ -3246,9 +3255,14 @@ def set_shift_type_qualifications(shift_type_id):
     if not cursor.fetchone():
         return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
 
-    ids = (request.get_json(silent=True) or {}).get('qualification_ids')
+    # parse_int_list laeuft ueber alles Iterierbare, also auch ueber die
+    # Zeichen von '12' - das ergaebe die Nachweise 1 und 2, die niemand
+    # genannt hat. Erst die Liste, dann die Zahlen darin.
+    rumpf = request.get_json(silent=True)
+    if not isinstance(rumpf, dict) or not isinstance(rumpf.get('qualification_ids'), list):
+        return jsonify({'message': t(g.lang, 'qualification_list_required')}), 400
     try:
-        ids = parse_int_list(ids)
+        ids = parse_int_list(rumpf['qualification_ids'])
     except ValueError as err:
         return jsonify({'message': str(err)}), 400
 
@@ -3264,7 +3278,7 @@ def set_shift_type_qualifications(shift_type_id):
             'INSERT INTO shift_type_qualifications (shift_type_id, qualification_id) '
             'VALUES (?, ?)', (shift_type_id, qualification_id))
     connection.commit()
-    return jsonify({'message': t(g.lang, 'shift_type_updated'),
+    return jsonify({'message': t(g.lang, 'qualification_requirements_saved'),
                     'required_qualifications': sorted(set(ids))}), 200
 
 
