@@ -81,10 +81,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 bis 11 gemergt und deployt (PR #16–#33); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 12 gemergt und deployt (PR #16–#34); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 555 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 48 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 566 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 52 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0017`. `0017_qualifications` legt den Nachweiskatalog und zwei Verknüpfungstabellen an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -978,6 +978,29 @@ nicht Inaktive.
 **Aus dem Review:** `.flash-warning` gab es im Stylesheet nie — seit Etappe 8 setzen mehrere
 Seiten `type: 'warning'`, und der Kasten blieb unformatiert. Rückwirkend hat also auch die
 Tauschseite ihre Hinweise unsichtbar angezeigt.
+
+## Etappe 12 — abgeschlossen, gemergt, deployt
+
+Keine Spec, wie 11: eine Lücke schließen, keine Etappe planen.
+
+Etappe 11 hat behoben, dass „Plan erzeugen" auf einer leeren Datenbank schweigend nichts tut —
+aber erst *nachdem* jemand gedrückt hat. `GET /setup-status` nennt es vorher, und die Planseite
+zeigt es **nur, solange etwas fehlt.**
+
+**Die Entscheidung, die man hinterfragen wird: nur drei Dinge stehen drin.** Kein aktiver
+Mitarbeiter, keine Schichtart, kein Bedarfsband — mehr verhindert keinen Plan. Eine Liste, die
+auch alles Wählbare aufzählt, ist eine Aufgabenliste, die nie leer wird, und eine Liste, die nie
+leer wird, wird ignoriert.
+
+**Daneben `notes`** für das, was wissenswert ist und nichts verhindert (fehlendes Bundesland).
+`ready` bleibt `true`, auch wenn Hinweise offen sind — mit eigenem Test.
+
+**In keiner der beiden Listen: die § 10-Frage.** „Nicht ausgenommen" ist keine fehlende Angabe,
+sondern genau das, was § 9 Abs. 1 sagt. Sie als Mangel zu führen hieße, den Regelfall zum
+Versäumnis zu erklären.
+
+Im Browser durchgespielt statt behauptet: leere Datenbank → drei benannte Lücken mit Link →
+gesetzt → Kasten verschwindet → 21 Schichten, vollständig besetzt.
 
 ## Arbeitsweise
 
