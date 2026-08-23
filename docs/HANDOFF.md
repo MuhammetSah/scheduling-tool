@@ -24,19 +24,22 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. **Etappe 5 ist vollständig**, und **Etappe 6a** hat den ersten Teil
-der zurückgestellten Befunde abgearbeitet. Alles ist gemergt und deployt; es gibt keine offenen
+Es ist nichts halb fertig. **Etappe 5 ist vollständig**, und **6a und 6b** haben zwei der vier
+Bündel zurückgestellter Befunde abgearbeitet. Alles ist gemergt und deployt; es gibt keine offenen
 Branches und keine offenen Pull Requests.
 
 Die Roadmap ist abgearbeitet. Was jetzt noch offen liegt, sind die **restlichen zurückgestellten
 Befunde** — siehe den eigenen Abschnitt. Sie sind gruppiert, nicht einzeln abzuarbeiten:
 
-| Bündel | Was drin ist |
-|---|---|
-| **Sperren am Anmeldeweg** | `is_locked_out`/`record_attempt` ohne Zeilensperre, der `password_not_set_yet`-Zweig ohne Zählung |
-| **Testschulden** | fester `10/9/11` statt `security.MAX_FAILED_ATTEMPTS`, ungepinntes `ortools`, Cache-Schlüssel in `ci.yml`, `Project Structure` im README, Lücken in zwei Rundlauftests |
-| **Eindeutigkeit auf `employee_availability`** | dasselbe Fenster zweimal ist doppelt gemeldet |
-| **Leistung** | zwei Befunde, beide mit „erst angehen, wenn der Benchmark es zeigt" markiert — er zeigt es nicht |
+| Bündel | Was drin ist | Stand |
+|---|---|---|
+| ~~Sperren am Anmeldeweg~~ | `is_locked_out`/`record_attempt` ohne Zeilensperre, der `password_not_set_yet`-Zweig ohne Zählung | **erledigt in 6b** |
+| **Testschulden** | ungepinntes `ortools`, Cache-Schlüssel in `ci.yml`, Lücken in zwei Rundlauftests, zwei Validierungstests, die nur den Status prüfen, ein irreführender Docstring | offen |
+| **Eindeutigkeit auf `employee_availability`** | dasselbe Fenster zweimal ist doppelt gemeldet; keine CHECK-Constraints | offen |
+| **Leistung** | zwei Befunde, beide mit „erst angehen, wenn der Benchmark es zeigt" markiert — er zeigt es nicht | offen, absichtlich |
+
+Aus den Testschulden sind `10/9/11` und der `Project Structure`-Block in 6b mitgegangen: sie lagen
+in Dateien, die ohnehin angefasst wurden. Der Rest gehört zusammen.
 
 **Bevor du daraus etwas nimmst: prüfe, ob es noch stimmt.** In Etappe 6a war einer der Befunde
 längst behoben, und ungeprüft danach zu arbeiten hieße, Vorhandenes zu „reparieren".
@@ -51,10 +54,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 und 6a gemergt und deployt (PR #16–#26); die API antwortet mit 200 |
+| `main` | Etappe 5, 6a und 6b gemergt und deployt (PR #16–#27); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 456 passed / 36 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 459 passed / 38 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -757,6 +760,37 @@ weitere: `parse_int_list()` (`unavailable_weekdays`, `allowed_shift_types`) und
 innerhalb jeder gültigen Spanne und deshalb stumm. **Wer eine Fehlerklasse findet, behebt sie im
 Parser, nicht an den Aufrufstellen, die ihm gerade eingefallen sind.**
 
+## Etappe 6b — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-6b-anmeldeweg-design.md`](superpowers/specs/2026-08-23-etappe-6b-anmeldeweg-design.md)
+
+Beide Befunde am Anmeldeweg beschrieben denselben Mangel aus verschiedenen Richtungen: **die
+Grenze von zehn Versuchen je Viertelstunde ließ sich umgehen.**
+
+**Der Zweig für eingeladene Konten kehrte zurück, bevor irgendetwas gezählt wurde.** Seine
+Meldung verrät — anders als die einheitliche Meldung überall sonst —, dass es diesen
+Benutzernamen gibt. Das ist eine bewusste Abwägung zugunsten des eingeladenen Menschen und bleibt
+so; unbegrenzt und ungezählt war sie aber eine Namensliste zum Nulltarif. Der Versuch wird jetzt
+gezählt wie jeder andere.
+
+**Prüfen und Zählen waren zwei Schritte.** N gleichzeitige Anfragen lasen alle denselben Stand
+unterhalb der Grenze und kamen alle durch — aus zehn Versuchen wurden so viele, wie ein Angreifer
+Verbindungen aufmacht. `security.attempt_guard()` serialisiert beides je Benutzername über einen
+Postgres-Advisory-Lock, nach dem Vorbild von `_migration_lock()`.
+
+**Je Benutzername und nicht global**, mit eigener Gegenprobe: ein globaler Lock stellt jede
+Anmeldung im Haus hinter jede andere, und wäre im Haupttest ebenfalls grün. Die Zwei-Zahlen-Form
+(`pg_advisory_lock(class, key)`) schließt eine Kollision mit dem Migrations-Lock aus, statt sie
+nur unwahrscheinlich zu machen. Sitzungsgebunden statt transaktionsgebunden, weil der Sperrpfad
+mit 429 antwortet, ohne zu committen.
+
+**Auf SQLite bewusst kein Lock** — dieselbe Abwägung, die der Migrations-Runner notiert.
+
+**Das Wichtigste für eine neue Sitzung:** die beiden Race-Tests laufen **nur** im
+`backend-postgres`-Job. Ein grüner Job allein beweist nichts; er könnte übersprungen haben.
+Beim Merge von PR #27 wurde im Joblog nachgesehen, dass beide wirklich `PASSED` meldeten
+(474 passed, 0 skipped). Wer die Drosselung anfasst, macht das wieder.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -857,6 +891,12 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     `parse_int_list()` und `parse_optional_hours()` lehnen das ab — **neue Eingabefelder gehen
     durch einen dieser Parser, nicht durch ein nacktes `int()`.**
 
+21. **Ein grüner `backend-postgres`-Job beweist nicht, dass die Postgres-Tests gelaufen sind.**
+    Sie überspringen sich selbst, wenn `TEST_DATABASE_URL` fehlt, und ein Lauf aus lauter
+    übersprungenen Tests meldet Erfolg. Wer etwas anfasst, dessen Nachweis dort liegt — die
+    Dialektschicht, die Migrationen, die beiden Advisory-Locks —, sieht im Joblog nach, dass die
+    betreffenden Tests wirklich `PASSED` melden. Bei PR #27 waren es 474 passed, 0 skipped.
+
 ## Offen — liegt beim Nutzer
 
 **Erledigt am 22.08.2026:** Etappe 2 und 3 gemergt und deployt (PR #13, #14), alle Migrationen
@@ -952,9 +992,9 @@ Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 
 - `ci.yml` Cache-Schlüssel deckt nur `requirements-dev.txt` ab
 - `ortools` in `requirements-dev.txt` ungepinnt
-- `password_not_set_yet`-Zweig in `login()` zählt keine Versuche
-- Drosselungstests verdrahten `10/9/11` fest statt `security.MAX_FAILED_ATTEMPTS`
-- `is_locked_out`/`record_attempt` sind check-then-act ohne Zeilensperre
+- ~~`password_not_set_yet`-Zweig in `login()` zählt keine Versuche~~ — **erledigt in 6b**
+- ~~Drosselungstests verdrahten `10/9/11` fest~~ — **erledigt in 6b**
+- ~~`is_locked_out`/`record_attempt` sind check-then-act ohne Zeilensperre~~ — **erledigt in 6b**, über einen Advisory-Lock je Benutzername statt einer Zeilensperre
 - `HTTPException`-Fallback liefert für andere Codes als 404/405 einen unübersetzten Literal (aktuell unerreichbar)
 - ~~`handleMonthChange` setzt den geladenen Plan nicht zurück~~ — **war bereits behoben**, in Etappe 6a nachgeprüft
 - `fetchSchedule()` schluckt jeden GET-Fehler zu `null`
@@ -980,9 +1020,9 @@ Neu aus dem Abschluss-Review von Etappe 1:
 - die Fensterprüfung rechnet im innersten Schleifenkörper von `eligible_candidates()` alle
   `"HH:MM"`-Strings pro Kandidat und Knoten neu. Datenbankseitig ist alles vorgeladen, nur
   rechnerisch. Erst angehen, wenn der Benchmark es zeigt
-- der `Project Structure`-Block im README listet seit Etappe 3 zwar `migrations/` und
-  `coverage_model.py`, weiterhin aber nicht `security.py`, `timeutil.py` oder die seit
-  Etappe 0 hinzugekommenen Testdateien
+- ~~der `Project Structure`-Block im README ist im Rückstand~~ — **erledigt in 6b**. `security.py`
+  und `timeutil.py` standen entgegen der Notiz längst drin; nachgetragen wurden die neuen
+  Testdateien und die Migrationsspanne
 - ~~Spec §6 sah eine eigene Route `GET/PUT /employees/<id>/availability` vor~~ — **erledigt in
   Etappe 4** (Vorarbeit 1). Lesen darf man sich selbst, schreiben bleibt HR
 
