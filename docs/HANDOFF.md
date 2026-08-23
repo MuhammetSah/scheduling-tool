@@ -42,11 +42,12 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
-**Etappe 8 hat den geführten Schichttausch gebaut.** Offen bleiben aus der Roadmap die
-Qualifikations-Zuordnung und die beiden ArbZG-Regeln, die das Tool bewusst der Personalabteilung
-überlässt: die Lage der Pause innerhalb eines Blocks (§ 4 Satz 3) und die Frage, ob der Betrieb
-überhaupt unter die Sonntagsruhe fällt (§ 9, § 10). Beides ist **keine Fortsetzung, sondern eine
-Festlegung des Nutzers**, und nichts davon ist begonnen.
+**Etappe 8 hat den geführten Schichttausch gebaut, Etappe 9 die letzten beiden ArbZG-Regeln.**
+Damit prüft das Tool alles, was es an Arbeitszeitrecht abbilden kann.
+
+**Offen bleibt aus der Roadmap genau ein Punkt: die Qualifikations-Zuordnung** — eine Schicht
+verlangt einen Nachweis, und nur wer ihn hat, darf darauf. Das ist **keine Fortsetzung, sondern
+eine Festlegung des Nutzers**, und es ist nicht begonnen.
 
 **Eine Erfahrung aus drei Aufräum-Etappen, die eine neue Sitzung sich sparen kann:** von den rund
 dreißig Einträgen dieser Liste waren **vier bereits erledigt**, ohne dass es jemand notiert hatte.
@@ -66,12 +67,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 bis 8 gemergt und deployt (PR #16–#30); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 9 gemergt und deployt (PR #16–#31); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 508 passed / 39 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 39 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 528 passed / 40 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 41 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0015`. `0015_swap_requests` legt die Tauschanträge an |
+| Migrationen | `0001`–`0016`. `0016_break_position` legt `shift_assignments.break_start` an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -886,6 +887,29 @@ umdreht.
 Personalabteilung eine der Schichten zwischendurch um, tauschte die Genehmigung sonst, *wer gerade
 dort steht*. Und `break_minutes` gehört zum Platz wie die Zeiten — was mitreist, reist ganz mit.
 
+## Etappe 9 — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-9-arbzg-rest-design.md`](superpowers/specs/2026-08-23-etappe-9-arbzg-rest-design.md)
+
+**§ 4 Satz 3 war nicht prüfbar, weil das Modell fehlte.** Das Tool kannte nur `break_minutes` —
+eine Dauer ohne Uhrzeit. Eine halbe Stunde Pause ab Schichtbeginn erfüllt Satz 1, verstößt gegen
+Satz 3 und sah in der Datenbank genauso aus wie eine mittige. § 4 Satz 1 verlangt ohnehin „im
+voraus feststehende Ruhepausen"; eine Dauer ohne Lage steht nicht fest.
+
+**Die Spalte bleibt NULL-bar und ohne Vorgabe**, und das ist die Entscheidung, die man hinterfragen
+wird: für jeden Block, den dieses Tool bauen kann, gibt es *immer* eine zulässige Lage. Eine
+fehlende Angabe ist deshalb nie ein bekannter Verstoß — sie zu bemängeln hieße, bei jedem Block zu
+warnen, sie zu erzwingen, jeden Bestandsplan für ungültig zu erklären.
+
+**Die § 10-Ausnahme schaltet § 11 nicht mit ab.** Die fünfzehn freien Sonntage und der
+Ersatzruhetag sind das Gegengewicht *zu* § 10 und gelten gerade dann, wenn er greift. Eine
+Ausnahme, die beides abschaltete, machte aus einer Erlaubnis eine Freistellung. Eigener Test.
+
+**Die Lehre, und sie ist eine Wiederholung:** `perform_swap()` reichte `break_minutes` weiter,
+`break_start` aber nicht — die Sperre stand in `ARBZG_BLOCKERS` und griff nie. Genau dasselbe war
+eine Etappe zuvor mit `break_minutes` passiert. Fallstrick 24 sagt „was zum Platz gehört, reist
+ganz mit"; **„ganz" heißt jedes Feld, nicht das zuletzt hinzugefügte.**
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -1005,10 +1029,13 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     werden — in Etappe 8 war der ganze Entwurf einmal fertig, bevor auffiel, dass sein Hauptnutzer
     die zweite Hälfte der Auswahl gar nicht sehen kann. Die Antwort ist nicht, ihm mehr zu zeigen.
 
-24. **Was zum Platz gehört, reist ganz mit.** Eine Zuweisung trägt Zeiten *und* `break_minutes`,
-    und beide gehören dem Platz, nicht der Person. Wer die Zuweisung weiterreicht und nur die
-    Zeiten mitnimmt, rechnet stillschweigend mit der gesetzlichen Mindestpause statt der
-    vereinbarten — und damit mit weniger Arbeitszeit, als anfällt.
+24. **Was zum Platz gehört, reist ganz mit — und „ganz" heißt jedes Feld.** Eine Zuweisung trägt
+    Zeiten, `break_minutes` *und* `break_start`; alle drei gehören dem Platz, nicht der Person.
+    Wer sie weiterreicht und eines auslässt, rechnet stillschweigend falsch: ohne die Dauer mit
+    der gesetzlichen Mindestpause statt der vereinbarten, ohne die Lage gar nicht nach § 4 Satz 3.
+    **Das ist zweimal hintereinander passiert** (Etappe 8 und 9, beide Male im Review gefunden),
+    einmal je Feld. Wer `constraint_findings()` aus einem neuen Pfad aufruft, geht die
+    Parameterliste durch, statt sich zu erinnern.
 
 ## Offen — liegt beim Nutzer
 
