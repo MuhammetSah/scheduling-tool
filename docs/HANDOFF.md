@@ -42,11 +42,11 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
-**Was jetzt kommt, ist eine Festlegung des Nutzers, keine Fortsetzung.** Die Roadmap nennt noch
-einen geführten Schichttausch (die Tauschfunktion selbst gibt es bereits), Qualifikations-Zuordnung,
-und die beiden ArbZG-Regeln, die das Tool bewusst der Personalabteilung überlässt: die Lage der
-Pause innerhalb eines Blocks (§ 4 Satz 3) und die Frage, ob der Betrieb überhaupt unter die
-Sonntagsruhe fällt (§ 9, § 10). Nichts davon ist begonnen.
+**Etappe 8 hat den geführten Schichttausch gebaut.** Offen bleiben aus der Roadmap die
+Qualifikations-Zuordnung und die beiden ArbZG-Regeln, die das Tool bewusst der Personalabteilung
+überlässt: die Lage der Pause innerhalb eines Blocks (§ 4 Satz 3) und die Frage, ob der Betrieb
+überhaupt unter die Sonntagsruhe fällt (§ 9, § 10). Beides ist **keine Fortsetzung, sondern eine
+Festlegung des Nutzers**, und nichts davon ist begonnen.
 
 **Eine Erfahrung aus drei Aufräum-Etappen, die eine neue Sitzung sich sparen kann:** von den rund
 dreißig Einträgen dieser Liste waren **vier bereits erledigt**, ohne dass es jemand notiert hatte.
@@ -66,12 +66,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5, 6 und 7 gemergt und deployt (PR #16–#29); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 8 gemergt und deployt (PR #16–#30); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 476 passed / 38 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 508 passed / 39 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 39 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
+| Migrationen | `0001`–`0015`. `0015_swap_requests` legt die Tauschanträge an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -853,6 +853,39 @@ Review, nicht von mir.
 **`boundary=None` stellt das alte Verhalten her.** Das ist es, was die 23 Kompatibilitätstests und
 den Benchmark unverändert lässt.
 
+## Etappe 8 — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-8-schichttausch-design.md`](superpowers/specs/2026-08-23-etappe-8-schichttausch-design.md)
+
+**Die tragende Entscheidung, und die einzige, die eine neue Sitzung wirklich kennen muss:** ein von
+Mitarbeitern beantragter Tausch wird **abgelehnt**, wenn er zwingendes Arbeitszeitrecht bräche
+(Ruhezeit, Tagesarbeitszeit, Pause, siebter Tag, Sonntagsbudget). Der Direkttausch der
+Personalabteilung **warnt weiterhin nur**.
+
+Der Grund ist nicht Vorsicht, sondern die Adressierung des Gesetzes: § 22 Abs. 1 ArbZG macht einen
+Verstoß zur Ordnungswidrigkeit **des Arbeitgebers**, und §§ 3 und 5 lassen sich nicht durch
+Einzelabrede abbedingen. Die Personalabteilung darf überstimmen, weil sie haftet und etwas wissen
+kann, das das Tool nicht weiß (§ 14 Notfall, § 7 Tarifvertrag). Zwei Kolleginnen dürfen es nicht.
+
+**Der Feiertag blockiert nicht.** § 9 verbietet, § 10 nimmt Branchen aus, und auf welcher Seite
+dieser Betrieb steht, ist eine Tatsache über den Betrieb. Zu blockieren hieße, sie zu behaupten.
+`ARBZG_BLOCKERS` in `app.py` führt die Grenze samt Begründung je Eintrag.
+
+**Der Fehler, den ich fast ausgeliefert hätte:** der erste Entwurf ließ den Antragsteller beide
+Schichten benennen. Ein Mitarbeiter sieht aber nur seine eigenen (5f) — das Merkmal wäre für seine
+Hauptnutzer unbenutzbar gewesen. Aufgefallen erst beim Anschließen der Oberfläche. Jetzt nennt der
+Antrag eine **Person**, und der Partner wählt selbst, was er dagegen gibt; `GET /colleagues` gibt
+dafür Namen und nichts über Zeiten.
+
+**`perform_swap()` tauscht und liest danach**; wer nur gefragt hat, rollt zurück. Vorher zu
+urteilen beurteilte den falschen Zustand — zwei Schichten an benachbarten Tagen meldeten eine
+Ruhezeitverletzung, die der Tausch gerade auflöst. Der Test dazu wird rot, wenn man die Reihenfolge
+umdreht.
+
+**Aus dem Review:** „dazwischen liegen Tage" reicht weiter als die Rechtslage. Setzt die
+Personalabteilung eine der Schichten zwischendurch um, tauschte die Genehmigung sonst, *wer gerade
+dort steht*. Und `break_minutes` gehört zum Platz wie die Zeiten — was mitreist, reist ganz mit.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -965,6 +998,17 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     das auf. Zwei Spalten zu nehmen, wo eine Funktion drei Ebenen auflöst, ist kein Abkürzen,
     sondern ein anderes Datenmodell. Dasselbe gilt für die Pause
     (`effective_break_minutes`/`legal_break_minutes`).
+
+23. **Was ein Mitarbeiter sieht, entscheidet, was er bedienen kann.** Seit 5f liefert
+    `GET /schedules/<j>/<m>` einem Mitarbeiterkonto ausschließlich dessen eigene Schichten. Jedes
+    neue Merkmal, das einen Mitarbeiter etwas *auswählen* lässt, muss daran zuerst gemessen
+    werden — in Etappe 8 war der ganze Entwurf einmal fertig, bevor auffiel, dass sein Hauptnutzer
+    die zweite Hälfte der Auswahl gar nicht sehen kann. Die Antwort ist nicht, ihm mehr zu zeigen.
+
+24. **Was zum Platz gehört, reist ganz mit.** Eine Zuweisung trägt Zeiten *und* `break_minutes`,
+    und beide gehören dem Platz, nicht der Person. Wer die Zuweisung weiterreicht und nur die
+    Zeiten mitnimmt, rechnet stillschweigend mit der gesetzlichen Mindestpause statt der
+    vereinbarten — und damit mit weniger Arbeitszeit, als anfällt.
 
 ## Offen — liegt beim Nutzer
 
