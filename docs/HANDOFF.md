@@ -631,8 +631,9 @@ Protokoll, dessen Einträge mit dem Konto verschwinden, ist keines.
    Fehlerart, die ein solcher Haken erzeugt. Der erste Test der Datei prüft deshalb
    ausdrücklich, dass ein Eintrag *entsteht*.
 
-**Die Aufbewahrungsfrist fehlt und ist bewusst offen** — das Log ist selbst personenbezogen. Sie
-gehört zum DSGVO-Teil und ist eine Entscheidung des Nutzers.
+**Die Aufbewahrungsfrist kam in 5i nach** — das Log ist selbst personenbezogen und fällt jetzt
+mit der Sechsmonatsfrist weg. Eine Route zum Leeren gibt es weiterhin nicht: was sich auf
+Knopfdruck leert, ist kein Protokoll.
 
 ## Etappe 5h — abgeschlossen, gemergt, deployt
 
@@ -1025,7 +1026,7 @@ Design: [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](su
   `coverage_requirements`, schneidet auf die Arbeitszeitfenster zu und kann den geteilten
   Dienst. `shift_requirements` wird nicht mehr gelesen und in Etappe 5 entfernt. Damit geht das
   Tool über Papershift und Deputy hinaus — dort wird nicht automatisch zugeschnitten.
-- **Etappe 5** — kein Vorhaben, sondern ein Bündel aus sechs unabhängigen Teilen. Siehe den
-  eigenen Abschnitt oben: `shift_requirements` entfernen, Veröffentlichen-Workflow, Audit-Log,
-  Exporte, DSGVO und das Arbeitszeitrecht. Letzteres zerfällt seinerseits in 5a (erledigt),
-  5b (Sonn- und Feiertage) und 5c (Achtstundenschnitt)
+- **Etappe 5** — vollständig. Kein Vorhaben, sondern ein Bündel aus neun unabhängigen Teilen,
+  jeder mit eigener Spec: das Arbeitszeitrecht (5a Ruhezeiten und Pausen, 5b Sonn- und
+  Feiertage, 5c Achtstundenschnitt, 5d Feiertagskalender), `shift_requirements` entfernen (5e),
+  Veröffentlichen-Workflow (5f), Änderungsprotokoll (5g), Exporte (5h), DSGVO (5i)

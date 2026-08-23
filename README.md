@@ -84,7 +84,7 @@ The log records **requests, not narrative**: time, user, method, path, response 
 - The hook **rolls back before writing**, on the request's own connection. Without that, committing the log entry also commits whatever a half-failed request left pending — an existing test caught it when an invalid employee suddenly persisted.
 - The obvious alternative, a connection of its own per request, is more decoupled but doubled the test suite's runtime (68 to 134 seconds) and would mean an extra Postgres connection for every write against an instance with a limited supply.
 
-There is **no route to clear it**. Something that empties at the press of a button is not a log. Retention is real and still open — the log is itself personal data and needs a period — but that is a decision for the operator and belongs with the GDPR work.
+There is **no route to clear it**. Something that empties at the press of a button is not a log. What the log does have is a *period*: it is personal data, so entries fall away with the retention clean-up described under [Data protection](#data-protection) — six months by default. That is deletion by rule, not by button.
 
 ## Exports
 
@@ -381,7 +381,7 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 - **v1.1** – a guided shift-swap flow (the underlying swap capability already exists)
 - Skill/qualification matching, so a shift can require a specific certification
 - Generation-time weekly-hours/rest-period checks that see across a month boundary (currently only the manual-edit warning path does — see [Part-time / weekly hours](#part-time--weekly-hours))
-- Remaining production-readiness work: and the ArbZG rules this tool still leaves to HR — the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
+- The ArbZG rules this tool still leaves to HR: the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
