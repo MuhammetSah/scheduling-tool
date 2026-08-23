@@ -77,6 +77,16 @@ aussehende Zeile für einen Tag, den niemand genannt hat.
 
 `parse_weekday()` lehnt beides ab.
 
+**Das Review zu PR #26 hat gezeigt, dass das zu kurz griff.** Behoben waren die drei Stellen, für
+die Tests geschrieben worden waren — nicht die Klasse. Dieselbe Schwäche stand noch in
+`parse_int_list()` (`unavailable_weekdays`, `allowed_shift_types`) und in
+`parse_optional_hours()`, wo `float(True)` eine Tagesgrenze von einer Stunde ergibt: innerhalb
+jeder gültigen Spanne und deshalb stumm.
+
+Die Behebung liegt jetzt in den **Parsern**, nicht an den Aufrufstellen. Eine Gegenprobe über ein
+zweites Feld desselben Parsers (`weekly_hours`) hält das fest — und eine dritte, dass eine echte
+`1` weiterhin durchgeht.
+
 ## 5. Ein 500er für einen Klientenfehler
 
 Beim Schreiben der Tests selbst gestolpert: `PUT /employees/<id>/availability` ruft `.get()` auf
@@ -103,9 +113,9 @@ liefert UTC und verschiebt für jeden östlich von Greenwich am Abend den Tag.
 
 ## 7. Tests
 
-`backend/test_api_eingaben.py` (11) und `frontend/src/pages/Employees.test.jsx` (5).
+`backend/test_api_eingaben.py` (16) und `frontend/src/pages/Employees.test.jsx` (5).
 
-Jeder Befund hat einen Test, der **vor** der Behebung rot war — neun von elf waren es. Dazu die
+Jeder Befund hat einen Test, der **vor** der Behebung rot war — dreizehn von sechzehn waren es. Dazu die
 Gegenproben: ein unsinniges Datum bleibt abgelehnt, genau zehn Stunden gehen durch, und die beiden
 Fenster-Meldungen dürfen nicht dieselbe werden.
 

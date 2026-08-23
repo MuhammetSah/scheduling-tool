@@ -645,9 +645,17 @@ def me():
 # ---------- serialization helpers ----------
 
 def parse_int_list(value):
+    """Whole numbers, rejecting the booleans int() quietly accepts.
+
+    int(True) is 1: a stray `true` in allowed_shift_types becomes whichever
+    shift type happens to hold id 1, and in unavailable_weekdays it blocks
+    Tuesday. Both land inside the valid range, so nothing downstream objects.
+    """
     if not value:
         return []
     try:
+        if any(isinstance(v, bool) for v in value):
+            raise ValueError
         return [int(v) for v in value]
     except (TypeError, ValueError):
         # int(None), int({...}), int([...]) etc. all raise TypeError rather than
@@ -770,6 +778,12 @@ def parse_optional_hours(value, field_key):
     'weekly_hours_label') rather than a literal string, so the message comes
     out in the request's language regardless of which field failed.
     """
+    # float(True) is 1.0, so an unchecked boolean becomes a one-hour daily
+    # limit or a one-hour weekly target - inside every valid range, and
+    # therefore silent. Checked here rather than in the callers so the rule
+    # holds for every field that goes through this parser.
+    if isinstance(value, bool):
+        raise ValueError(t(g.lang, 'field_must_be_number', field=t(g.lang, field_key)))
     if value is None or value == '':
         return None
     try:
@@ -833,9 +847,8 @@ def replace_employee_constraints(connection, employee_id, data):
     cursor = connection.cursor()
 
     cursor.execute('DELETE FROM employee_unavailable_weekdays WHERE employee_id = ?', (employee_id,))
-    for weekday in parse_int_list(data.get('unavailable_weekdays')):
-        if not 0 <= weekday <= 6:
-            raise ValueError(t(g.lang, 'weekday_out_of_range'))
+    for weekday in data.get('unavailable_weekdays') or []:
+        weekday = parse_weekday(weekday)
         cursor.execute('INSERT INTO employee_unavailable_weekdays (employee_id, weekday) VALUES (?, ?)', (employee_id, weekday))
 
     cursor.execute('DELETE FROM employee_unavailable_dates WHERE employee_id = ?', (employee_id,))

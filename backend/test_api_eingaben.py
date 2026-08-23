@@ -127,6 +127,58 @@ def test_null_stunden_am_tag_werden_abgelehnt(hr_client):
     assert antwort.status_code == 400
 
 
+def test_ein_gesperrter_wochentag_ist_kein_wahrheitswert(hr_client):
+    """Aus dem Review zu PR #26: dieselbe Klasse, andere Stelle.
+
+    unavailable_weekdays ging ueber parse_int_list() und blieb bei int()
+    stehen. true sperrte den Dienstag.
+    """
+    anna = _anna(hr_client)
+
+    antwort = hr_client.put(f'/employees/{anna["id"]}', json={
+        'name': 'Anna', 'unavailable_weekdays': [True]})
+
+    assert antwort.status_code == 400
+
+
+def test_eine_erlaubte_schichtart_ist_kein_wahrheitswert(hr_client):
+    """Und noch eine: allowed_shift_types nimmt dieselbe Liste. true waere
+    die Schichtart mit der Nummer 1 - welche das ist, entscheidet der Zufall
+    der Anlagereihenfolge."""
+    anna = _anna(hr_client)
+
+    antwort = hr_client.put(f'/employees/{anna["id"]}', json={
+        'name': 'Anna', 'allowed_shift_types': [True]})
+
+    assert antwort.status_code == 400
+
+
+def test_eine_stundenzahl_ist_kein_wahrheitswert(hr_client):
+    """float(True) ist 1.0. Eine Tagesgrenze von einer Stunde, weil jemand
+    true geschickt hat - innerhalb der erlaubten Spanne und damit stumm."""
+    antwort = hr_client.post('/employees', json={
+        'name': 'Emma', 'email': 'emma@example.com', 'max_daily_hours': True})
+
+    assert antwort.status_code == 400
+
+
+def test_eine_wochenstundenzahl_auch_nicht(hr_client):
+    """Gegenprobe ueber ein zweites Feld desselben Parsers: die Behebung
+    gehoert in parse_optional_hours(), nicht in eine der Aufrufstellen."""
+    antwort = hr_client.post('/employees', json={
+        'name': 'Frida', 'email': 'frida@example.com', 'weekly_hours': True})
+
+    assert antwort.status_code == 400
+
+
+def test_eine_echte_stundenzahl_geht_weiterhin(hr_client):
+    """Gegenprobe: 1 ist als Zahl in Ordnung, nur als Wahrheitswert nicht."""
+    antwort = hr_client.post('/employees', json={
+        'name': 'Greta', 'email': 'greta@example.com', 'max_daily_hours': 1})
+
+    assert antwort.status_code in (200, 201), antwort.json
+
+
 def test_ein_wahrheitswert_ist_kein_wochentag(hr_client):
     """int(True) ist 1. Ein Fenster fuer Dienstag, weil jemand true schickt."""
     anna = _anna(hr_client)
