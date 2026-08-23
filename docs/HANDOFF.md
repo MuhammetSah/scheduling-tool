@@ -81,10 +81,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 bis 12 gemergt und deployt (PR #16–#34); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 13 gemergt und deployt (PR #16–#35); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 566 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 52 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 574 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 52 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0017`. `0017_qualifications` legt den Nachweiskatalog und zwei Verknüpfungstabellen an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -1002,6 +1002,38 @@ Versäumnis zu erklären.
 Im Browser durchgespielt statt behauptet: leere Datenbank → drei benannte Lücken mit Link →
 gesetzt → Kasten verschwindet → 21 Schichten, vollständig besetzt.
 
+## Etappe 13 — abgeschlossen, gemergt, deployt
+
+**Die beiden Leistungsbefunde sind erledigt, und zwar durch Messen.** Sie trugen seit ihrer
+Aufnahme die Notiz „erst angehen, wenn der Benchmark es zeigt"; gelaufen ist er dafür nie.
+
+`benchmark.py` endet jetzt mit einer Skalierungsprobe auf dem Produktionspfad, halbe Belegschaft
+im Fenster-Modus — genau dort sitzen beide Befunde.
+
+**Der Zuschnitt ist nicht der Engpass:** 1,36 Sekunden bei 2480 Blöcken. Die Notiz zu `plan_day()`
+ist damit eingelöst, mit Nein.
+
+**Die Wand ist eine andere, und sie war unbekannt.** `backtrack()` rekursiert einmal je Platz —
+die Blockzahl eines Monats *ist* die Stapeltiefe. Bei Pythons Standardgrenze laufen 930 Blöcke
+durch und 992 nicht mehr, also rund dreißig Blöcke am Tag: eine große Station, kein Gedankenspiel.
+Gescheitert ist es mit einem `RecursionError` an beliebiger Stelle tiefer (bei der Messung in
+`locale.getlocale()`), über die API als 500er.
+
+Jetzt eine benannte Ausnahme mit beiden Zahlen. **Die Grenze ist abgeleitet, nicht
+festgeschrieben** — aus `sys.getrecursionlimit()` und der aktuellen Stapeltiefe; unter Gunicorn
+ist sie eine andere als in einem Test.
+
+**Was bewusst offen bleibt, mit Kosten:** die Rekursion in eine Schleife umzuschreiben ist ein
+Eingriff in das heikelste Stück des Projekts (Branch-and-Bound samt Rücknahme von sechs
+Zustandsstrukturen, und die 23 Bestandstests decken nur Schichtzahlen ab). Die Rekursionsgrenze
+hochzusetzen verschiebt die Wand und tauscht eine saubere Ausnahme gegen einen möglichen harten
+Absturz. **Eine Grenze zu benennen ist nicht dasselbe wie sie aufzuheben** — aber es ist die
+Entscheidung, die man ohne Auftrag treffen darf.
+
+**Nebenbefund:** Stufe 2 liegt bei jeder Größe über 100 % des Acht-Sekunden-Budgets. Kein
+Überziehen, sondern die dokumentierte Strategie — bleiben Lücken, fährt AUTO einen zweiten Lauf.
+Zwei volle Budgets sind das Maximum, sechzehn Sekunden also der dokumentierte schlechteste Fall.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -1146,6 +1178,11 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     Von-Hand-Füllen. Erst fragen, was die Tests *benutzen*, dann entscheiden, ob es ein Hinweis
     oder ein Verbot wird.
 
+28. **Ein „erst wenn der Benchmark es zeigt" ist eine Aufgabe, keine Ablage.** Zwei
+    Leistungsbefunde standen zwölf Etappen lang mit dieser Notiz da, ohne dass jemand gemessen
+    hätte. Das Messen hat sie an einem Nachmittag erledigt — und dabei eine Grenze gefunden, die
+    niemand gesucht hat. **Wer eine Frage vertagt, notiert auch, wie man sie beantwortet.**
+
 ## Offen — liegt beim Nutzer
 
 **Erledigt am 22.08.2026:** Etappe 2 und 3 gemergt und deployt (PR #13, #14), alle Migrationen
@@ -1267,9 +1304,9 @@ Neu aus dem Abschluss-Review von Etappe 1:
   — **erledigt in Etappe 6a**. Abgelaufene Fenster bekommen einen eigenen Hinweis statt der
   Meldung für „gar keine Fenster": der Unterschied entscheidet, ob jemand ein Fenster anlegen
   oder eine Grenze ändern muss
-- die Fensterprüfung rechnet im innersten Schleifenkörper von `eligible_candidates()` alle
-  `"HH:MM"`-Strings pro Kandidat und Knoten neu. Datenbankseitig ist alles vorgeladen, nur
-  rechnerisch. Erst angehen, wenn der Benchmark es zeigt
+- ~~die Fensterprüfung rechnet im innersten Schleifenkörper von `eligible_candidates()` alle
+  `"HH:MM"`-Strings neu~~ — **gemessen in Etappe 13 mit halber Belegschaft im Fenster-Modus:
+  zeigt sich nicht.** Der Engpass ist die Rekursionstiefe, nicht die Rechnung
 - ~~der `Project Structure`-Block im README ist im Rückstand~~ — **erledigt in 6b**. `security.py`
   und `timeutil.py` standen entgegen der Notiz längst drin; nachgetragen wurden die neuen
   Testdateien und die Migrationsspanne
@@ -1339,9 +1376,9 @@ Weiterhin offen aus den Reviews von Etappe 3:
 
 Neu aus Etappe 4:
 
-- `plan_day()` läuft die probeweise Tagesbesetzung nach jedem einzelnen Zuschnitt komplett neu,
-  statt sie fortzuschreiben. Bei wenigen Blöcken pro Tag ist das billig, bei vielen quadratisch.
-  Erst angehen, wenn der Benchmark es zeigt
+- ~~`plan_day()` läuft die probeweise Tagesbesetzung nach jedem Zuschnitt neu~~ — **gemessen in
+  Etappe 13: zeigt sich nicht.** 1,36 Sekunden bei 2480 Blöcken, und dort greift längst die
+  Rekursionsgrenze
 - der Zuschnitt greift nur bei Mitarbeitern im `windows`-Modus. Jemand mit
   `availability_mode = 'anytime'`, dem nur die Tagesgrenze im Weg steht, bekommt kein gekürztes
   Stück angeboten — denkbar, aber nicht das, was die Spec unter Zuschnitt versteht
