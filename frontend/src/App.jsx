@@ -9,6 +9,7 @@ import Login from './pages/Login'
 import Register from './pages/Register'
 import Accounts from './pages/Accounts'
 import AuditLog from './pages/AuditLog'
+import SwapRequests from './pages/SwapRequests'
 import SetPassword from './pages/SetPassword'
 import Flash from './Flash'
 import { api, UnauthorizedError } from './api'
@@ -127,6 +128,7 @@ function App() {
             {user ? (
               <>
                 <NavLink to="/" end className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.schedule')}</NavLink>
+                <NavLink to="/swap-requests" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.swapRequests')}</NavLink>
                 {isHr && (
                   <>
                     <NavLink to="/employees" className={({ isActive }) => isActive ? 'active' : ''}>{t('nav.employees')}</NavLink>
@@ -156,6 +158,11 @@ function App() {
               <Route path="/" element={
                 <RequireAuth user={user} setupRequired={setupRequired}>
                   <SchedulePage setFlash={setFlash} user={user} />
+                </RequireAuth>
+              } />
+              <Route path="/swap-requests" element={
+                <RequireAuth user={user} setupRequired={setupRequired}>
+                  <SwapRequests setFlash={setFlash} user={user} />
                 </RequireAuth>
               } />
               <Route path="/employees" element={
