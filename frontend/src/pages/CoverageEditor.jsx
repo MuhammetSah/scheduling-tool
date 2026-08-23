@@ -234,6 +234,7 @@ function CoverageEditor({ setFlash }) {
                     type="button"
                     className="btn-danger btn-small"
                     title={t('coverageEditor.removeBandTitle')}
+                    aria-label={t('coverageEditor.removeBandTitle')}
                     onClick={() => removeBand(wd, band._key)}
                   >
                     ×

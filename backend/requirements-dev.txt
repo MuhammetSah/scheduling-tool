@@ -2,4 +2,10 @@
 # braucht nichts hiervon.
 -r requirements.txt
 pytest==9.1.1
-ortools
+
+# Gepinnt wie alles in requirements.txt, und aus demselben Grund: ein
+# unbeaufsichtigtes Release darf den naechsten CI-Lauf nicht brechen. Dass es
+# hier nur um den Benchmark geht, macht keinen Unterschied - ein roter Lauf
+# haelt genauso auf, und die Ursache waere dann eine Bibliothek, die niemand
+# angefasst hat.
+ortools==9.15.6755
