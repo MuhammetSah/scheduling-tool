@@ -30,6 +30,7 @@ gezeigt.
 
 import sys
 import threading
+import time
 from pathlib import Path
 
 import psycopg2
@@ -429,6 +430,117 @@ def test_login_attempts_text_vergleich_funktioniert_wie_auf_sqlite(pg_db):
         assert not security.is_locked_out(cursor, 'tester')
     finally:
         connection.close()
+
+
+def test_gleichzeitige_anmeldeversuche_kommen_nicht_beide_an_der_sperre_vorbei(pg_db):
+    """Die Race, die zu security.attempt_guard() gefuehrt hat.
+
+    is_locked_out() liest einen Zaehler, den record_attempt() gleich darauf
+    erhoeht. Ohne Serialisierung lesen zwei gleichzeitige Anmeldungen beide
+    denselben Stand unterhalb der Grenze und kommen beide durch - aus zehn
+    erlaubten Versuchen je Viertelstunde werden so viele, wie ein Angreifer
+    Verbindungen aufmacht.
+
+    Wie beim Migrations-Lock zwei Threads mit je eigener Verbindung, also je
+    eigener Postgres-Sitzung. Damit die Race zuverlaessig eintritt statt nur
+    gelegentlich, liegt zwischen Lesen und Schreiben eine halbe Sekunde: ohne
+    Lock lesen garantiert beide den Stand 9, mit Lock wartet der zweite, bis
+    der erste auf 10 erhoeht und freigegeben hat.
+    """
+    migrations, _schema_url, _schema = pg_db
+    migrations.apply_pending()
+
+    import db
+    import security
+
+    # Ein Versuch unter der Grenze - der naechste ist der letzte erlaubte.
+    vorlauf = db.get_db_connection()
+    try:
+        cursor = vorlauf.cursor()
+        for _ in range(security.MAX_FAILED_ATTEMPTS - 1):
+            security.record_attempt(cursor, 'anna', '127.0.0.1', succeeded=False)
+        vorlauf.commit()
+    finally:
+        vorlauf.close()
+
+    durchgelassen = []
+
+    def versuch():
+        connection = db.get_db_connection()
+        try:
+            cursor = connection.cursor()
+            with security.attempt_guard(cursor, 'anna'):
+                gesperrt = security.is_locked_out(cursor, 'anna')
+                time.sleep(0.5)
+                if not gesperrt:
+                    durchgelassen.append(True)
+                    security.record_attempt(cursor, 'anna', '127.0.0.1', succeeded=False)
+                    connection.commit()
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=versuch) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert not any(thread.is_alive() for thread in threads), (
+        'mindestens ein Thread haengt noch fest - deutet auf einen Deadlock im Advisory-Lock hin'
+    )
+    assert len(durchgelassen) == 1, (
+        f'{len(durchgelassen)} von 2 Versuchen kamen an der Sperre vorbei. Ohne den '
+        'Advisory-Lock sind es beide, und die Drosselung ist keine Grenze mehr, sondern '
+        'eine Empfehlung.'
+    )
+
+    pruefung = db.get_db_connection()
+    try:
+        cursor = pruefung.cursor()
+        cursor.execute(
+            'SELECT COUNT(*) AS n FROM login_attempts WHERE identifier = ?', ('anna',))
+        assert cursor.fetchone()['n'] == security.MAX_FAILED_ATTEMPTS
+        assert security.is_locked_out(cursor, 'anna')
+    finally:
+        pruefung.close()
+
+
+def test_der_lock_gilt_je_benutzername_und_nicht_global(pg_db):
+    """Gegenprobe: ein globaler Lock waere ebenfalls gruen im Test oben.
+
+    Er wuerde aber jede Anmeldung im Haus hinter jeder anderen anstellen. Zwei
+    verschiedene Namen duerfen sich nicht gegenseitig aufhalten.
+    """
+    migrations, _schema_url, _schema = pg_db
+    migrations.apply_pending()
+
+    import db
+    import security
+
+    erste = db.get_db_connection()
+    zweite = db.get_db_connection()
+    try:
+        with security.attempt_guard(erste.cursor(), 'anna'):
+            # Wuerde blockieren, wenn der Lock nicht je Benutzername waere -
+            # der join(timeout) faenge das als haengenden Thread.
+            fertig = []
+
+            def anderer_name():
+                with security.attempt_guard(zweite.cursor(), 'berta'):
+                    fertig.append(True)
+
+            thread = threading.Thread(target=anderer_name)
+            thread.start()
+            thread.join(timeout=5)
+
+            assert not thread.is_alive(), (
+                'der Versuch fuer "berta" wartet auf den Lock fuer "anna" - der Lock '
+                'ist global statt je Benutzername'
+            )
+            assert fertig == [True]
+    finally:
+        erste.close()
+        zweite.close()
 
 
 def test_information_schema_probe_erkennt_fehlende_spalte_und_ergaenzt_sie(pg_leere_migrationen):
