@@ -364,6 +364,21 @@ def build_slots(year, month, shift_types):
     return slots
 
 
+def holds_qualification_on(employee, qualification_id, iso_date):
+    """Does this employee hold that certificate, and is it still valid?
+
+    A missing valid_until means "does not expire", not "expired" - the same
+    reading valid_from/valid_until have for availability windows, and the
+    comparison is inclusive for the same reason: two neighbouring rules that
+    read "until" differently are a trap.
+    """
+    held = employee.get('qualifications') or {}
+    if qualification_id not in held:
+        return False
+    valid_until = held[qualification_id]
+    return not valid_until or iso_date <= valid_until
+
+
 def structurally_eligible(employee, slot):
     """Constraints that depend only on the employee and the slot, not on other assignments."""
     if slot['weekday'] in employee['unavailable_weekdays']:
@@ -373,6 +388,13 @@ def structurally_eligible(employee, slot):
     allowed = employee['allowed_shift_types']
     if allowed and slot['shift_type_id'] not in allowed:
         return False
+    # Hard here, a warning on the manual path - the same split the rest of the
+    # tool uses. A generated plan that has to be reworked by hand is not help.
+    # Read from the slot rather than looked up, so a caller that never supplies
+    # requirements (the 23 compatibility tests, benchmark.py) is unaffected.
+    for qualification_id in slot.get('required_qualifications') or ():
+        if not holds_qualification_on(employee, qualification_id, slot['date']):
+            return False
     if employee.get('availability_mode', 'anytime') == 'windows':
         # Without known shift hours there is nothing to check - same stance
         # as the rest-period check (see rest_period_ok).

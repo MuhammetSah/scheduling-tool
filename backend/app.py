@@ -688,6 +688,12 @@ def serialize_employee(cursor, row):
     allowed_shift_types = [r['shift_type_id'] for r in cursor.fetchall()]
 
     cursor.execute(
+        'SELECT eq.qualification_id, q.name, eq.valid_until '
+        'FROM employee_qualifications eq JOIN qualifications q ON q.id = eq.qualification_id '
+        'WHERE eq.employee_id = ? ORDER BY q.name', (employee_id,))
+    qualifications = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute(
         'SELECT weekday, start_time, end_time, valid_from, valid_until FROM employee_availability '
         'WHERE employee_id = ? ORDER BY weekday, start_time',
         (employee_id,),
@@ -715,6 +721,7 @@ def serialize_employee(cursor, row):
         'unavailable_weekdays': unavailable_weekdays,
         'unavailable_dates': unavailable_dates,
         'allowed_shift_types': allowed_shift_types,
+        'qualifications': qualifications,
         'availability_mode': row['availability_mode'],
         'availability': availability,
     }
@@ -973,16 +980,22 @@ def serialize_shift_type(cursor, row):
 
     The per-weekday head counts it used to carry moved to
     coverage_requirements in Etappe 3 and stopped being read by the planner in
-    Etappe 4; the table behind them is gone since 0010. The cursor argument
-    stays for the sake of every caller's signature - and because a shift type
-    may well grow something worth a second query again.
+    Etappe 4; the table behind them is gone since 0010. What it grew instead is
+    the certificates it requires - which is what the cursor argument, kept for
+    every caller's signature, is finally used for again.
     """
+    cursor.execute(
+        'SELECT stq.qualification_id, q.name FROM shift_type_qualifications stq '
+        'JOIN qualifications q ON q.id = stq.qualification_id '
+        'WHERE stq.shift_type_id = ? ORDER BY q.name', (row['id'],))
+    required = [dict(r) for r in cursor.fetchall()]
     return {
         'id': row['id'],
         'name': row['name'],
         'start_time': row['start_time'],
         'end_time': row['end_time'],
         'color': row['color'],
+        'required_qualifications': required,
     }
 
 
@@ -1191,6 +1204,10 @@ def delete_employee(employee_id):
         'DELETE FROM employee_unavailable_dates WHERE employee_id = ?',
         'DELETE FROM employee_allowed_shift_types WHERE employee_id = ?',
         'DELETE FROM employee_absences WHERE employee_id = ?',
+        # Ein Nachweis ist eine persoenliche Angabe. Sie kamen nach 5i dazu
+        # und standen deshalb nicht auf dieser Liste - ein Grabstein mit
+        # Ersthelferschein ist genau das, was die Anonymisierung verhindert.
+        'DELETE FROM employee_qualifications WHERE employee_id = ?',
     ):
         cursor.execute(statement, (employee_id,))
 
@@ -1322,6 +1339,12 @@ def export_employee_data(employee_id):
     absences = [dict(r) for r in cursor.fetchall()]
 
     cursor.execute(
+        'SELECT q.name, eq.valid_until FROM employee_qualifications eq '
+        'JOIN qualifications q ON q.id = eq.qualification_id '
+        'WHERE eq.employee_id = ? ORDER BY q.name', (employee_id,))
+    qualifications = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute(
         'SELECT sa.date, sa.start_time, sa.end_time, sa.break_minutes, st.name AS shift_type_name '
         'FROM shift_assignments sa LEFT JOIN shift_types st ON st.id = sa.shift_type_id '
         'WHERE sa.employee_id = ? ORDER BY sa.date, sa.start_time', (employee_id,))
@@ -1345,6 +1368,7 @@ def export_employee_data(employee_id):
     return jsonify({
         'employee': employee,
         'absences': absences,
+        'qualifications': qualifications,
         'assignments': assignments,
         'accounts': accounts,
         'audit_log': log_entries,
@@ -1935,6 +1959,10 @@ def load_employees_for_scheduling(cursor, year=None, month=None):
             'allowed_shift_types': allowed if allowed else None,
             'availability_mode': row['availability_mode'],
             'availability': availability,
+            # qualification_id -> valid_until (or None). A dict rather than a
+            # set, because holding a certificate and it still being valid are
+            # two different questions and the second needs the date.
+            'qualifications': employee_qualifications(cursor, employee_id),
         })
         if year is not None and month is not None:
             before, sundays = scheduling_history(cursor, employee_id, year, month)
@@ -2157,6 +2185,13 @@ def generate_schedule_route():
     try:
         slots = build_month_blocks(
             year, month, shift_types, effective_bands_by_date(cursor, year, month), employees)
+        # The requirement lives on the shift type, so a block inherits it from
+        # its template. A block *without* a template carries none - since
+        # Etappe 4 the planner trims blocks free of any template, and there is
+        # nothing for them to inherit. Said here rather than discovered later.
+        verlangt = qualification_requirements(cursor)
+        for slot in slots:
+            slot['required_qualifications'] = verlangt.get(slot['shift_type_id']) or set()
         result = generate_schedule(year, month, employees, shift_types,
                                    weekend_weight=weekend_weight, slots=slots,
                                    boundary=boundary_context(cursor, year, month))
@@ -2655,6 +2690,26 @@ def constraint_findings(cursor, employee_id, assignment_date, shift_type_id, sch
     if cursor.fetchone():
         melde('warn_marked_unavailable', name=employee['name'], date=assignment_date)
 
+    # A certificate this shift requires, and this person does not hold - or
+    # holds expired. Two different messages on purpose: "does not have it" and
+    # "theirs ran out on the 31st" call for different things being done.
+    if shift_type_id is not None:
+        cursor.execute(
+            'SELECT stq.qualification_id, q.name FROM shift_type_qualifications stq '
+            'JOIN qualifications q ON q.id = stq.qualification_id '
+            'WHERE stq.shift_type_id = ? ORDER BY q.name', (shift_type_id,))
+        verlangt = [dict(r) for r in cursor.fetchall()]
+        if verlangt:
+            gehalten = employee_qualifications(cursor, employee_id)
+            for nachweis in verlangt:
+                bis = gehalten.get(nachweis['qualification_id'], False)
+                if bis is False:
+                    melde('warn_missing_qualification', name=employee['name'],
+                          qualification=nachweis['name'])
+                elif bis and assignment_date > bis:
+                    melde('warn_expired_qualification', name=employee['name'],
+                          qualification=nachweis['name'], date=bis)
+
     # A block without a template isn't any shift type, so a restriction on
     # which types this person may work has nothing to say about it.
     if shift_type_id is not None:
@@ -3031,6 +3086,200 @@ def update_assignment(assignment_id):
 
     connection.commit()
     return jsonify({'message': t(g.lang, 'assignment_updated'), 'warnings': warnings})
+
+
+# ---------- qualifications ----------
+#
+# What a shift requires, and who holds it. The interesting column is
+# valid_until: a first-aid certificate expires after two years (DGUV Vorschrift
+# 1 § 26 asks for the refresher), a forklift licence likewise. A certificate
+# without an expiry is one the roster keeps honouring years after it ended.
+#
+# Hard in the generator, a warning on the manual path - the same split the tool
+# uses everywhere. Deliberately *not* a blocker for a swap: whether a given
+# certificate is legally required (first aid) or a house rule ("knows the
+# coffee machine") is something only the business knows, and refusing on that
+# basis would assert it. See ARBZG_BLOCKERS for where that line runs.
+
+
+def qualification_requirements(cursor):
+    """shift_type_id -> the set of qualification ids it requires."""
+    cursor.execute('SELECT shift_type_id, qualification_id FROM shift_type_qualifications')
+    verlangt = {}
+    for row in cursor.fetchall():
+        verlangt.setdefault(row['shift_type_id'], set()).add(row['qualification_id'])
+    return verlangt
+
+
+def employee_qualifications(cursor, employee_id):
+    """qualification_id -> valid_until (or None) for one employee."""
+    cursor.execute(
+        'SELECT qualification_id, valid_until FROM employee_qualifications '
+        'WHERE employee_id = ?', (employee_id,))
+    return {row['qualification_id']: row['valid_until'] for row in cursor.fetchall()}
+
+
+def qualification_names(cursor):
+    cursor.execute('SELECT id, name FROM qualifications')
+    return {row['id']: row['name'] for row in cursor.fetchall()}
+
+
+@app.route('/qualifications', methods=['GET'])
+@login_required
+def list_qualifications():
+    """The catalogue. Readable by anyone signed in - it is a list of words,
+    and an employee needs it to make sense of their own certificates."""
+    cursor = get_db().cursor()
+    cursor.execute('SELECT id, name FROM qualifications ORDER BY name')
+    return jsonify([dict(row) for row in cursor.fetchall()])
+
+
+@app.route('/qualifications', methods=['POST'])
+@hr_required
+def create_qualification():
+    """One name per row, and the name is unique.
+
+    "Ersthelfer" twice creates two certificates that mean the same thing, and
+    from then on half the workforce holds one and half the other - while every
+    shift requires exactly one of them.
+    """
+    name = ((request.get_json(silent=True) or {}).get('name') or '').strip()
+    if not name:
+        return jsonify({'message': t(g.lang, 'name_required')}), 400
+
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM qualifications WHERE name = ?', (name,))
+    if cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'qualification_exists', name=name)}), 409
+
+    cursor.execute('INSERT INTO qualifications (name) VALUES (?)', (name,))
+    neu = cursor.lastrowid
+    connection.commit()
+    return jsonify({'id': neu, 'name': name}), 201
+
+
+@app.route('/qualifications/<int:qualification_id>', methods=['DELETE'])
+@hr_required
+def delete_qualification(qualification_id):
+    """Gone everywhere at once.
+
+    ON DELETE CASCADE on both link tables: a certificate that no longer exists
+    cannot be held by anybody and cannot be required by any shift. Leaving
+    either behind would mean a shift requiring something nobody can ever hold.
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM qualifications WHERE id = ?', (qualification_id,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'qualification_not_found')}), 404
+
+    # Explicit rather than relying on the cascade: SQLite only enforces foreign
+    # keys with PRAGMA foreign_keys on, and this must not depend on that.
+    cursor.execute('DELETE FROM employee_qualifications WHERE qualification_id = ?',
+                   (qualification_id,))
+    cursor.execute('DELETE FROM shift_type_qualifications WHERE qualification_id = ?',
+                   (qualification_id,))
+    cursor.execute('DELETE FROM qualifications WHERE id = ?', (qualification_id,))
+    connection.commit()
+    return jsonify({'message': t(g.lang, 'qualification_deleted')}), 200
+
+
+@app.route('/employees/<int:employee_id>/qualifications', methods=['PUT'])
+@hr_required
+def set_employee_qualifications(employee_id):
+    """Replace what this person holds, expiry dates included.
+
+    The date goes through parse_iso_date rather than a bare check: a stored
+    '20261115' would pass validation and then lose every later comparison,
+    so the certificate would simply never expire (see Fallstrick 19 in the
+    handoff).
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM employees WHERE id = ?', (employee_id,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    # Vor dem DELETE geprueft, und ohne `or []`: `{"qualifications": false}`
+    # faellt sonst auf eine leere Liste durch und loescht alles, was diese
+    # Person hat - ein Tippfehler, der wie eine Absicht aussieht. Eine leere
+    # Liste bleibt ausdruecklich erlaubt, sie ist eine Aussage.
+    rumpf = request.get_json(silent=True)
+    if not isinstance(rumpf, dict) or not isinstance(rumpf.get('qualifications'), list):
+        return jsonify({'message': t(g.lang, 'qualification_list_required')}), 400
+    eintraege = rumpf['qualifications']
+
+    gesehen = set()
+    zeilen = []
+    for eintrag in eintraege:
+        if not isinstance(eintrag, dict):
+            return jsonify({'message': t(g.lang, 'request_body_must_be_object')}), 400
+        qualification_id = eintrag.get('qualification_id')
+        cursor.execute('SELECT id FROM qualifications WHERE id = ?', (qualification_id,))
+        if not cursor.fetchone():
+            return jsonify({'message': t(g.lang, 'qualification_not_found')}), 404
+        if qualification_id in gesehen:
+            return jsonify({'message': t(g.lang, 'qualification_listed_twice')}), 400
+        gesehen.add(qualification_id)
+        try:
+            bis = eintrag.get('valid_until')
+            bis = parse_iso_date(bis) if bis else None
+        except ValueError as err:
+            return jsonify({'message': str(err)}), 400
+        zeilen.append((employee_id, qualification_id, bis))
+
+    cursor.execute('DELETE FROM employee_qualifications WHERE employee_id = ?', (employee_id,))
+    for zeile in zeilen:
+        cursor.execute(
+            'INSERT INTO employee_qualifications (employee_id, qualification_id, valid_until) '
+            'VALUES (?, ?, ?)', zeile)
+    connection.commit()
+
+    cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
+    return jsonify(serialize_employee(cursor, cursor.fetchone())), 200
+
+
+@app.route('/shift-types/<int:shift_type_id>/qualifications', methods=['PUT'])
+@hr_required
+def set_shift_type_qualifications(shift_type_id):
+    """What this shift requires - of everybody on it, not of one of them.
+
+    "At least one first-aider per shift" would be a headcount inside a
+    headcount and needs its own model. What this says is the simpler and more
+    common thing: this work may only be done by someone who can do it.
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    cursor.execute('SELECT id FROM shift_types WHERE id = ?', (shift_type_id,))
+    if not cursor.fetchone():
+        return jsonify({'message': t(g.lang, 'shift_type_not_found')}), 404
+
+    # parse_int_list laeuft ueber alles Iterierbare, also auch ueber die
+    # Zeichen von '12' - das ergaebe die Nachweise 1 und 2, die niemand
+    # genannt hat. Erst die Liste, dann die Zahlen darin.
+    rumpf = request.get_json(silent=True)
+    if not isinstance(rumpf, dict) or not isinstance(rumpf.get('qualification_ids'), list):
+        return jsonify({'message': t(g.lang, 'qualification_list_required')}), 400
+    try:
+        ids = parse_int_list(rumpf['qualification_ids'])
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
+
+    for qualification_id in ids:
+        cursor.execute('SELECT id FROM qualifications WHERE id = ?', (qualification_id,))
+        if not cursor.fetchone():
+            return jsonify({'message': t(g.lang, 'qualification_not_found')}), 404
+
+    cursor.execute('DELETE FROM shift_type_qualifications WHERE shift_type_id = ?',
+                   (shift_type_id,))
+    for qualification_id in set(ids):
+        cursor.execute(
+            'INSERT INTO shift_type_qualifications (shift_type_id, qualification_id) '
+            'VALUES (?, ?)', (shift_type_id, qualification_id))
+    connection.commit()
+    return jsonify({'message': t(g.lang, 'qualification_requirements_saved'),
+                    'required_qualifications': sorted(set(ids))}), 200
 
 
 # ---------- the guided swap ----------

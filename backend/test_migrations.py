@@ -69,6 +69,7 @@ ALLE_MIGRATIONEN_TABELLEN = (BASELINE_TABELLEN | {
     'settings',
     'audit_log',
     'shift_swap_requests',
+    'qualifications', 'employee_qualifications', 'shift_type_qualifications',
 }) - {
     # 0010 entfernt sie wieder. Nach 0001 gibt es sie, am Ende nicht mehr -
     # deshalb steht sie oben in BASELINE_TABELLEN und hier in der Gegenmenge,
@@ -1470,3 +1471,22 @@ def test_ein_antrag_faellt_mit_seiner_schicht_weg(fresh_db):
         assert verblieben == 0
     finally:
         connection.close()
+
+
+def test_die_nachweise_laufen_rund(fresh_db):
+    """Rundlauf, und die Gegenprobe, dass down() alle drei Tabellen mitnimmt.
+
+    Eine vergessene bliebe wegen CREATE TABLE IF NOT EXISTS unbemerkt -
+    derselbe Fehler, den der 0006-Rundlauf seit Etappe 6c auch prueft.
+    """
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    drei = {'qualifications', 'employee_qualifications', 'shift_type_qualifications'}
+    assert drei <= tabellen(db_file)
+
+    while '0017_qualifications' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert not (drei & tabellen(db_file))
+
+    assert '0017_qualifications' in migrations.apply_pending()
+    assert drei <= tabellen(db_file)

@@ -217,6 +217,38 @@ TRANSLATIONS = {
         'en': 'The {date} is a Sunday – § 9 Abs. 1 ArbZG forbids Sunday work '
               'unless the business falls under § 10 (set under opening hours)',
     },
+    'qualification_exists': {
+        'de': 'Den Nachweis „{name}" gibt es bereits.',
+        'en': 'The certificate “{name}” already exists.',
+    },
+    'qualification_list_required': {
+        'de': 'Es wird eine Liste erwartet.',
+        'en': 'A list is expected.',
+    },
+    'qualification_requirements_saved': {
+        'de': 'Verlangte Nachweise gespeichert',
+        'en': 'Required certificates saved',
+    },
+    'qualification_not_found': {
+        'de': 'Nachweis nicht gefunden',
+        'en': 'Certificate not found',
+    },
+    'qualification_deleted': {
+        'de': 'Nachweis gelöscht',
+        'en': 'Certificate deleted',
+    },
+    'qualification_listed_twice': {
+        'de': 'Derselbe Nachweis ist doppelt angegeben.',
+        'en': 'The same certificate is listed twice.',
+    },
+    'warn_missing_qualification': {
+        'de': '{name} hat den Nachweis „{qualification}" nicht, den diese Schicht verlangt',
+        'en': '{name} does not hold the certificate “{qualification}” this shift requires',
+    },
+    'warn_expired_qualification': {
+        'de': '{name}s Nachweis „{qualification}" ist am {date} abgelaufen',
+        'en': '{name}’s certificate “{qualification}” expired on {date}',
+    },
     'invalid_date_value': {
         'de': 'Ungültiges Datum: {date}',
         'en': 'Invalid date: {date}',

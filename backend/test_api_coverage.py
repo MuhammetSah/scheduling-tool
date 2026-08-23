@@ -936,14 +936,26 @@ def test_die_ruhepause_erzeugt_keine_deckungsluecke(hr_client):
 
 
 def test_schichtart_traegt_keine_bedarfszahlen_mehr(hr_client):
-    """Die Schichtart ist nur noch Vorlage: Name, Zeiten, Farbe."""
+    """Die Schichtart ist Vorlage: Name, Zeiten, Farbe - und seit Etappe 10 die
+    Nachweise, die sie verlangt.
+
+    Die verlangten Nachweise sind das Gegenteil der alten Bedarfszahlen: die
+    beschrieben, WIE VIELE gebraucht werden, und das gehoert seit Etappe 3 in
+    die Bedarfsbaender. Diese beschreiben, WER die Arbeit machen darf, und das
+    ist eine Eigenschaft der Arbeit selbst.
+
+    Der Schluesselsatz bleibt bewusst festgenagelt: er ist die Stelle, an der
+    auffaellt, wenn die Vorlage wieder anfaengt, Dinge zu sammeln.
+    """
     antwort = hr_client.post('/shift-types', json={
         'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00',
     })
 
     assert antwort.status_code == 201, antwort.json
     assert 'requirements' not in antwort.json
-    assert set(antwort.json) == {'id', 'name', 'start_time', 'end_time', 'color'}
+    assert set(antwort.json) == {'id', 'name', 'start_time', 'end_time', 'color',
+                                 'required_qualifications'}
+    assert antwort.json['required_qualifications'] == []
 
 
 def test_requirements_im_rumpf_wird_ignoriert_statt_abgelehnt(hr_client):
