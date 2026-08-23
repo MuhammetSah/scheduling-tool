@@ -24,22 +24,28 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. **Etappe 5 ist vollständig**, und **6a und 6b** haben zwei der vier
-Bündel zurückgestellter Befunde abgearbeitet. Alles ist gemergt und deployt; es gibt keine offenen
-Branches und keine offenen Pull Requests.
+Es ist nichts halb fertig. **Etappe 5 ist vollständig**, und **Etappe 6 hat die zurückgestellten
+Befunde abgearbeitet** — bis auf die zwei Leistungsbefunde, die ihre eigene Notiz „erst angehen,
+wenn der Benchmark es zeigt" tragen, und er zeigt es nicht. Alles ist gemergt und deployt; es gibt
+keine offenen Branches und keine offenen Pull Requests.
 
 Die Roadmap ist abgearbeitet. Was jetzt noch offen liegt, sind die **restlichen zurückgestellten
 Befunde** — siehe den eigenen Abschnitt. Sie sind gruppiert, nicht einzeln abzuarbeiten:
 
-| Bündel | Was drin ist | Stand |
-|---|---|---|
-| ~~Sperren am Anmeldeweg~~ | `is_locked_out`/`record_attempt` ohne Zeilensperre, der `password_not_set_yet`-Zweig ohne Zählung | **erledigt in 6b** |
-| **Testschulden** | ungepinntes `ortools`, Cache-Schlüssel in `ci.yml`, Lücken in zwei Rundlauftests, zwei Validierungstests, die nur den Status prüfen, ein irreführender Docstring | offen |
-| **Eindeutigkeit auf `employee_availability`** | dasselbe Fenster zweimal ist doppelt gemeldet; keine CHECK-Constraints | offen |
-| **Leistung** | zwei Befunde, beide mit „erst angehen, wenn der Benchmark es zeigt" markiert — er zeigt es nicht | offen, absichtlich |
+**Damit ist die Liste leer** bis auf zwei Leistungsbefunde: `plan_day()` läuft die probeweise
+Tagesbesetzung nach jedem Zuschnitt neu, und die Fensterprüfung rechnet im innersten
+Schleifenkörper alle `"HH:MM"`-Zeichenketten neu. Beide tragen seit ihrer Aufnahme die Notiz
+„erst angehen, wenn der Benchmark es zeigt". Er zeigt es nicht, und eine Optimierung ohne Messung
+wäre geraten.
 
-Aus den Testschulden sind `10/9/11` und der `Project Structure`-Block in 6b mitgegangen: sie lagen
-in Dateien, die ohnehin angefasst wurden. Der Rest gehört zusammen.
+**Was jetzt kommt, ist eine Festlegung des Nutzers, keine Fortsetzung.** Die Roadmap nennt noch
+einen geführten Schichttausch (die Tauschfunktion selbst gibt es bereits), Qualifikations-Zuordnung
+und Prüfungen über die Monatsgrenze hinweg. Nichts davon ist begonnen.
+
+**Eine Erfahrung aus drei Aufräum-Etappen, die eine neue Sitzung sich sparen kann:** von den rund
+dreißig Einträgen dieser Liste waren **vier bereits erledigt**, ohne dass es jemand notiert hatte.
+Erledigtes ist deshalb durchgestrichen statt gelöscht — wer später liest, sieht dann, dass es
+geprüft wurde. Und jede der drei Etappen begann mit einer Prüfung, nicht mit einer Behebung.
 
 **Bevor du daraus etwas nimmst: prüfe, ob es noch stimmt.** In Etappe 6a war einer der Befunde
 längst behoben, und ungeprüft danach zu arbeiten hieße, Vorhandenes zu „reparieren".
@@ -54,10 +60,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5, 6a und 6b gemergt und deployt (PR #16–#27); die API antwortet mit 200 |
+| `main` | Etappe 5 und 6 gemergt und deployt (PR #16–#28); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 459 passed / 38 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 467 passed / 38 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 30 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -791,6 +797,30 @@ mit 429 antwortet, ohne zu committen.
 Beim Merge von PR #27 wurde im Joblog nachgesehen, dass beide wirklich `PASSED` meldeten
 (474 passed, 0 skipped). Wer die Drosselung anfasst, macht das wieder.
 
+## Etappe 6c — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-6c-reste-design.md`](superpowers/specs/2026-08-23-etappe-6c-reste-design.md)
+
+Die letzten beiden Bündel: Eindeutigkeit auf `employee_availability` und die Testschulden.
+
+**`PUT /shift-times` pflegte eine zweite Zeitprüfung neben `parse_assignment_times()`, und sie war
+bereits auseinandergelaufen.** Gleicher Beginn und gleiches Ende wurden angenommen und von
+`shift_duration_minutes()` als Lauf über Mitternacht gelesen — aus `10:00`–`10:00` wurde ein
+Vierundzwanzigstundendienst. Für die Zuweisung war genau das in Etappe 2 behoben worden. Die
+Route benutzt jetzt denselben Parser.
+
+**Nur exakte Duplikate der Arbeitszeitfenster werden abgelehnt.** Zwei Fenster an einem Wochentag
+sind der geteilte Dienst; Überlappungen zusammenzufassen hieße, eine Eingabe stillschweigend
+umzuschreiben. Die Gültigkeitsgrenzen gehören in den Vergleich — gleiche Zeiten mit verschiedenen
+Grenzen sind zwei Aussagen, nicht eine.
+
+**Die Lehre steckt wieder im Review.** Der Umbau auf den gemeinsamen Parser führte einen neuen
+Fehler ein: das Formular schickt geleerte Felder als `""`, der Parser macht `None` daraus — aber
+die Rücksetz-Prüfung stand *davor*, also fiel `""` in ein `INSERT` mit NULL-Zeiten auf eine
+`NOT NULL`-Spalte. Ein 500er, wo vorher eine verständliche 400 stand. **Wer eine Prüfung durch
+eine andere ersetzt, verschiebt damit auch, wann Werte normalisiert werden — die Reihenfolge der
+Zweige dahinter gehört zum Umbau, nicht zur Umgebung.**
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -990,8 +1020,8 @@ Teil des Dumps.
 
 Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 
-- `ci.yml` Cache-Schlüssel deckt nur `requirements-dev.txt` ab
-- `ortools` in `requirements-dev.txt` ungepinnt
+- ~~`ci.yml` Cache-Schlüssel deckt nur `requirements-dev.txt` ab~~ — **erledigt in 6c**
+- ~~`ortools` in `requirements-dev.txt` ungepinnt~~ — **erledigt in 6c**
 - ~~`password_not_set_yet`-Zweig in `login()` zählt keine Versuche~~ — **erledigt in 6b**
 - ~~Drosselungstests verdrahten `10/9/11` fest~~ — **erledigt in 6b**
 - ~~`is_locked_out`/`record_attempt` sind check-then-act ohne Zeilensperre~~ — **erledigt in 6b**, über einen Advisory-Lock je Benutzername statt einer Zeilensperre
@@ -999,7 +1029,7 @@ Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 - ~~`handleMonthChange` setzt den geladenen Plan nicht zurück~~ — **war bereits behoben**, in Etappe 6a nachgeprüft
 - `fetchSchedule()` schluckt jeden GET-Fehler zu `null`
 - `MIGRATIONS_DIR.iterdir()` wirft, wenn das Verzeichnis fehlt
-- Zwei Validierungstests in `test_api_availability.py` prüfen nur den Status, nicht die Meldung
+- ~~Zwei Validierungstests in `test_api_availability.py` prüfen nur den Status~~ — **erledigt in 6c**
 - ~~Frontend hat keinerlei Testinfrastruktur~~ — **erledigt in Etappe 3** (Task 8, Vitest +
   Testing Library, siehe dort)
 
@@ -1011,8 +1041,9 @@ Neu aus dem Abschluss-Review von Etappe 1:
 - keine CHECK-Constraints auf `employee_availability` (`weekday`, `start_time`, `end_time`);
   konsistent mit den anderen Tabellen, die API ist der einzige Schreiber. Wieder aufgreifen,
   sobald ein zweiter Schreibpfad entsteht (Import/Seed in Etappe 5)
-- keine Eindeutigkeit und keine Überlappungsprüfung auf `employee_availability` — dasselbe
-  Fenster zweimal gesendet steht zweimal in der Warnung
+- ~~keine Eindeutigkeit auf `employee_availability`~~ — **erledigt in 6c**, aber nur für exakte
+  Duplikate. Überlappungen bleiben absichtlich erlaubt: sie zusammenzufassen hieße, eine Eingabe
+  stillschweigend umzuschreiben, und zwei Fenster an einem Tag sind der geteilte Dienst
 - ~~die Fenster-Abzeichen in der Mitarbeiterliste filtern nicht nach `valid_from`/`valid_until`~~
   — **erledigt in Etappe 6a**. Abgelaufene Fenster bekommen einen eigenen Hinweis statt der
   Meldung für „gar keine Fenster": der Unterschied entscheidet, ob jemand ein Fenster anlegen
@@ -1028,7 +1059,7 @@ Neu aus dem Abschluss-Review von Etappe 1:
 
 Neu aus den Reviews von Etappe 2:
 
-- ungenutzte Konstante `ASSIGNMENT_TIMES_PY_PATH` in `test_migrations_postgres.py`
+- ~~ungenutzte Konstante `ASSIGNMENT_TIMES_PY_PATH`~~ — **war bereits benutzt**, in 6c nachgeprüft
 - der Bestandstest zum Tabellenneubau prüft nur 6 von 9 kopierten Spalten
 - `ux_assignment_slot_v2` ist ein Ausdrucksindex und damit als Zugriffspfad schwächer als sein
   Vorgänger — nutzbarer Präfix nur `(schedule_id, date)`
@@ -1039,12 +1070,12 @@ Neu aus den Reviews von Etappe 2:
   einen Fehler zu erzeugen
 - in der Wochenschleife von `constraint_warnings()` laufen jetzt zwei Abfragen pro Zeile statt
   einer, multipliziert in `replacement_suggestions()`
-- die `end_time`-Hälfte der Zeitformat-Prüfung ist ungetestet
+- ~~die `end_time`-Hälfte der Zeitformat-Prüfung ist ungetestet~~ — **war bereits getestet**, in 6c nachgeprüft
 - die Validierungsreihenfolge in `add_slot()` prüft Zeiten vor dem Datum
 - die Regel „Block ohne Vorlage braucht Zeiten" steht an zwei Stellen (`add_slot()` und
   `update_assignment()`)
-- `set_shift_times()` hat dieselbe Gleichheitslücke, die in `parse_assignment_times()`
-  behoben wurde (vorbestehend)
+- ~~`set_shift_times()` hat dieselbe Gleichheitslücke wie `parse_assignment_times()`~~ —
+  **erledigt in 6c**, indem die Route denselben Parser benutzt statt einer zweiten Prüfung
 - der i18n-Schlüssel `availability_time_invalid` wird jetzt auch für Zuweisungen benutzt,
   obwohl sein Name nach Etappe 1 klingt
 - ~~ein unübersetztes `OK`-Literal in `ShiftCell.jsx`~~ — **erledigt in Etappe 4**, es lag in
@@ -1070,10 +1101,8 @@ Aus dem Abschluss-Review von Etappe 3 behoben (eine Fix-Runde, ein Commit):
 
 Weiterhin offen aus den Reviews von Etappe 3:
 
-- der Rundlauftest von `0006_coverage.py` prüft nach `down()`+`up()` nur `business_hours`,
-  nicht ob die beiden Nebentabellen (`business_hours_exceptions`, `coverage_requirements`)
-  wirklich weg waren — ein vergessenes `DROP TABLE` bliebe wegen `CREATE TABLE IF NOT EXISTS`
-  unbemerkt
+- ~~der Rundlauftest von `0006_coverage.py` prüft nur `business_hours`~~ — **erledigt in 6c**;
+  alle drei Tabellen werden nach dem Rollback geprüft
 - ein Docstring in `test_migrations_postgres.py` spricht von Einzelindex-Zugriff, der Test
   vergleicht aber ganze Tupel
 - für `0007_derive_coverage.py` gibt es nur einen Postgres-Test (die Ableitung selbst), keine
@@ -1084,8 +1113,8 @@ Weiterhin offen aus den Reviews von Etappe 3:
   (`create_business_hours_exception()`) ist check-then-act ohne Sperre
 - kein eigener HTTP-Test für den Abwesenheitsfall bei den Deckungslücken (code-seitig korrekt,
   über denselben `employee_id IS NULL`-Filter wie ein unbesetzter Platz)
-- der Entfernen-Button im Bedarfseditor (`frontend/src/pages/CoverageEditor.jsx`) hat nur
-  `title`, kein `aria-label`
+- ~~der Entfernen-Button im Bedarfseditor hat nur `title`, kein `aria-label`~~ — **erledigt in
+  6c**; der Test findet ihn jetzt über `getByRole`, denselben Weg wie jemand, der ihn nicht sieht
 - die Datumsformatierung steht jetzt in dritter Kopie im Frontend — folgt aber bereits
   etablierter Projektkonvention, keine neu eingeführte Dublette
 
