@@ -29,3 +29,8 @@ dist/
 Thumbs.db
 *.swp
 .idea/
+
+# Claude Code: .claude/settings.json, Hooks, Befehle und Agenten sind
+# versioniert und gelten fuers Team. Persoenliche Uebersteuerungen nicht.
+.claude/settings.local.json
+CLAUDE.local.md
