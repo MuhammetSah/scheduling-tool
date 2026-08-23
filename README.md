@@ -741,7 +741,7 @@ pg_restore --clean --no-owner --dbname="$DATABASE_URL" schichtplan-2026-08-16.du
 
 ## API Endpoints
 
-Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one). Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes and reading `/employees/<id>/availability`, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
+Everything except `/`, `/health`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one) — `/health` is public because a health check behind a login is one nobody can use, and it reports the schema version rather than anything about the workforce. Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes and reading `/employees/<id>/availability`, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
 
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
