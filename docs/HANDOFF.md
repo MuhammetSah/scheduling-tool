@@ -24,22 +24,12 @@ der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 
 ## Erster Schritt einer neuen Sitzung
 
-Es ist nichts halb fertig. Alles bis einschließlich 5h ist gemergt, deployt und dokumentiert;
-es gibt keine offenen Branches und keine offenen Pull Requests.
+Es ist nichts halb fertig. **Etappe 5 ist vollständig** — 5a bis 5i sind gemergt, deployt und
+dokumentiert; es gibt keine offenen Branches und keine offenen Pull Requests.
 
-**Offen ist nur noch der DSGVO-Teil**, und er braucht zwei Festlegungen, die keine Sitzung
-treffen kann — beide mit rechtlicher Folge:
-
-1. **Aufbewahrungsfristen.** Wie lange bleiben Krankmeldungen (Art.-9-Daten) und die Einträge
-   des Audit-Logs? Art. 5 Abs. 1 lit. e verlangt eine Begrenzung; welche, hängt vom Betrieb ab.
-2. **Löschen oder anonymisieren.** Wird ein Mitarbeiter gelöscht, verschwinden dann seine
-   vergangenen Schichten — oder bleiben sie ohne Namen stehen? Löschen schreibt die Geschichte
-   um und nimmt dem Audit-Log seinen Zweck; Anonymisieren behält den Plan und entfernt die
-   Person.
-
-Das Mechanische lässt sich ohne diese Zahlen bauen (Auskunft nach Art. 15, Löschweg,
-konfigurierbare Frist mit „keine automatische Löschung" als Vorgabe). Die Zahlen selbst gehören
-dem Nutzer.
+Damit ist die Roadmap bis hierher abgearbeitet. Was als Nächstes kommt, ist keine Fortsetzung,
+sondern eine neue Festlegung des Nutzers. Was sich aus der Arbeit selbst aufdrängt, steht unter
+„Zurückgestellte Befunde"; nichts davon ist dringend.
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
@@ -51,13 +41,13 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Alles bis 5h gemergt und deployt (PR #16–#24); die API antwortet mit 200 |
+| `main` | Etappe 5 vollständig gemergt und deployt (PR #16–#25); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 421 passed / 35 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 440 passed / 36 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 25 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0013`. `0013_audit_log` legt das Änderungsprotokoll an |
-| Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach den Exporten |
+| Migrationen | `0001`–`0014`. `0014_anonymisation` legt `employees.anonymized_at` an |
+| Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
 ## Etappe 0 — abgeschlossen, gemergt, deployt
@@ -672,6 +662,61 @@ Entwürfe; der Unterschied ist der Empfänger.
 erfundene wäre eine Behauptung, die die Daten nicht tragen. Ein Kalender in anderer Zone
 verschiebt die Termine — steht im README.
 
+## Etappe 5i — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-5i-dsgvo-design.md`](superpowers/specs/2026-08-23-etappe-5i-dsgvo-design.md)
+
+Zwei Festlegungen kamen vom Nutzer: **sechs Monate** Aufbewahrung, und beim Löschen wird
+**anonymisiert**. Beide prägen alles Weitere.
+
+**Der Konflikt, der zuerst zu klären war — und der nächsten Sitzung sofort auffallen wird, wenn
+sie ihn nicht kennt:** sechs Monate lassen sich *nicht* auf den Dienstplan anwenden.
+[§ 16 Abs. 2 ArbZG](https://www.gesetze-im-internet.de/arbzg/__16.html) verlangt, Nachweise über
+die acht Stunden hinausgehende Arbeitszeit **mindestens zwei Jahre** aufzubewahren. Einen Plan
+mit Zehnstundentagen nach sechs Monaten zu löschen wäre der Verstoß gegen eine Norm zur
+Erfüllung einer anderen. Die Frist gilt deshalb nur für das, was *über* die
+Arbeitszeitaufzeichnung hinausgeht: Krank- und Urlaubsmeldungen und das Änderungsprotokoll.
+
+**Der Abwesenheitsgrund steht doppelt.** Er liegt in `employee_absences` **und** denormalisiert
+in der Zuweisung, die er freigemacht hat (`absence_type`, `absent_employee_id`). Nur die eine
+Tabelle zu räumen ließe die Gesundheitsangabe im Dienstplan stehen — genau der Punkt, den man
+übersieht. Beide Orte werden geräumt, mit eigenem Test.
+
+**Und beim Löschen genauso** — das hat erst das CodeRabbit-Review in PR #25 gefunden. Die
+Anonymisierung leerte `employee_absences` und ließ den Grund in der Zuweisung stehen, samt
+`absent_employee_id`. Die Gesundheitsangabe hätte die gelöschte Person um Monate überlebt, bis
+die Aufbewahrungsfrist sie eingeholt hätte. **Die Lehre:** ein doppelter Speicherort ist an
+*jedem* Löschweg doppelt, nicht nur an dem, an dem man ihn bemerkt hat.
+
+**Löschen heißt anonymisieren.** Vorher setzte `ON DELETE SET NULL` die Schichten der gelöschten
+Person auf „unbesetzt": die Vergangenheit sah rückwirkend unterbesetzt aus, Deckungslücken
+erschienen aus dem Nichts, und die Arbeitszeitaufzeichnung verlor genau die Zuordnung, die sie
+ausmacht. Jetzt wird die Zeile zum Grabstein — Name ersetzt, E-Mail weg, `active` auf 0,
+`anonymized_at` gesetzt, alles Persönliche daneben gelöscht —, und die Zuweisungen zeigen weiter
+auf sie. Art. 17 Abs. 3 lit. b nimmt Verarbeitung aus, die einer rechtlichen Verpflichtung
+dient; § 16 Abs. 2 ArbZG ist eine.
+
+`DELETE /employees/<id>` behält seinen Namen und ändert seine Bedeutung. Die Antwort sagt es
+ausdrücklich, und die Rückfrage in der Oberfläche auch.
+
+**Kein Zeitplandienst, und das ist gesagt statt vorgetäuscht.** Der genutzte Render-Plan bietet
+keinen. Geräumt wird beim Start der Anwendung — in der Praxis bei jedem Deploy — und auf
+Knopfdruck über `POST /retention/purge`. Der Knopf meldet Zahlen je Tabelle; ein Aufräumen, das
+schweigt, lässt niemanden wissen, ob es lief. Läuft die Instanz monatelang ohne Neustart durch,
+räumt sie ohne den Knopf nicht.
+
+**Die Auskunft nach Art. 15** (`GET /employees/<id>/data-export`, self-or-HR) liefert JSON, nie
+den Passwort-Hash — das eine Feld, dessen Preisgabe die Auskunft selbst zum Sicherheitsproblem
+machte. Ein Test hält das fest. JSON und nicht PDF, weil Art. 15 Abs. 3 ein gängiges
+elektronisches Format verlangt und die Alternative eine Abhängigkeit für Papieroptik wäre.
+
+**Bewusst nicht dabei:** Einwilligungsverwaltung (die Verarbeitung stützt sich auf das
+Arbeitsverhältnis und § 16 ArbZG, nicht auf Einwilligung — eine Einwilligungsoberfläche
+täuschte eine Rechtsgrundlage vor), ein Verarbeitungsverzeichnis nach Art. 30 (ein Dokument,
+kein Programmteil), und ein Löschen der Arbeitszeitaufzeichnung nach zwei Jahren (§ 16 nennt ein
+Minimum, kein Maximum — wann darüber hinaus gelöscht wird, ist wieder eine Festlegung des
+Betreibers).
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -752,6 +797,13 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     hätte das PyPI-Paket `coverage` (Abhängigkeit von `pytest-cov`) verdeckt, sobald jemand das
     ergänzt — auch wenn `coverage` zum Entscheidungszeitpunkt nicht installiert war. Deshalb
     heißt die Datei `coverage_model.py`.
+
+18. **Eine gelöschte Person ist noch da — als Grabstein.** Seit 5i löscht
+    `DELETE /employees/<id>` die Zeile nicht, sondern anonymisiert sie (`anonymized_at` gesetzt,
+    `active` auf 0). Jede neue Abfrage, die Mitarbeiter *auflistet* oder *zählt*, muss
+    `anonymized_at IS NULL` mitführen — sonst tauchen Grabsteine als Personal auf, im
+    Auswahlfeld, in Statistiken, im Generator. Wer über `shift_assignments` joint, will das
+    Gegenteil: dort gehört der Grabstein dazu, sonst sieht die Vergangenheit unbesetzt aus.
 
 ## Offen — liegt beim Nutzer
 

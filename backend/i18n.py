@@ -387,6 +387,18 @@ TRANSLATIONS = {
         'de': 'Unbekannter Zustand. Erlaubt sind: {allowed}',
         'en': 'Unknown status. Allowed values are: {allowed}',
     },
+    'anonymised_employee_name': {
+        'de': 'Gelöschter Mitarbeiter #{id}',
+        'en': 'Deleted employee #{id}',
+    },
+    'employee_anonymised': {
+        'de': 'Mitarbeiter gelöscht. Die vergangenen Schichten bleiben ohne Namen bestehen — § 16 Abs. 2 ArbZG verlangt, Arbeitszeitnachweise mindestens zwei Jahre aufzubewahren.',
+        'en': 'Employee deleted. Past shifts remain without a name — § 16 Abs. 2 ArbZG requires working-time records to be kept for at least two years.',
+    },
+    'retention_purged': {
+        'de': 'Aufräumen abgeschlossen',
+        'en': 'Clean-up finished',
+    },
     'free_block_label': {
         'de': 'Dienst',
         'en': 'Shift',

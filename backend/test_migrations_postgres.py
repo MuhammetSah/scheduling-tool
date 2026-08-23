@@ -1171,3 +1171,18 @@ def test_in_das_protokoll_laesst_sich_schreiben(pg_db):
             assert zeiger.fetchone()[0] == '/assignments/1'
     finally:
         verbindung.close()
+
+
+def test_anonymisierungsspalte_laesst_sich_zurueckrollen_und_erneut_anwenden(pg_db):
+    """Postgres-Gegenstueck zum Rundlauf von 0014_anonymisation."""
+    migrations, schema_url, schema = pg_db
+    migrations.apply_pending()
+
+    while '0014_anonymisation' in migrations.applied_versions():
+        migrations.rollback_last()
+
+    # Die Spalte ueberlebt die Ruecknahme absichtlich - siehe down().
+    assert 'anonymized_at' in spalten(schema_url, schema, 'employees')
+
+    assert '0014_anonymisation' in migrations.apply_pending()
+    assert 'anonymized_at' in spalten(schema_url, schema, 'employees')

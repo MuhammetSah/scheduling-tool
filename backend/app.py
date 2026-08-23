@@ -878,7 +878,10 @@ def list_employees():
     # colleagues' personal data.
     connection = get_db()
     cursor = connection.cursor()
-    cursor.execute('SELECT * FROM employees ORDER BY name')
+    # Anonymised rows are tombstones, not staff: their assignments still hang
+    # off them so the working-time record stays whole (§ 16 Abs. 2 ArbZG), but
+    # offering them for editing or counting them as headcount would be wrong.
+    cursor.execute('SELECT * FROM employees WHERE anonymized_at IS NULL ORDER BY name')
     employees = [serialize_employee(cursor, row) for row in cursor.fetchall()]
     return jsonify(employees)
 
@@ -1052,9 +1055,178 @@ def delete_employee(employee_id):
     if linked:
         return jsonify({'message': t(g.lang, 'delete_linked_account_first', accounts=', '.join(linked))}), 400
 
-    cursor.execute('DELETE FROM employees WHERE id = ?', (employee_id,))
+    # Anonymised, not deleted. ON DELETE SET NULL would turn this person's past
+    # shifts into unfilled ones - the past would read as understaffed, coverage
+    # gaps would appear retroactively, and the working-time record § 16 Abs. 2
+    # ArbZG requires would lose the very attribution that makes it one.
+    #
+    # Art. 17 Abs. 3 lit. b DSGVO exempts processing needed to comply with a
+    # legal obligation, and § 16 Abs. 2 is one. What stays is the working-time
+    # record without a person; what goes is the person.
+    for statement in (
+        'DELETE FROM employee_availability WHERE employee_id = ?',
+        'DELETE FROM employee_unavailable_weekdays WHERE employee_id = ?',
+        'DELETE FROM employee_unavailable_dates WHERE employee_id = ?',
+        'DELETE FROM employee_allowed_shift_types WHERE employee_id = ?',
+        'DELETE FROM employee_absences WHERE employee_id = ?',
+    ):
+        cursor.execute(statement, (employee_id,))
+
+    # The absence reason lives in two places: employee_absences, cleared above,
+    # and denormalised into the assignment it freed. Clearing only the table
+    # would leave the health note - with the person attached - sitting in the
+    # roster until the retention period catches it months later.
+    #
+    # The assignment itself stays. Deleting the cover shift would rewrite the
+    # working-time record § 16 Abs. 2 ArbZG requires.
+    cursor.execute(
+        'UPDATE shift_assignments SET absence_type = NULL, absent_employee_id = NULL '
+        'WHERE absent_employee_id = ?', (employee_id,))
+
+    cursor.execute(
+        'UPDATE employees SET name = ?, email = NULL, active = 0, '
+        'anonymized_at = CURRENT_TIMESTAMP WHERE id = ?',
+        (t(g.lang, 'anonymised_employee_name', id=employee_id), employee_id))
     connection.commit()
-    return jsonify({'message': t(g.lang, 'employee_deleted')}), 200
+    return jsonify({'message': t(g.lang, 'employee_anonymised')}), 200
+
+
+# ---------- GDPR: access, erasure, retention ----------
+#
+# Two decisions came from the operator: six months of retention, and erasure by
+# anonymisation. Both shape what follows.
+
+# § 16 Abs. 2 ArbZG requires records of working time beyond eight hours a day
+# to be kept for at least two years, so the retention period deliberately does
+# *not* touch assignments or schedules. Deleting a month with ten-hour days
+# after six months would be breaking one rule in order to keep another.
+RETENTION_DEFAULT_MONTHS = 6
+
+
+def retention_months(cursor):
+    """How long absences and log entries are kept, in months."""
+    stored = read_settings(cursor).get('retention_months')
+    try:
+        months = int(stored)
+    except (TypeError, ValueError):
+        return RETENTION_DEFAULT_MONTHS
+    return months if months > 0 else RETENTION_DEFAULT_MONTHS
+
+
+def retention_cutoff(cursor):
+    """The date before which the personal extras are removed.
+
+    Months as 30 days each rather than calendar arithmetic: the difference is
+    at most a couple of days on a six-month period, and a cutoff that lands on
+    the same day of the month is not worth a dependency or a leap-year branch.
+    """
+    return (date.today() - timedelta(days=30 * retention_months(cursor))).isoformat()
+
+
+def purge_expired_personal_data(cursor):
+    """Remove what the retention period no longer covers.
+
+    Three places, and the third is the one that gets missed: an absence is
+    recorded in employee_absences *and* denormalised into the assignment it
+    freed (absence_type, absent_employee_id). Clearing only the table would
+    leave the health note sitting in the roster.
+
+    Assignments themselves are never touched - see RETENTION_DEFAULT_MONTHS.
+    """
+    cutoff = retention_cutoff(cursor)
+    removed = {}
+
+    cursor.execute('DELETE FROM employee_absences WHERE date < ?', (cutoff,))
+    removed['absences'] = cursor.rowcount
+
+    cursor.execute(
+        'UPDATE shift_assignments SET absence_type = NULL, absent_employee_id = NULL '
+        'WHERE date < ? AND absence_type IS NOT NULL', (cutoff,))
+    removed['assignment_absence_marks'] = cursor.rowcount
+
+    cursor.execute('DELETE FROM audit_log WHERE at < ?', (cutoff,))
+    removed['audit_entries'] = cursor.rowcount
+
+    return removed
+
+
+@app.route('/retention/purge', methods=['POST'])
+@hr_required
+def purge_retention():
+    """Run the clean-up now, and say what it did.
+
+    There is no scheduler: the hosting plan in use offers none, and pretending
+    otherwise would be worse than saying so. The purge also runs at startup,
+    which in practice means on every deploy. An instance left running for
+    months without a restart will not clean up on its own until someone presses
+    this - which is exactly why it reports counts rather than a bare "done".
+    """
+    connection = get_db()
+    cursor = connection.cursor()
+    removed = purge_expired_personal_data(cursor)
+    connection.commit()
+    return jsonify({
+        'message': t(g.lang, 'retention_purged'),
+        'retention_months': retention_months(cursor),
+        'removed': removed,
+    })
+
+
+@app.route('/employees/<int:employee_id>/data-export', methods=['GET'])
+def export_employee_data(employee_id):
+    """Everything this tool knows about one person, as JSON (Art. 15 DSGVO).
+
+    Self-or-HR, the same rule the absences and availability windows follow.
+
+    JSON rather than PDF: Art. 15 Abs. 3 asks for "a commonly used electronic
+    format", JSON is one, and the alternative would be a dependency bought for
+    the sake of looking like paper.
+    """
+    error = require_self_or_hr(employee_id)
+    if error:
+        return error
+
+    cursor = get_db().cursor()
+    cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
+    row = cursor.fetchone()
+    if not row:
+        return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
+
+    employee = serialize_employee(cursor, row)
+
+    cursor.execute(
+        'SELECT date, absence_type FROM employee_absences WHERE employee_id = ? ORDER BY date',
+        (employee_id,))
+    absences = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute(
+        'SELECT sa.date, sa.start_time, sa.end_time, sa.break_minutes, st.name AS shift_type_name '
+        'FROM shift_assignments sa LEFT JOIN shift_types st ON st.id = sa.shift_type_id '
+        'WHERE sa.employee_id = ? ORDER BY sa.date, sa.start_time', (employee_id,))
+    assignments = [dict(r) for r in cursor.fetchall()]
+
+    # Never the password hash. It is the one field whose disclosure would make
+    # the export itself a security problem.
+    cursor.execute(
+        'SELECT id, username, role, email, created_at FROM users WHERE employee_id = ?',
+        (employee_id,))
+    accounts = [dict(r) for r in cursor.fetchall()]
+
+    log_entries = []
+    if accounts:
+        cursor.execute(
+            'SELECT at, method, path, status FROM audit_log WHERE user_id IN '
+            '(SELECT id FROM users WHERE employee_id = ?) ORDER BY at DESC',
+            (employee_id,))
+        log_entries = [dict(r) for r in cursor.fetchall()]
+
+    return jsonify({
+        'employee': employee,
+        'absences': absences,
+        'assignments': assignments,
+        'accounts': accounts,
+        'audit_log': log_entries,
+    })
 
 
 # ---------- self-service absences (sick / vacation) ----------
@@ -3210,7 +3382,7 @@ SCHEDULE_DRAFT = 'draft'
 SCHEDULE_PUBLISHED = 'published'
 SCHEDULE_STATES = (SCHEDULE_DRAFT, SCHEDULE_PUBLISHED)
 
-KNOWN_SETTINGS = {'holiday_region'}
+KNOWN_SETTINGS = {'holiday_region', 'retention_months'}
 
 
 def read_settings(cursor):
@@ -3448,6 +3620,34 @@ def handle_unexpected_error(error):
 @app.route('/')
 def index():
     return jsonify({'message': t(g.lang, 'api_root'), 'status': 'ok'})
+
+
+def _purge_at_startup():
+    """Run the retention clean-up once, when the module is imported.
+
+    There is no scheduler on the hosting plan in use, and pretending there was
+    one would be worse than saying so. In practice the service restarts on
+    every deploy, which makes this the usual trigger; an instance left running
+    for months needs POST /retention/purge instead. Both are documented.
+
+    Never allowed to stop the application from starting: a clean-up that keeps
+    the service down is a far bigger problem than data kept a week too long.
+    """
+    try:
+        connection = _open_db_connection()
+        try:
+            cursor = connection.cursor()
+            removed = purge_expired_personal_data(cursor)
+            connection.commit()
+            if any(removed.values()):
+                app.logger.info('Aufbewahrungsfrist: %s', removed)
+        finally:
+            connection.close()
+    except Exception:
+        app.logger.exception('Aufbewahrungslauf beim Start fehlgeschlagen')
+
+
+_purge_at_startup()
 
 
 if __name__ == '__main__':

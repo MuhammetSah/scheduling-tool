@@ -24,6 +24,7 @@ function BusinessHours({ setFlash }) {
   // a valid state and deliberately not defaulted to some state or other.
   const [regions, setRegions] = useState([])
   const [region, setRegion] = useState('')
+  const [retentionMonths, setRetentionMonths] = useState('6')
 
   async function load() {
     try {
@@ -37,6 +38,7 @@ function BusinessHours({ setFlash }) {
       setExceptions(exc)
       setRegions(moeglicheRegionen)
       setRegion(settings.holiday_region || '')
+      setRetentionMonths(settings.retention_months || '6')
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }
@@ -114,8 +116,58 @@ function BusinessHours({ setFlash }) {
     }
   }
 
+  async function saveRetention(months) {
+    setRetentionMonths(months)
+    try {
+      await api.put('/settings', { retention_months: months || null })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
+  async function purgeNow() {
+    if (!confirm(t('retention.purgeConfirm'))) return
+    try {
+      const result = await api.post('/retention/purge', {})
+      setFlash({
+        type: 'success',
+        text: t('retention.purged', {
+          absences: result.removed.absences,
+          marks: result.removed.assignment_absence_marks,
+          entries: result.removed.audit_entries,
+        }),
+      })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+    }
+  }
+
   return (
     <>
+      <div className="panel">
+        <div className="panel-header">
+          <h2>{t('retention.title')}</h2>
+        </div>
+        <div className="field">
+          <label htmlFor="retention-months">{t('retention.monthsLabel')}</label>
+          <input
+            id="retention-months"
+            type="number"
+            min="1"
+            value={retentionMonths}
+            onChange={e => setRetentionMonths(e.target.value)}
+            onBlur={e => saveRetention(e.target.value)}
+          />
+          <p className="hint">{t('retention.hint')}</p>
+        </div>
+        <div className="toolbar">
+          <button type="button" className="btn-secondary" onClick={purgeNow}>
+            {t('retention.purgeButton')}
+          </button>
+          <span className="hint">{t('retention.scheduleHint')}</span>
+        </div>
+      </div>
+
       <div className="panel">
         <div className="panel-header">
           <h2>{t('businessHours.regionTitle')}</h2>

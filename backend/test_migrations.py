@@ -1354,3 +1354,28 @@ def test_0013_haelt_eintraege_ohne_fremdschluessel_auf_users(fresh_db):
         connection.close()
 
     assert anzahl == 1
+
+
+# ---------- 0014_anonymisation ----------
+
+
+def test_0014_ergaenzt_den_anonymisierungszeitpunkt(fresh_db):
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+
+    connection = sqlite3.connect(db_file)
+    try:
+        spalten = {zeile[1] for zeile in connection.execute('PRAGMA table_info(employees)')}
+    finally:
+        connection.close()
+
+    assert 'anonymized_at' in spalten
+
+
+def test_0014_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
+    migrations, _db_file = fresh_db
+    migrations.apply_pending()
+
+    zurueck_bis(migrations, '0014_anonymisation')
+
+    assert '0014_anonymisation' in migrations.apply_pending()
