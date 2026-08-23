@@ -26,6 +26,7 @@ from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
     MAX_AVERAGE_DAILY_HOURS, MAX_CONSECUTIVE_DAYS, MIN_FREE_SUNDAYS_PER_YEAR, _ranges_overlap,
     _time_range_minutes, average_window, exceeds_average, generate_schedule,
+    PlanTooLarge,
     break_position_breaches_arbzg, legal_break_minutes, net_working_minutes,
     rest_gap_hours, shift_datetimes, stretches_without_break,
     shift_duration_minutes, window_contains_shift, window_is_valid_on, working_days_in,
@@ -2214,6 +2215,12 @@ def generate_schedule_route():
         result = generate_schedule(year, month, employees, shift_types,
                                    weekend_weight=weekend_weight, slots=slots,
                                    boundary=boundary_context(cursor, year, month))
+    except PlanTooLarge as zu_gross:
+        # Die Suche rekursiert je Platz (siehe PlanTooLarge in scheduler.py).
+        # Vorher endete das in einem 500er - der Meldung, die am wenigsten
+        # sagt, ausgerechnet fuer eine Grenze, die man kennen muss.
+        return jsonify({'message': t(g.lang, 'plan_too_large',
+                                     blocks=zu_gross.slots, limit=zu_gross.limit)}), 400
     except ValueError:
         return jsonify({'message': t(g.lang, 'invalid_year_or_month')}), 400
 

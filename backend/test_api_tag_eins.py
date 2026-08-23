@@ -75,3 +75,47 @@ def test_gepflegte_baender_ohne_bedarf_bleiben_erlaubt(hr_client):
     assert antwort.status_code == 201, antwort.json
     assert 'notice' not in antwort.json
     assert hr_client.get('/schedules/2026/11').json['assignments'] == []
+
+
+# ---------- Die Obergrenze der Suche ----------
+
+
+def test_ein_zu_grosser_monat_sagt_es_statt_abzustuerzen(hr_client, monkeypatch):
+    """Gefunden beim Messen (siehe test_scheduler_grenze.py).
+
+    backtrack() rekursiert je Platz; oberhalb der Rekursionsgrenze scheiterte
+    das Erzeugen mit einem 500er "Unerwarteter Serverfehler" - der Meldung,
+    die am wenigsten sagt.
+
+    Die Grenze wird hier heruntergesetzt statt einen Monat mit tausend
+    Bloecken zu bauen: geprueft wird der Weg von der Ausnahme zur Meldung,
+    nicht die Zahl selbst.
+    """
+    import scheduler
+
+    monkeypatch.setattr(scheduler, 'max_plannable_slots', lambda: 3)
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'})
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': wd, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 2}
+        for wd in range(7)])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 11})
+
+    assert antwort.status_code == 400, antwort.json
+    assert 'zu gro' in antwort.json['message']
+
+
+def test_ein_normaler_monat_bleibt_unberuehrt(hr_client):
+    """Gegenprobe: eine Grenze, die immer greift, waere sonst ebenfalls
+    gruen."""
+    hr_client.post('/employees', json={'name': 'Anna'})
+    hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'})
+    hr_client.put('/coverage-requirements', json=[
+        {'weekday': wd, 'start_time': '08:00', 'end_time': '16:00', 'required_count': 1}
+        for wd in range(7)])
+
+    antwort = hr_client.post('/schedules/generate', json={'year': 2026, 'month': 11})
+
+    assert antwort.status_code == 201, antwort.json
