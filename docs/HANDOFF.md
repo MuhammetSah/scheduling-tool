@@ -81,10 +81,10 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 bis 13 gemergt und deployt (PR #16–#35); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 14 gemergt und deployt (PR #16–#36); `/health` meldet `database: ok`, Stand `0017` |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 574 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 52 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 579 passed / 49 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 52 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
 | Migrationen | `0001`–`0017`. `0017_qualifications` legt den Nachweiskatalog und zwei Verknüpfungstabellen an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
@@ -1034,6 +1034,28 @@ Entscheidung, die man ohne Auftrag treffen darf.
 Überziehen, sondern die dokumentierte Strategie — bleiben Lücken, fährt AUTO einen zweiten Lauf.
 Zwei volle Budgets sind das Maximum, sechzehn Sekunden also der dokumentierte schlechteste Fall.
 
+## Etappe 14 — abgeschlossen, gemergt, deployt
+
+**`GET /` meldete seit jeher `status: ok` und fasste die Datenbank nie an** — und `render.yaml`
+verdrahtete `healthCheckPath` auf genau diese Route. Stirbt die Datenbank, hält Render den Dienst
+also für gesund und schickt ihm weiter Anfragen, die samt und sonders mit 500 enden. **Am 07.09.
+ist das der wahrscheinlichste Fehler**: `DATABASE_URL` zeigt auf nichts, die Anwendung startet,
+alles sieht gut aus.
+
+`/health` liest wirklich, und zwar aus `schema_migrations` — das beantwortet in einem Zug beide
+Fragen des Umstellungsblattes: kommt die Datenbank an, und welcher Stand liegt dort. **503 statt
+200 mit einem Feld darin**, weil eine Überwachung den Status liest und nicht den Rumpf.
+
+**Der Preis steht dabei:** eine kurz stolpernde Datenbank lässt Render den Dienst als ungesund
+führen, und das kann einen Neustart auslösen. Bei einer Datenbank, die nicht antwortet, ist ein
+Neustart aber ohnehin nicht das Problem.
+
+Die Wurzel bleibt die Begrüßung der API und behauptet keine Gesundheit mehr. Schritt 4 des
+Umstellungsblattes hat damit **eine** Abfrage statt zweier indirekter.
+
+Am lebenden Dienst nachgesehen: `{"database":"ok","migrations":{"applied":17,"latest":
+"0017_qualifications"},"status":"ok"}`.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -1182,6 +1204,11 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     Leistungsbefunde standen zwölf Etappen lang mit dieser Notiz da, ohne dass jemand gemessen
     hätte. Das Messen hat sie an einem Nachmittag erledigt — und dabei eine Grenze gefunden, die
     niemand gesucht hat. **Wer eine Frage vertagt, notiert auch, wie man sie beantwortet.**
+
+29. **Eine Zusage, die nichts prüft, ist schlimmer als keine.** `GET /` sagte `status: ok`, ohne
+    die Datenbank anzufassen — und die Überwachung hing daran. Wer ein Feld `status` einführt,
+    schuldet die Prüfung dahinter; wer sie nicht leisten will, nennt das Feld anders. Dasselbe
+    Muster wie beim leeren Plan in Etappe 11: Erfolg melden und nichts tun.
 
 ## Offen — liegt beim Nutzer
 
