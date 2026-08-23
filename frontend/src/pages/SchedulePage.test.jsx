@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { LanguageProvider } from '../i18n/LanguageContext'
 import SchedulePage from './SchedulePage'
 import { api } from '../api'
@@ -37,13 +38,22 @@ async function zeigen(setFlash) {
                                 end_time: '16:00', color: '#3366cc',
                                 required_qualifications: [] }])
     }
+    // Eingerichtet: die Tafel "was noch fehlt" bleibt aus dem Weg, damit
+    // diese Tests von den Meldungen handeln und nicht von ihr.
+    if (pfad === '/setup-status') {
+      return Promise.resolve({ ready: true, missing: [], notes: [] })
+    }
     return Promise.resolve([])
   })
   await act(async () => {
     render(
-      <LanguageProvider>
-        <SchedulePage setFlash={setFlash} user={HR} />
-      </LanguageProvider>
+      // Die Seite verlinkt seit Etappe 12 auf die fehlenden Einstellungen -
+      // <Link> braucht einen Router darüber.
+      <MemoryRouter>
+        <LanguageProvider>
+          <SchedulePage setFlash={setFlash} user={HR} />
+        </LanguageProvider>
+      </MemoryRouter>
     )
   })
 }
@@ -88,5 +98,73 @@ describe('SchedulePage: der leere Plan sagt warum', () => {
     await generieren(setFlash, leererPlan({ unfilled_count: 3 }))
 
     expect(setFlash).toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }))
+  })
+})
+
+describe('SchedulePage: was noch fehlt', () => {
+  // Seit Etappe 12 zeigt die Seite, was einen brauchbaren Plan noch
+  // verhindert - aber nur, solange wirklich etwas fehlt. Eine Tafel, die immer
+  // da ist, ist Moeblierung; eine, die verschwindet, ist eine Antwort.
+  async function mitStand(stand, user = HR) {
+    const nichtGefunden = Object.assign(new Error('kein Plan'), { status: 404 })
+    api.get.mockImplementation(pfad => {
+      if (pfad.startsWith('/schedules/')) return Promise.reject(nichtGefunden)
+      if (pfad === '/setup-status') return Promise.resolve(stand)
+      return Promise.resolve([])
+    })
+    await act(async () => {
+      render(
+        <MemoryRouter>
+          <LanguageProvider>
+            <SchedulePage setFlash={() => {}} user={user} />
+          </LanguageProvider>
+        </MemoryRouter>
+      )
+    })
+  }
+
+  beforeEach(() => { vi.clearAllMocks() })
+
+  it('nennt, was fehlt, und wohin', async () => {
+    await mitStand({
+      ready: false,
+      missing: [{ key: 'coverage_requirements', route: '/coverage-requirements',
+                  text: 'Es ist noch kein Bedarfsband hinterlegt.' }],
+      notes: [],
+    })
+
+    expect(screen.getByText(/kein Bedarfsband/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Dorthin' }))
+      .toHaveAttribute('href', '/coverage-requirements')
+  })
+
+  it('verschwindet, sobald nichts mehr fehlt', async () => {
+    // Die Gegenprobe, und die wichtigste: eine Tafel, die bleibt, waere sonst
+    // ebenfalls gruen.
+    await mitStand({ ready: true, missing: [], notes: [] })
+
+    expect(screen.queryByText(/Bevor der erste Plan/)).not.toBeInTheDocument()
+  })
+
+  it('zeigt Hinweise, ohne sie zu Maengeln zu machen', async () => {
+    await mitStand({
+      ready: true,
+      missing: [],
+      notes: [{ key: 'holiday_region', route: '/business-hours',
+                text: 'Ohne Bundesland kennt das Werkzeug keine Feiertage.' }],
+    })
+
+    // Bereit heisst bereit: die Tafel bleibt aus, auch wenn Hinweise offen sind.
+    expect(screen.queryByText(/Bevor der erste Plan/)).not.toBeInTheDocument()
+  })
+
+  it('zeigt einem Mitarbeiter nichts davon', async () => {
+    // Was dem Betrieb fehlt, ist die Sache der Personalabteilung - und die API
+    // lehnt die Route fuer Mitarbeiter ohnehin ab.
+    await mitStand({ ready: false, missing: [{ key: 'employees', route: '/employees',
+                                               text: 'Kein Mitarbeiter' }], notes: [] },
+                    { id: 2, username: 'anna', role: 'employee', employee_id: 5 })
+
+    expect(screen.queryByText(/Bevor der erste Plan/)).not.toBeInTheDocument()
   })
 })

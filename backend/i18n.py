@@ -369,6 +369,26 @@ TRANSLATIONS = {
         'de': 'weekend_weight darf nicht negativ sein',
         'en': 'weekend_weight must not be negative',
     },
+    'setup_needs_employees': {
+        'de': 'Es ist noch kein aktiver Mitarbeiter angelegt — ohne den bliebe '
+              'jeder Block unbesetzt.',
+        'en': 'No active employee yet — every block would stay unfilled.',
+    },
+    'setup_needs_shift_types': {
+        'de': 'Es ist noch keine Schichtart angelegt.',
+        'en': 'No shift type yet.',
+    },
+    'setup_needs_coverage': {
+        'de': 'Es ist noch kein Bedarfsband hinterlegt — daraus baut der Planer '
+              'die Blöcke.',
+        'en': 'No coverage band yet — that is what the planner builds blocks from.',
+    },
+    'setup_note_holiday_region': {
+        'de': 'Ohne Bundesland kennt das Werkzeug keine Feiertage und meldet sie '
+              'nicht. Ein Plan entsteht trotzdem.',
+        'en': 'Without a federal state the tool knows no public holidays and says '
+              'nothing about them. A plan is still produced.',
+    },
     'no_coverage_defined': {
         'de': 'Es ist kein Bedarfsband hinterlegt — der Plan bleibt deshalb '
               'leer. Der Bedarf lässt sich unter „Bedarf" festlegen.',
