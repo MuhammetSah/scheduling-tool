@@ -113,6 +113,9 @@ def test_wochentag_ausserhalb_0_bis_6_ist_400(hr_client):
     })
 
     assert antwort.status_code == 400
+    # Ohne die Meldung waere jede beliebige 400 gruen - auch eine aus einer
+    # ganz anderen Pruefung, die den Wochentag nie angesehen hat.
+    assert 'Wochentag' in antwort.json['message']
 
 
 def test_ungueltige_uhrzeiten_sind_400(hr_client):
@@ -143,6 +146,8 @@ def test_valid_until_vor_valid_from_ist_400(hr_client):
     })
 
     assert antwort.status_code == 400
+    assert antwort.json['message'] == (
+        'Das Gültigkeitsende darf nicht vor dem Gültigkeitsbeginn liegen.')
     assert antwort.json['message'] == 'Das Gültigkeitsende darf nicht vor dem Gültigkeitsbeginn liegen.'
 
 

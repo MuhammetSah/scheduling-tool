@@ -887,6 +887,13 @@ def replace_employee_availability(cursor, employee_id, entries):
     shift types - a route that changes more than its name says.
     """
     cursor.execute('DELETE FROM employee_availability WHERE employee_id = ?', (employee_id,))
+    # Exact duplicates only. Two windows on one weekday are the split shift and
+    # must stay allowed; overlapping ones stay too, because merging them would
+    # quietly rewrite what somebody typed. But the same weekday, the same hours
+    # AND the same validity bounds twice is one statement made twice - the
+    # scheduler shrugs (a slot fits if it fits ANY window), and every surface
+    # shows it twice with no way to tell whether that was meant.
+    gesehen = set()
     for entry in entries or []:
         if not isinstance(entry, dict):
             raise ValueError(t(g.lang, 'availability_entry_invalid'))
@@ -908,6 +915,13 @@ def replace_employee_availability(cursor, employee_id, entries):
             for bound in (entry.get('valid_from'), entry.get('valid_until')))
         if valid_from and valid_until and valid_until < valid_from:
             raise ValueError(t(g.lang, 'availability_valid_range_invalid'))
+
+        kennung = (weekday, start_time, end_time, valid_from, valid_until)
+        if kennung in gesehen:
+            raise ValueError(t(g.lang, 'availability_window_duplicate',
+                               weekday=WEEKDAYS[g.lang][weekday],
+                               start=start_time, end=end_time))
+        gesehen.add(kennung)
 
         cursor.execute(
             'INSERT INTO employee_availability (employee_id, weekday, start_time, end_time, valid_from, valid_until) '
@@ -2291,8 +2305,15 @@ def set_shift_times(year, month):
         connection.commit()
         return jsonify({'message': t(g.lang, 'times_reset_to_default')}), 200
 
-    if not valid_time(start_time) or not valid_time(end_time):
-        return jsonify({'message': t(g.lang, 'time_format_hint')}), 400
+    # The same parser update_assignment() uses, rather than a second check that
+    # drifts from it. It was already drifting: this route accepted an equal
+    # start and end, which shift_duration_minutes() reads as running past
+    # midnight and turns into a 1440-minute day. And it answered "wrong format"
+    # for a half-filled pair, pointing at the one thing that was fine.
+    try:
+        start_time, end_time = parse_assignment_times(data)
+    except ValueError as err:
+        return jsonify({'message': str(err)}), 400
 
     cursor.execute('''
         INSERT INTO shift_time_overrides (schedule_id, date, shift_type_id, start_time, end_time)

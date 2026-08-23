@@ -215,3 +215,110 @@ def test_eine_liste_statt_eines_objekts_ist_ein_klientenfehler(hr_client):
         {'weekday': 1, 'start_time': '08:00', 'end_time': '16:00'}])
 
     assert antwort.status_code == 400
+
+
+# ---------- Dieselbe Eingabe, dieselbe Antwort ----------
+
+
+def test_gleiche_zeiten_werden_auch_beim_tagesabweichenden_ueberschreiben_abgelehnt(hr_client):
+    """Fuer die Zuweisung war das schon behoben, fuer die Tagesausnahme nicht.
+
+    Gleicher Beginn und gleiches Ende ist keine Schicht der Laenge null:
+    shift_duration_minutes() liest end <= start als "laeuft ueber Mitternacht"
+    und macht daraus stillschweigend 1440 Minuten. Aus einer offensichtlich
+    unsinnigen Eingabe wird ein Vierundzwanzigstundendienst.
+    """
+    art = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    antwort = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'],
+        'start_time': '10:00', 'end_time': '10:00'})
+
+    assert antwort.status_code == 400
+
+
+def test_eine_nachtschicht_geht_dort_weiterhin(hr_client):
+    """Gegenprobe: end < start ist ausdruecklich erlaubt - das ist die
+    Nachtschicht, nicht der Fehler."""
+    art = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    antwort = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'],
+        'start_time': '22:00', 'end_time': '06:00'})
+
+    assert antwort.status_code == 200, antwort.json
+
+
+def test_eine_halbe_zeitangabe_nennt_das_fehlende_paar(hr_client):
+    """Nur ein Ende ohne Beginn ergab "Format falsch" - die Zeit stimmt aber,
+    es fehlt die andere Haelfte. Eine Meldung, die auf die falsche Stelle
+    zeigt, kostet mehr Zeit als gar keine."""
+    art = hr_client.post('/shift-types', json={
+        'name': 'Tag', 'start_time': '08:00', 'end_time': '16:00'}).json
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    antwort = hr_client.put('/schedules/2026/9/shift-times', json={
+        'date': '2026-09-07', 'shift_type_id': art['id'], 'start_time': '10:00'})
+
+    assert antwort.status_code == 400
+    assert 'Format' not in antwort.json['message']
+
+
+# ---------- Dasselbe Fenster zweimal ----------
+
+
+def test_dasselbe_fenster_zweimal_wird_abgelehnt(hr_client):
+    """Es stand zweimal in der Warnung und zweimal in der Liste.
+
+    Der Generator kommt damit zurecht - ein Platz passt, wenn er in
+    IRGENDEIN Fenster passt -, aber die Oberflaechen zeigen es doppelt, und
+    niemand kann sehen, ob das Absicht war.
+    """
+    anna = _anna(hr_client)
+
+    antwort = hr_client.put(f'/employees/{anna["id"]}/availability', json={
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00'},
+            {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00'},
+        ]})
+
+    assert antwort.status_code == 400
+
+
+def test_zwei_fenster_am_selben_tag_bleiben_erlaubt(hr_client):
+    """Gegenprobe, und die wichtigere Haelfte: der geteilte Dienst braucht
+    genau das. Auch Ueberlappungen bleiben erlaubt - sie zusammenzufassen
+    hiesse, eine Eingabe stillschweigend umzuschreiben."""
+    anna = _anna(hr_client)
+
+    antwort = hr_client.put(f'/employees/{anna["id"]}/availability', json={
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 0, 'start_time': '08:00', 'end_time': '12:00'},
+            {'weekday': 0, 'start_time': '10:00', 'end_time': '18:00'},
+        ]})
+
+    assert antwort.status_code == 200, antwort.json
+    assert len(hr_client.get(f'/employees/{anna["id"]}').json['availability']) == 2
+
+
+def test_dasselbe_fenster_mit_verschiedenen_grenzen_bleibt_erlaubt(hr_client):
+    """Gegenprobe: gleiche Zeiten, verschiedene Gueltigkeit sind zwei
+    verschiedene Aussagen - "bis Maerz so, ab April wieder"."""
+    anna = _anna(hr_client)
+
+    antwort = hr_client.put(f'/employees/{anna["id"]}/availability', json={
+        'availability_mode': 'windows',
+        'availability': [
+            {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00',
+             'valid_until': '2026-03-31'},
+            {'weekday': 0, 'start_time': '08:00', 'end_time': '16:00',
+             'valid_from': '2026-04-01'},
+        ]})
+
+    assert antwort.status_code == 200, antwort.json

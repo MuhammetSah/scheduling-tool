@@ -87,7 +87,11 @@ describe('CoverageEditor band list editing', () => {
     const startInputs = await screen.findAllByLabelText(START_LABEL)
     expect(startInputs).toHaveLength(1)
 
-    fireEvent.click(screen.getByTitle(REMOVE_BAND_TITLE))
+    // Ueber die zugaengliche Bezeichnung statt ueber title: der Knopf traegt
+    // ein blosses "×", und ohne aria-label liest ein Screenreader genau das
+    // vor. Der Test findet ihn jetzt auf demselben Weg wie jemand, der ihn
+    // nicht sehen kann.
+    fireEvent.click(screen.getByRole('button', { name: REMOVE_BAND_TITLE }))
     expect(screen.queryByLabelText(START_LABEL)).not.toBeInTheDocument()
   })
 })

@@ -149,6 +149,10 @@ TRANSLATIONS = {
         'de': 'Wochentag muss zwischen 0 (Montag) und 6 (Sonntag) liegen',
         'en': 'Weekday must be between 0 (Monday) and 6 (Sunday)',
     },
+    'availability_window_duplicate': {
+        'de': 'Das Fenster {weekday} {start}–{end} ist doppelt angegeben',
+        'en': 'The window {weekday} {start}–{end} is given twice',
+    },
     'invalid_date_value': {
         'de': 'Ungültiges Datum: {date}',
         'en': 'Invalid date: {date}',

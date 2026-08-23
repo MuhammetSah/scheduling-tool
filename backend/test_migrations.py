@@ -985,6 +985,14 @@ def test_bedarfsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(f
         migrations.rollback_last()
     assert '0006_coverage' not in migrations.applied_versions()
 
+    # Alle drei, nicht nur business_hours: up() legt mit CREATE TABLE IF NOT
+    # EXISTS an, also verschwaende ein vergessenes DROP TABLE in down() keinen
+    # Fehler - der Rundlauf saehe trotzdem gruen aus, und die Tabelle behielte
+    # ihren alten Inhalt ueber einen Rollback hinweg.
+    verblieben = tabellen(db_file) & {
+        'business_hours', 'business_hours_exceptions', 'coverage_requirements'}
+    assert verblieben == set(), f'down() hat stehen gelassen: {sorted(verblieben)}'
+
     connection = sqlite3.connect(db_file)
     try:
         connection.execute("INSERT INTO employees (name) VALUES ('Anna')")
