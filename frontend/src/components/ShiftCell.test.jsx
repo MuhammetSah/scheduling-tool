@@ -139,3 +139,29 @@ describe('ShiftCell mit Ruhepausen', () => {
     expect(container.querySelector('.slot-break')).not.toBeNull()
   })
 })
+
+describe('ShiftCell mit der Lage der Ruhepause', () => {
+  // Seit Etappe 9 traegt eine Zuweisung nicht nur die Dauer der Pause, sondern
+  // ihre Lage: Paragraph 4 Satz 3 ArbZG erlaubt hoechstens sechs Stunden am
+  // Stueck, und ohne Uhrzeit laesst sich der Satz gar nicht pruefen.
+  function mitLage(lage) {
+    return [{ ...slot(1, 0, 'Anna', '08:00', '16:00'),
+              break_minutes: 30, effective_break_minutes: 30, break_start: lage }]
+  }
+
+  it('zeigt die Lage neben der Dauer', () => {
+    renderCell(mitLage('12:00'))
+
+    expect(screen.getByText(/12:00/)).toBeInTheDocument()
+  })
+
+  it('zeigt ohne Lage nur die Dauer', () => {
+    // Gegenprobe: die Lage ist freiwillig. Fuer jeden Block, den dieses Tool
+    // bauen kann, gibt es immer eine zulaessige - eine fehlende Angabe ist
+    // deshalb kein Mangel, den die Zelle anmahnen muesste.
+    const { container } = renderCell(mitLage(null))
+
+    expect(container.querySelector('.slot-break')).not.toBeNull()
+    expect(screen.queryByText(/ab /)).not.toBeInTheDocument()
+  })
+})

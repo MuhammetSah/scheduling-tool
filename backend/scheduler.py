@@ -153,6 +153,10 @@ MAX_CONSECUTIVE_DAYS = 6
 MIN_FREE_SUNDAYS_PER_YEAR = 15
 
 BREAK_THRESHOLDS = ((6 * 60, 0), (9 * 60 + 30, 30))
+# § 4 Satz 3 ArbZG: "Länger als sechs Stunden hintereinander dürfen
+# Arbeitnehmer nicht ohne Ruhepause beschäftigt werden." Exactly six is still
+# allowed - the sentence says *longer than*.
+MAX_MINUTES_WITHOUT_BREAK = 6 * 60
 LONG_SHIFT_BREAK_MINUTES = 45
 
 
@@ -164,6 +168,33 @@ def legal_break_minutes(duration_minutes):
         if duration_minutes <= limit:
             return minutes
     return LONG_SHIFT_BREAK_MINUTES
+
+
+def stretches_without_break(span_minutes, break_offset, break_minutes):
+    """The two working stretches a break splits a block into, in minutes.
+
+    `break_offset` is how far into the block the break starts, so a caller only
+    has to do the midnight arithmetic once, where it already does it for the
+    block itself. Returns (before, after); either may be zero, which is exactly
+    the case § 4 Satz 3 cares about - a break at the very edge does not
+    interrupt anything.
+    """
+    before = break_offset
+    after = span_minutes - break_offset - break_minutes
+    return before, max(0, after)
+
+
+def break_position_breaches_arbzg(span_minutes, break_offset, break_minutes):
+    """Does a break at this offset leave more than six hours in one go?
+
+    Answers only when there is something to answer: a block that does not
+    reach the six hours § 4 requires a break for cannot breach Satz 3, and a
+    break of zero length interrupts nothing regardless of where it sits.
+    """
+    if not span_minutes or not break_minutes:
+        return False
+    before, after = stretches_without_break(span_minutes, break_offset, break_minutes)
+    return max(before, after) > MAX_MINUTES_WITHOUT_BREAK
 
 
 def net_working_minutes(duration_minutes, break_minutes):

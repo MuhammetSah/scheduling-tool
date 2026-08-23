@@ -327,6 +327,24 @@ Note **9:30, not 9:00**. At a 9:30 span a 30-minute break still leaves exactly n
 
 The one place § 4 can be broken at all is the manual-correction path: left alone the break is the legal minimum and every plan is compliant by construction, so only someone entering a shorter break by hand gets a warning — and it stays a warning.
 
+### Where the break falls, and whether Sunday work is allowed at all
+
+Two rules this tool used to hand to HR rather than check.
+
+**§ 4 Satz 3 — no more than six hours in one go.** Until this stage the tool knew only the break's *duration*, never its *position*. Half an hour of break starting at the shift's first minute satisfies Satz 1 and breaches Satz 3, and both looked identical in the database.
+
+That is a modelling gap as much as a checking one: [§ 4 Satz 1](https://www.gesetze-im-internet.de/arbzg/__4.html) asks for breaks "im voraus feststehend" — fixed in advance — and a duration without a time is not fixed. A block can now carry when its break begins.
+
+**Optional on purpose.** For every block this tool can build — at most ten hours, at least thirty minutes of break — a lawful position always exists, so an unstated one is never a *known* breach. Flagging it would mean warning on every single block; requiring it would declare every existing roster invalid; inventing a default would assert something about a workflow the tool does not know. The check bites exactly where somebody has stated a position, and there it has teeth. Exactly six hours stays allowed — the sentence says *longer than*.
+
+**One position per block.** § 4 Satz 2 permits splitting a break into chunks of at least fifteen minutes; modelling that would be its own table. Not modelling it makes the tool **stricter, not laxer** — record the longest chunk's position and you get more warnings than you are owed, not fewer. Worth saying rather than leaving to be discovered.
+
+**§ 9 / § 10 — is this business exempt?** § 9 Abs. 1 forbids work on Sundays and public holidays; § 10 exempts whole industries. The tool used to warn on *every* holiday and on *no* Sunday — the first is pure noise for a hospital, and the second was missing outright even though § 9 covers Sundays just the same.
+
+There is now a setting for it, defaulting to **not exempt**, because that is what § 9 says and because a tool that assumes the exemption falls silent on the very rule it was asked to watch.
+
+**What the exemption does not switch off:** the fifteen free Sundays of § 11 Abs. 1 and the replacement rest day of § 11 Abs. 3. Both are the counterweight *to* § 10 and apply precisely when it does. An exemption that turned them off too would turn a permission into a dispensation — and there is a test that says so.
+
 ### Rest days and free Sundays
 
 Two more rules bind the planner since this stage, both hard in the generator and warnings on the manual-correction path.
@@ -455,7 +473,6 @@ Run it with `./venv/bin/python benchmark.py` (needs `requirements-dev.txt` for t
 
 **Roadmap** (not yet built):
 - Skill/qualification matching, so a shift can require a specific certification
-- The ArbZG rules this tool still leaves to HR: the position of a break within a block (§ 4 Satz 3), and whether the business is exempt from Sunday rest at all (§ 9, § 10)
 
 ## Tech Stack
 
@@ -499,6 +516,7 @@ schichtplan-tool/
 │   ├── test_api_exports.py     # Who may download what
 │   ├── test_api_dsgvo.py       # Access, anonymisation, retention
 │   ├── test_api_schichttausch.py  # The guided swap, and where the law says no
+│   ├── test_api_arbzg_rest.py  # Break position (§ 4 Satz 3) and the § 10 exemption
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
@@ -627,7 +645,7 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)), `0016_break_position` (adds `shift_assignments.break_start`, nullable — see [Where the break falls](#where-the-break-falls-and-whether-sunday-work-is-allowed-at-all)). To manage by hand:
 
 ```bash
 cd backend
@@ -723,7 +741,7 @@ Everything except `/`, `/register`, `/login` and `/me` needs a signed-in session
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (508 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (526 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
 
 ## About This Project
 

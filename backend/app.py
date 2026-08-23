@@ -26,7 +26,8 @@ from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
     MAX_AVERAGE_DAILY_HOURS, MAX_CONSECUTIVE_DAYS, MIN_FREE_SUNDAYS_PER_YEAR, _ranges_overlap,
     _time_range_minutes, average_window, exceeds_average, generate_schedule,
-    legal_break_minutes, net_working_minutes, rest_gap_hours, shift_datetimes,
+    break_position_breaches_arbzg, legal_break_minutes, net_working_minutes,
+    rest_gap_hours, shift_datetimes, stretches_without_break,
     shift_duration_minutes, window_contains_shift, window_is_valid_on, working_days_in,
 )
 
@@ -831,6 +832,43 @@ def parse_assignment_times(data):
         raise ValueError(t(g.lang, 'assignment_times_must_differ'))
     return start_time, end_time
 
+
+def parse_break_start(value, break_minutes, span_start, span_end):
+    """Where inside the block the break begins, as minutes from its start.
+
+    Returns (stored "HH:MM" or None, offset in minutes or None).
+
+    § 4 Satz 1 ArbZG asks for breaks "im voraus feststehend" - fixed in
+    advance. A duration without a time is not fixed, so this is not only what
+    makes Satz 3 checkable but what makes the record match the sentence.
+
+    Refused rather than warned about, because neither case describes a break at
+    all: a position without a duration, and a position outside the block. Both
+    are typing mistakes, not judgements somebody made.
+
+    The offset is computed on the same minute axis the rest of the tool uses,
+    so a night shift's 02:00 lands after its 22:00 start instead of appearing
+    to precede it.
+    """
+    if value is None or value == '':
+        return None, None
+    if not valid_time(value):
+        raise ValueError(t(g.lang, 'availability_time_invalid', value=value))
+    if not break_minutes:
+        raise ValueError(t(g.lang, 'break_start_needs_minutes'))
+    if not (span_start and span_end):
+        raise ValueError(t(g.lang, 'break_start_needs_times'))
+
+    span = shift_duration_minutes(span_start, span_end)
+    offset = shift_duration_minutes(span_start, value)
+    # shift_duration_minutes reads an equal start and end as a full day, which
+    # is right for a shift and wrong for an offset of zero.
+    if value == span_start:
+        offset = 0
+    if offset + break_minutes > span:
+        raise ValueError(t(g.lang, 'break_start_outside_block',
+                           start=span_start, end=span_end))
+    return value, offset
 
 def parse_break_minutes(value):
     """A whole number of minutes, or None for "not separately agreed".
@@ -1941,7 +1979,7 @@ def fetch_schedule(year, month):
     cursor.execute('''
         SELECT sa.id, sa.date, sa.shift_type_id, sa.slot_index, sa.employee_id, sa.manually_edited,
                sa.absence_type, sa.absent_employee_id, sa.start_time, sa.end_time,
-               sa.break_minutes,
+               sa.break_minutes, sa.break_start,
                st.name AS shift_type_name, st.color AS shift_type_color,
                st.start_time AS type_start_time, st.end_time AS type_end_time,
                e.name AS employee_name, ae.name AS absent_employee_name
@@ -2577,7 +2615,7 @@ def weekday_adverb(lang, weekday_index):
 
 def constraint_findings(cursor, employee_id, assignment_date, shift_type_id, schedule_id,
                         exclude_assignment_id=None, start_time=None, end_time=None,
-                        break_minutes=None):
+                        break_minutes=None, break_start=None):
     """Non-blocking warnings for assigning `employee_id` to one shift.
 
     Unlike the scheduler's hard constraints (which only ever see one month at a
@@ -2732,13 +2770,19 @@ def constraint_findings(cursor, employee_id, assignment_date, shift_type_id, sch
     # not something the tool can derive - so this states the situation and
     # leaves the judgement where it belongs. Silent while no federal state has
     # been picked, because then no date is known to be a holiday.
+    ausgenommen = sunday_work_permitted(cursor)
     feiertag = holidays_in_range(
         date.fromisoformat(assignment_date), date.fromisoformat(assignment_date),
         holiday_region(cursor),
     )
-    if feiertag:
+    if feiertag and not ausgenommen:
         melde('warn_public_holiday', date=assignment_date,
                           name=next(iter(feiertag.values())))
+    # § 9 Abs. 1 covers Sundays as well, and the tool used to say nothing about
+    # them at all - it only counted the yearly budget of § 11 Abs. 1, which is
+    # a different rule with a different purpose.
+    if date.fromisoformat(assignment_date).weekday() == 6 and not ausgenommen:
+        melde('warn_sunday_work', date=assignment_date)
 
     # § 11 Abs. 1 ArbZG: at least 15 Sundays a year stay free of work.
     if date.fromisoformat(assignment_date).weekday() == 6:
@@ -2760,6 +2804,21 @@ def constraint_findings(cursor, employee_id, assignment_date, shift_type_id, sch
             melde('warn_break_below_minimum', name=employee['name'],
                               hours=proposed_span / 60, minutes=break_minutes,
                               required=required)
+
+    # § 4 Satz 3: no more than six hours in one go. Only answerable once
+    # somebody has said *when* the break falls - and silent otherwise on
+    # purpose, because for every block this tool can build (at most ten hours,
+    # at least thirty minutes of break) a lawful position always exists. An
+    # unstated one is therefore never a known breach, and flagging it would
+    # mean warning on every single block.
+    if (proposed_span is not None and break_minutes and break_start
+            and proposed_start):
+        offset = 0 if break_start == proposed_start else shift_duration_minutes(
+            proposed_start, break_start)
+        if break_position_breaches_arbzg(proposed_span, offset, break_minutes):
+            before, after = stretches_without_break(proposed_span, offset, break_minutes)
+            melde('warn_stretch_without_break', name=employee['name'],
+                              hours=max(before, after) / 60)
 
     if employee['max_shifts_per_month'] is not None:
         cursor.execute(
@@ -2852,7 +2911,8 @@ def constraint_findings(cursor, employee_id, assignment_date, shift_type_id, sch
 ARBZG_BLOCKERS = frozenset({
     'warn_rest_period_too_short',      # § 5 Abs. 1 - eleven hours between shifts
     'warn_daily_hours_exceeded',       # § 3 - ten hours a working day
-    'warn_break_below_minimum',        # § 4 - 30/45 minutes
+    'warn_break_below_minimum',        # § 4 Satz 1 - 30/45 minutes
+    'warn_stretch_without_break',      # § 4 Satz 3 - never more than six in a row
     'warn_seventh_consecutive_day',    # § 11 Abs. 3 via the six-day rule
     'warn_sunday_budget_exhausted',    # § 11 Abs. 1 - fifteen free Sundays
     'warn_overlapping_blocks',         # not law but physics: one person, one place
@@ -2936,13 +2996,23 @@ def update_assignment(assignment_id):
 
     try:
         break_minutes = parse_break_minutes(data.get('break_minutes'))
+        # Against the hours this block will actually run, which is what
+        # assignment_hours() resolves out of its three layers - not against the
+        # times in the request body, which may be absent.
+        wirksam_start, wirksam_ende = assignment_hours(cursor, {
+            'schedule_id': assignment['schedule_id'], 'date': assignment['date'],
+            'shift_type_id': assignment['shift_type_id'],
+            'start_time': start_time, 'end_time': end_time,
+        })
+        break_start, _offset = parse_break_start(
+            data.get('break_start'), break_minutes, wirksam_start, wirksam_ende)
     except ValueError as err:
         return jsonify({'message': str(err)}), 400
 
     warnings = constraint_warnings(
         cursor, employee_id, assignment['date'], assignment['shift_type_id'], assignment['schedule_id'],
         exclude_assignment_id=assignment_id, start_time=start_time, end_time=end_time,
-        break_minutes=break_minutes,
+        break_minutes=break_minutes, break_start=break_start,
     )
 
     # start_time/end_time and break_minutes are written on every PUT, same
@@ -2955,8 +3025,8 @@ def update_assignment(assignment_id):
     # silent change to what was stored, so the same rule applies.
     cursor.execute(
         'UPDATE shift_assignments SET employee_id = ?, start_time = ?, end_time = ?, '
-        'break_minutes = ?, manually_edited = 1 WHERE id = ?',
-        (employee_id, start_time, end_time, break_minutes, assignment_id))
+        'break_minutes = ?, break_start = ?, manually_edited = 1 WHERE id = ?',
+        (employee_id, start_time, end_time, break_minutes, break_start, assignment_id))
     refresh_unfilled_count(cursor, assignment['schedule_id'])
 
     connection.commit()
@@ -3955,7 +4025,27 @@ SCHEDULE_DRAFT = 'draft'
 SCHEDULE_PUBLISHED = 'published'
 SCHEDULE_STATES = (SCHEDULE_DRAFT, SCHEDULE_PUBLISHED)
 
-KNOWN_SETTINGS = {'holiday_region', 'retention_months'}
+KNOWN_SETTINGS = {'holiday_region', 'retention_months', 'sunday_work_permitted'}
+
+
+def sunday_work_permitted(cursor):
+    """Does this business fall under one of § 10 ArbZG's exemptions?
+
+    § 9 Abs. 1 forbids employing anyone on Sundays and public holidays; § 10
+    exempts whole industries - hospitals, restaurants, transport, and a long
+    list besides. Which side a business is on is a fact about the business,
+    and only its operator can state it.
+
+    The default is "not exempt", because that is what § 9 says and because a
+    tool that assumes the exemption would fall silent on the one rule it was
+    asked to watch.
+
+    What this does NOT switch off: the fifteen free Sundays of § 11 Abs. 1 and
+    the replacement rest day of § 11 Abs. 3. Both are the counterweight *to*
+    § 10 and apply precisely when it does - an exemption that turned them off
+    too would turn a permission into a dispensation.
+    """
+    return read_settings(cursor).get('sunday_work_permitted') == 'yes'
 
 
 def read_settings(cursor):

@@ -229,7 +229,8 @@ function SchedulePage({ setFlash, user }) {
   // purpose: a future two-argument call (`reassign(id, employeeId)`) would
   // silently wipe individual times instead of failing loudly, so
   // startTime/endTime are required - every call site must decide.
-  async function reassign(assignmentId, employeeIdRaw, startTime, endTime, breakMinutes = null) {
+  async function reassign(assignmentId, employeeIdRaw, startTime, endTime, breakMinutes = null,
+                          breakStart = null) {
     const employeeId = employeeIdRaw === '' ? null : Number(employeeIdRaw)
     try {
       // break_minutes travels with every call for the same reason the times
@@ -241,6 +242,9 @@ function SchedulePage({ setFlash, user }) {
         start_time: startTime,
         end_time: endTime,
         break_minutes: breakMinutes,
+        // Wie die Zeiten und die Dauer: die Route schreibt die ganze Zeile,
+        // ein ausgelassenes Feld wird geleert.
+        break_start: breakStart,
       })
       setWarnings(result.warnings || [])
       await refreshSchedule()

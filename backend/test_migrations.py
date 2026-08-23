@@ -1393,6 +1393,22 @@ def test_0014_laeuft_nach_der_eigenen_ruecknahme_wieder_vorwaerts(fresh_db):
 # ---------- 0015_swap_requests ----------
 
 
+def test_die_pausenlage_ueberlebt_einen_rundlauf(fresh_db):
+    """Wie 0008 und 0014 laesst down() die Spalte stehen - up() ist ueber
+    table_columns() wiederholbar, und ein Tabellenneubau fuer eine NULL-bare
+    Zusatzspalte waere mehr Risiko als Nutzen."""
+    migrations, db_file = fresh_db
+    migrations.apply_pending()
+    assert 'break_start' in spalten(db_file, 'shift_assignments')
+
+    while '0016_break_position' in migrations.applied_versions():
+        migrations.rollback_last()
+    assert 'break_start' in spalten(db_file, 'shift_assignments')
+
+    assert '0016_break_position' in migrations.apply_pending()
+    assert 'break_start' in spalten(db_file, 'shift_assignments')
+
+
 def test_tauschantraege_laufen_rund(fresh_db):
     """Rundlauf, und die Gegenprobe, dass down() beide Indizes mitnimmt.
 

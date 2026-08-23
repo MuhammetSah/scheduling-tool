@@ -25,6 +25,7 @@ function BusinessHours({ setFlash }) {
   const [regions, setRegions] = useState([])
   const [region, setRegion] = useState('')
   const [retentionMonths, setRetentionMonths] = useState('6')
+  const [sundayWork, setSundayWork] = useState(false)
 
   async function load() {
     try {
@@ -39,6 +40,7 @@ function BusinessHours({ setFlash }) {
       setRegions(moeglicheRegionen)
       setRegion(settings.holiday_region || '')
       setRetentionMonths(settings.retention_months || '6')
+      setSundayWork(settings.sunday_work_permitted === 'yes')
     } catch (err) {
       setFlash({ type: 'error', text: err.message })
     }
@@ -116,6 +118,16 @@ function BusinessHours({ setFlash }) {
     }
   }
 
+  async function saveSundayWork(erlaubt) {
+    setSundayWork(erlaubt)
+    try {
+      await api.put('/settings', { sunday_work_permitted: erlaubt ? 'yes' : null })
+    } catch (err) {
+      setFlash({ type: 'error', text: err.message })
+      setSundayWork(!erlaubt)
+    }
+  }
+
   async function saveRetention(months) {
     setRetentionMonths(months)
     try {
@@ -144,6 +156,23 @@ function BusinessHours({ setFlash }) {
 
   return (
     <>
+      <div className="panel">
+        <div className="panel-header">
+          <h2>{t('sundayWork.title')}</h2>
+        </div>
+        <div className="field checkbox-field">
+          <input
+            id="sunday-work"
+            type="checkbox"
+            checked={sundayWork}
+            onChange={e => saveSundayWork(e.target.checked)}
+          />
+          <label htmlFor="sunday-work">{t('sundayWork.label')}</label>
+        </div>
+        <p className="hint">{t('sundayWork.hint')}</p>
+        <p className="hint">{t('sundayWork.stillApplies')}</p>
+      </div>
+
       <div className="panel">
         <div className="panel-header">
           <h2>{t('retention.title')}</h2>
