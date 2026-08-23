@@ -67,12 +67,24 @@ Seiten:
 gleich; sie mitzuzählen bedeutete, jeden für Schichten zu belasten, die gerade ersetzt werden.
 Dieselbe Begründung, die `scheduling_history()` seit Etappe 5b notiert.
 
-Blöcke ohne Zeiten werden übersprungen: ohne Minutenachse können sie weder eine Ruhezeit begrenzen
-noch Arbeitszeit beitragen. Übersprungen statt geraten.
+**Die Zeiten kommen über `assignment_hours()`, nicht aus den beiden Spalten.** Das Review zu PR #29
+hat gefunden, dass die erste Fassung sie direkt las — eine gespeicherte Zuweisung muss ihre Zeiten
+aber nicht selbst tragen: sie kann sie aus einer Tagesausnahme oder aus der Schichtart beziehen.
+Eine Nachtschicht, die ihre Zeiten aus der Vorlage nimmt, war damit **unsichtbar**, und der Erste
+wurde frei geplant, als gäbe es sie nicht. `assignment_hours()` löst genau diese drei Ebenen auf
+und stand die ganze Zeit daneben.
+
+**Die Lehre:** wer eine bestehende Datenstruktur neu ausliest, muss die Ebenen mitlesen, die ihre
+vorhandenen Leser schon kennen. Zwei Spalten zu nehmen, wo eine Funktion drei Ebenen auflöst, ist
+kein Abkürzen, sondern ein anderes Datenmodell.
+
+Bleibt wirklich nichts übrig — keine Vorlage und keine eigenen Zeiten —, wird der Block
+übersprungen: ohne Minutenachse kann er weder eine Ruhezeit begrenzen noch Arbeitszeit beitragen.
+Übersprungen statt geraten, mit eigener Gegenprobe.
 
 ## 5. Tests
 
-`backend/test_api_monatsgrenze.py`, sieben Tests — und die Gegenproben sind hier die eigentliche
+`backend/test_api_monatsgrenze.py`, neun Tests — und die Gegenproben sind hier die eigentliche
 Arbeit:
 
 | Test | Wogegen er schützt |

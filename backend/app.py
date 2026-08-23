@@ -1809,8 +1809,8 @@ def boundary_context(cursor, year, month):
     danach = last_of_month + timedelta(days=7)
 
     cursor.execute(
-        'SELECT employee_id, date, start_time, end_time, break_minutes '
-        'FROM shift_assignments '
+        'SELECT schedule_id, employee_id, date, shift_type_id, start_time, end_time, '
+        'break_minutes FROM shift_assignments '
         'WHERE employee_id IS NOT NULL AND date BETWEEN ? AND ? '
         'AND (date < ? OR date > ?)',
         (davor.isoformat(), danach.isoformat(),
@@ -1823,15 +1823,21 @@ def boundary_context(cursor, year, month):
                (last_of_month + timedelta(days=1)).isoformat()}
 
     for row in cursor.fetchall():
-        if not (row['start_time'] and row['end_time']):
-            # No minute axis, so it can neither bound a rest period nor
-            # contribute working time. Skipped rather than guessed at.
+        # Through assignment_hours(), not off the two columns: a saved
+        # assignment need not carry its own times. It may take them from a
+        # per-date override or from the shift type, and reading the columns
+        # alone made a night shift defined by its template invisible - the 1st
+        # then planned free, as if it were not there.
+        start_time, end_time = assignment_hours(cursor, row)
+        if not (start_time and end_time):
+            # No minute axis at all - no template and no times of its own. It
+            # can neither bound a rest period nor contribute working time, and
+            # turning that into a block would be guessing.
             continue
         schluessel = (row['employee_id'], row['date'])
 
         if row['date'] in flanken:
-            day_hours.setdefault(schluessel, []).append(
-                (row['start_time'], row['end_time']))
+            day_hours.setdefault(schluessel, []).append((start_time, end_time))
 
         d = date.fromisoformat(row['date'])
         week_start = (d - timedelta(days=d.weekday())).isoformat()
@@ -1842,8 +1848,7 @@ def boundary_context(cursor, year, month):
                 and date.fromisoformat(week_start) <= last_of_month):
             continue
         minuten = net_working_minutes(
-            shift_duration_minutes(row['start_time'], row['end_time']),
-            row['break_minutes'])
+            shift_duration_minutes(start_time, end_time), row['break_minutes'])
         if minuten:
             woche = (row['employee_id'], week_start)
             week_minutes[woche] = week_minutes.get(woche, 0) + minuten

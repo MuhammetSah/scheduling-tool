@@ -202,3 +202,73 @@ def test_ohne_wochenziel_aendert_sich_nichts(hr_client):
     plan = hr_client.get('/schedules/2026/9').json
     erster = [z for z in plan['assignments'] if z['date'] == '2026-09-01']
     assert any(z['employee_id'] == anna['id'] for z in erster)
+
+
+# ---------- Zeiten, die nicht in der Zuweisung stehen ----------
+
+
+def test_auch_eine_schicht_ohne_eigene_zeiten_begrenzt_die_ruhezeit(hr_client):
+    """Aus dem Review zu PR #29.
+
+    Eine gespeicherte Zuweisung muss ihre Zeiten nicht selbst tragen: sie kann
+    sie aus der Schichtart beziehen oder aus einer Tagesausnahme. Wer nur die
+    Spalten start_time/end_time liest, sieht eine solche Nachtschicht gar
+    nicht - und plant den Ersten frei, als gaebe es sie nicht.
+
+    assignment_hours() loest genau diese drei Ebenen auf und stand die ganze
+    Zeit daneben.
+    """
+    from app import get_db
+
+    anna = _aufbau(hr_client)
+    nacht = hr_client.post('/shift-types', json={
+        'name': 'Nacht', 'start_time': '22:00', 'end_time': '06:00'}).json
+
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 8, 'published')")
+        schedule_id = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            'employee_id, start_time, end_time) '
+            "VALUES (?, '2026-08-31', ?, 0, ?, NULL, NULL)",
+            (schedule_id, nacht['id'], anna['id']))
+        connection.commit()
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    plan = hr_client.get('/schedules/2026/9').json
+    erster = [z for z in plan['assignments'] if z['date'] == '2026-09-01']
+    assert erster, 'am 1. September gibt es keinen Block - der Aufbau stimmt nicht'
+    assert all(z['employee_id'] != anna['id'] for z in erster), (
+        'Anna wurde am 1. September eingeplant, obwohl ihre Nachtschicht am 31.08. '
+        'ihre Zeiten aus der Schichtart bezieht'
+    )
+
+
+def test_eine_schicht_ganz_ohne_ableitbare_zeiten_sperrt_nichts(hr_client):
+    """Gegenprobe: ohne Vorlage und ohne eigene Zeiten gibt es keine
+    Minutenachse. Daraus eine Sperre zu machen hiesse zu raten."""
+    from app import get_db
+
+    anna = _aufbau(hr_client)
+    with hr_client.application.app_context():
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute(
+            "INSERT INTO schedules (year, month, status) VALUES (2026, 8, 'published')")
+        schedule_id = cursor.lastrowid
+        cursor.execute(
+            'INSERT INTO shift_assignments (schedule_id, date, shift_type_id, slot_index, '
+            'employee_id, start_time, end_time) '
+            "VALUES (?, '2026-08-31', NULL, 0, ?, NULL, NULL)",
+            (schedule_id, anna['id']))
+        connection.commit()
+
+    hr_client.post('/schedules/generate', json={'year': 2026, 'month': 9})
+
+    plan = hr_client.get('/schedules/2026/9').json
+    erster = [z for z in plan['assignments'] if z['date'] == '2026-09-01']
+    assert any(z['employee_id'] == anna['id'] for z in erster)
