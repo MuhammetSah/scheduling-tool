@@ -42,12 +42,21 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
-**Etappe 8 hat den geführten Schichttausch gebaut, Etappe 9 die letzten beiden ArbZG-Regeln.**
-Damit prüft das Tool alles, was es an Arbeitszeitrecht abbilden kann.
+**Die Roadmap ist abgearbeitet.** Etappe 8 brachte den geführten Schichttausch, Etappe 9 die
+letzten beiden ArbZG-Regeln, Etappe 10 die Nachweise. Damit ist jeder Punkt umgesetzt, den das
+Entwurfsdokument und das README als offen führten.
 
-**Offen bleibt aus der Roadmap genau ein Punkt: die Qualifikations-Zuordnung** — eine Schicht
-verlangt einen Nachweis, und nur wer ihn hat, darf darauf. Das ist **keine Fortsetzung, sondern
-eine Festlegung des Nutzers**, und es ist nicht begonnen.
+**Was jetzt kommt, ist vollständig eine Festlegung des Nutzers.** Es gibt keine Fortsetzung mehr,
+die sich aus dem Vorhandenen ergibt. Was sich beim Bauen aufgedrängt hat und bewusst liegen blieb,
+steht in den Specs unter „Bewusst nicht dabei" — jeweils mit dem Grund. Die auffälligsten:
+
+| Naheliegend | Warum es liegen blieb |
+|---|---|
+| „Mindestens ein Ersthelfer je Schicht" | Eine Anzahl innerhalb einer Anzahl, eigenes Modell |
+| Warnung, wenn ein Nachweis demnächst abläuft | Braucht eine Frist, und die legt der Betreiber fest |
+| Geteilte Pausen nach § 4 Satz 2 | Eigene Tabelle; ohne sie ist das Tool strenger, nicht laxer |
+| Benachrichtigungen beim Tauschantrag | Es gibt keinen Versandweg außer den Einladungsmails |
+| Anforderungen am Bedarfsband statt an der Schichtart | Kostete die Einheit, die HR benennt und wiedererkennt |
 
 **Eine Erfahrung aus drei Aufräum-Etappen, die eine neue Sitzung sich sparen kann:** von den rund
 dreißig Einträgen dieser Liste waren **vier bereits erledigt**, ohne dass es jemand notiert hatte.
@@ -67,12 +76,12 @@ Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
 
 | | |
 |---|---|
-| `main` | Etappe 5 bis 9 gemergt und deployt (PR #16–#31); die API antwortet mit 200 |
+| `main` | Etappe 5 bis 10 gemergt und deployt (PR #16–#32); die API antwortet mit 200 |
 | Branch-Situation | Keine offenen Branches, keine offenen Pull Requests |
 | Aktueller Branch | keiner — `main` ist der Stand |
-| Testsuite | 528 passed / 40 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 41 Frontend-Tests (Vitest + Testing Library) |
+| Testsuite | 551 passed / 41 skipped (Postgres-only, lokal übersprungen), warnungsfrei unter `-W error::DeprecationWarning`; dazu 45 Frontend-Tests (Vitest + Testing Library) |
 | CI | 4 Jobs: `backend (3.13)`, `backend (3.14)`, `backend-postgres`, `frontend` (letzterer führt seit Etappe 3 zusätzlich `npm test -- --run` aus) — alle grün auf `main` |
-| Migrationen | `0001`–`0016`. `0016_break_position` legt `shift_assignments.break_start` an |
+| Migrationen | `0001`–`0017`. `0017_qualifications` legt den Nachweiskatalog und zwei Verknüpfungstabellen an |
 | Laufzeitabhängigkeiten (Backend) | unverändert fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata — auch nach Exporten und DSGVO |
 | Laufzeitabhängigkeiten (Frontend, neu, nur dev) | vitest, @testing-library/react, @testing-library/jest-dom, jsdom — die erste Frontend-Testinfrastruktur des Projekts, alle als devDependency |
 
@@ -910,6 +919,30 @@ Ausnahme, die beides abschaltete, machte aus einer Erlaubnis eine Freistellung. 
 eine Etappe zuvor mit `break_minutes` passiert. Fallstrick 24 sagt „was zum Platz gehört, reist
 ganz mit"; **„ganz" heißt jedes Feld, nicht das zuletzt hinzugefügte.**
 
+## Etappe 10 — abgeschlossen, gemergt, deployt
+
+Spec: [`docs/superpowers/specs/2026-08-23-etappe-10-qualifikationen-design.md`](superpowers/specs/2026-08-23-etappe-10-qualifikationen-design.md)
+
+Der letzte Punkt der Roadmap. **Die interessante Hälfte ist nicht die Zuordnung, sondern
+`valid_until`**: ein Ersthelferschein läuft nach zwei Jahren ab (DGUV Vorschrift 1 § 26), und ein
+Nachweis ohne Ablaufdatum ist einer, den der Dienstplan noch Jahre nach seinem Ende beachtet.
+
+**Hart im Generator, Warnung bei der Handkorrektur, keine Sperre beim Tausch.** Die letzte
+Entscheidung ist die, die man hinterfragen wird: ob ein Nachweis rechtlich verlangt ist oder eine
+Hausregel, kann das Tool nicht wissen — dieselbe Zurückhaltung wie beim Feiertag in Etappe 9.
+
+**Der Preis, und er steht im README:** die Anforderung hängt an der Schichtart, also erbt ein Block
+ohne Vorlage nichts. Seit Etappe 4 schneidet der Planer genau solche Blöcke zu.
+
+**Zwei Fehler, die das Review gefunden hat, und beide sind Wiederholungen:**
+
+1. **Fallstrick 16 wieder.** Die beiden Verknüpfungstabellen bekamen einen zusammengesetzten
+   Primärschlüssel statt einer `id` — sauber modelliert, auf SQLite grün, auf Postgres ein 500er in
+   jeder schreibenden Route. Der lokale Lauf war grün, `backend-postgres` rot: genau die
+   Konstellation aus Fallstrick 21. Der Postgres-Schreibtest hat getan, wofür er da ist.
+2. **Die Anonymisierung übersah die Nachweise.** `delete_employee()` räumt seit 5i eine feste Liste
+   personenbezogener Tabellen; die neue stand nicht darauf.
+
 ## Arbeitsweise
 
 Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
@@ -1036,6 +1069,17 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     **Das ist zweimal hintereinander passiert** (Etappe 8 und 9, beide Male im Review gefunden),
     einmal je Feld. Wer `constraint_findings()` aus einem neuen Pfad aufruft, geht die
     Parameterliste durch, statt sich zu erinnern.
+
+25. **Die Löschliste in `delete_employee()` ist der Ort, an dem das Vergessen steht.** Wer eine
+    Tabelle anlegt, die etwas über eine Person sagt, trägt sie dort ein — sonst überlebt die Angabe
+    die Anonymisierung. In Etappe 10 sind es die Nachweise gewesen, gefunden im Review; die Liste
+    wächst nicht von selbst mit.
+
+26. **Eine neue Tabelle folgt dem Muster der bestehenden, auch wo es unnötig aussieht.** Jede
+    Verknüpfungstabelle in diesem Schema trägt eine eigene `id` und sagt die Eindeutigkeit mit
+    `UNIQUE` — nicht aus Gewohnheit, sondern weil die Dialektschicht jedem `INSERT` ein
+    `RETURNING id` anhängt (Fallstrick 16). Ein zusammengesetzter Primärschlüssel ist die sauberere
+    Modellierung und auf Postgres ein Laufzeitfehler.
 
 ## Offen — liegt beim Nutzer
 
