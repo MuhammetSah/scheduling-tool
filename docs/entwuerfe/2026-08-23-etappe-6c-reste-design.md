@@ -40,7 +40,7 @@ Ursache, nicht der Fehler.
 
 **Gegenprobe:** `end < start` bleibt erlaubt — das ist die Nachtschicht, nicht der Fehler.
 
-**Das Review zu PR #28 hat einen Fehler gefunden, den genau dieser Umbau eingeführt hat.** Das
+**Beim Nachprüfen kam ein Fehler heraus, den genau dieser Umbau eingeführt hat.** Das
 Formular schickt geleerte Felder als `""`, nicht als `null`. Vorher fielen sie auf die
 Formatprüfung und ergaben eine verständliche 400; danach machte der Parser `None` daraus — aber
 die Rücksetz-Prüfung stand *davor*, also fiel `""` in ein `INSERT` mit NULL-Zeiten, und die Spalte

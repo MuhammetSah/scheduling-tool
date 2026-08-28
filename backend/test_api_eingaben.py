@@ -128,7 +128,7 @@ def test_null_stunden_am_tag_werden_abgelehnt(hr_client):
 
 
 def test_ein_gesperrter_wochentag_ist_kein_wahrheitswert(hr_client):
-    """Aus dem Review zu PR #26: dieselbe Klasse, andere Stelle.
+    """Beim Nachpruefen gefunden: dieselbe Klasse, andere Stelle.
 
     unavailable_weekdays ging ueber parse_int_list() und blieb bei int()
     stehen. true sperrte den Dienstag.
@@ -325,7 +325,7 @@ def test_dasselbe_fenster_mit_verschiedenen_grenzen_bleibt_erlaubt(hr_client):
 
 
 def test_leere_zeiten_setzen_die_ausnahme_zurueck(hr_client):
-    """Aus dem Review zu PR #28, und der Fehler kam aus derselben Aenderung.
+    """Beim Nachpruefen gefunden, und der Fehler kam aus derselben Aenderung.
 
     Das Formular schickt leere Felder als "" und nicht als null. Vorher fiel
     das auf die Formatpruefung und ergab eine 400; nach dem Umbau auf

@@ -4,6 +4,13 @@ Der laufende Arbeitsstand: was fertig ist, was offen liegt, und die Fallstricke,
 Projekt stellt. Gedacht als das, was man nach zwei Wochen Pause zuerst liest.
 Stand: 28.08.2026.
 
+> **Zu den Kennungen weiter unten.** Die Einträge zu den einzelnen Etappen nennen
+> Commit-Kürzel und Vorgangsnummern aus der vorherigen Ablage des Projekts. Dieses
+> Repository beginnt mit dem hier beschriebenen Stand, dort sind sie also nicht
+> auflösbar. Sie stehen trotzdem noch da, weil der Wert dieser Einträge in der
+> Begründung liegt und nicht im Verweis — und weil eine nachträglich geglättete
+> Aufzeichnung eine schlechtere Aufzeichnung wäre.
+
 ## Das Projekt
 
 Schichtplan-Tool für Personalabteilungen. Flask-Backend (`backend/`), React 19 + Vite

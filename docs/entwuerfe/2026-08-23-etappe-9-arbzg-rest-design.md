@@ -59,7 +59,7 @@ Regeln — aus demselben Grund wie in Etappe 8.
 **Und genau dort habe ich die Lehre der Vorgängeretappe direkt wiederholt.** `perform_swap()`
 reichte `break_minutes` weiter, `break_start` aber nicht — die Sperre stand in der Liste und griff
 nie. Eine Sperre, die nie greift, ist schlimmer als keine, weil die Liste sie wie eine aussehen
-lässt. Gefunden im Review zu PR #31, eine Etappe nachdem dieselbe Sache mit `break_minutes`
+lässt. Beim Nachprüfen gefunden, eine Etappe nachdem dieselbe Sache mit `break_minutes`
 passiert war. **Was zum Platz gehört, reist ganz mit — und „ganz" heißt jedes Feld, nicht das
 zuletzt hinzugefügte.**
 

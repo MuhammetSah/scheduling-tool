@@ -94,7 +94,7 @@ Zwischen beiden liegen Tage. Wer nur einmal prüft, genehmigt später einen Taus
 rechtswidrig geworden ist — und die Prüfung von damals steht als Beleg dafür in der Akte, dass
 alles geprüft worden sei.
 
-**Das Review zu PR #30 hat gezeigt, dass „dazwischen liegen Tage" weiter reicht, als ich bedacht
+**Das Nachprüfen hat gezeigt, dass „dazwischen liegen Tage" weiter reicht, als ich bedacht
 hatte.** Nicht nur die Rechtslage kann sich ändern, sondern die Besetzung selbst: setzt die
 Personalabteilung eine der beiden Schichten zwischendurch von Hand um, tauschte die Genehmigung
 anschließend, *wer gerade dort steht* — ein Tausch, dem niemand zugestimmt hat, mit einer

@@ -99,7 +99,7 @@ def test_die_grenze_haengt_an_der_rekursionsgrenze(hr_client=None):
 
 
 def test_auch_der_alte_pfad_ist_geschuetzt(hr_client=None):
-    """Aus dem Review zu PR #35.
+    """Beim Nachpruefen dieser Etappe gefunden.
 
     Der erste Riegel griff nur, wenn Plaetze mitgegeben wurden. Ohne sie baut
     _search() sie selbst aus den Bedarfszahlen der Schichtart - und rekursiert

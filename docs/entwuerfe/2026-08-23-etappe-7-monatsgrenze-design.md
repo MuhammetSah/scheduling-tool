@@ -67,7 +67,7 @@ Seiten:
 gleich; sie mitzuzählen bedeutete, jeden für Schichten zu belasten, die gerade ersetzt werden.
 Dieselbe Begründung, die `scheduling_history()` seit Etappe 5b notiert.
 
-**Die Zeiten kommen über `assignment_hours()`, nicht aus den beiden Spalten.** Das Review zu PR #29
+**Die Zeiten kommen über `assignment_hours()`, nicht aus den beiden Spalten.** Das Nachprüfen
 hat gefunden, dass die erste Fassung sie direkt las — eine gespeicherte Zuweisung muss ihre Zeiten
 aber nicht selbst tragen: sie kann sie aus einer Tagesausnahme oder aus der Schichtart beziehen.
 Eine Nachtschicht, die ihre Zeiten aus der Vorlage nimmt, war damit **unsichtbar**, und der Erste

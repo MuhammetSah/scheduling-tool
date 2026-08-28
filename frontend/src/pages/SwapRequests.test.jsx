@@ -101,7 +101,7 @@ describe('SwapRequests: wer welchen Knopf sieht', () => {
   })
 
   it('nennt eine fehlende Gegenschicht "noch nicht gewählt", nicht "entfallen"', async () => {
-    // Aus dem Review zu PR #30: geprüft wurde nur auf "pending", aber ein
+    // Beim Nachprüfen gefunden: geprüft wurde nur auf "pending", aber ein
     // zurückgezogener Antrag hat ebenso wenig eine Gegenschicht - und
     // "entfallen" behauptete dort, es habe eine gegeben.
     await zeigen({ role: 'hr', employee_id: null }, [antrag({ status: 'withdrawn' })])

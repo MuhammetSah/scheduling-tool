@@ -208,7 +208,7 @@ def test_ohne_wochenziel_aendert_sich_nichts(hr_client):
 
 
 def test_auch_eine_schicht_ohne_eigene_zeiten_begrenzt_die_ruhezeit(hr_client):
-    """Aus dem Review zu PR #29.
+    """Beim Nachpruefen dieser Etappe gefunden.
 
     Eine gespeicherte Zuweisung muss ihre Zeiten nicht selbst tragen: sie kann
     sie aus der Schichtart beziehen oder aus einer Tagesausnahme. Wer nur die

@@ -77,7 +77,7 @@ aussehende Zeile für einen Tag, den niemand genannt hat.
 
 `parse_weekday()` lehnt beides ab.
 
-**Das Review zu PR #26 hat gezeigt, dass das zu kurz griff.** Behoben waren die drei Stellen, für
+**Das Nachprüfen hat gezeigt, dass das zu kurz griff.** Behoben waren die drei Stellen, für
 die Tests geschrieben worden waren — nicht die Klasse. Dieselbe Schwäche stand noch in
 `parse_int_list()` (`unavailable_weekdays`, `allowed_shift_types`) und in
 `parse_optional_hours()`, wo `float(True)` eine Tagesgrenze von einer Stunde ergibt: innerhalb

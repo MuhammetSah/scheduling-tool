@@ -97,7 +97,7 @@ Fallstrick 21 im Handoff steht. Beide Tabellen tragen jetzt eine `id` und sagen 
 mit `UNIQUE`, wie `employee_allowed_shift_types` seit `0001_baseline.py`. Dem vorhandenen Muster zu
 folgen wäre von Anfang an richtig gewesen.
 
-**Das Review zu PR #32 fand vier weitere Dinge, und eines davon ist eine Datenschutzlücke:**
+**Das Nachprüfen fand vier weitere Dinge, und eines davon ist eine Datenschutzlücke:**
 `delete_employee()` räumt seit Etappe 5i Fenster, gesperrte Tage, Abwesenheiten und erlaubte
 Schichtarten weg — die Nachweise kamen später dazu und standen nicht auf der Liste. **Ein Grabstein
 mit Ersthelferschein ist genau das, was die Anonymisierung verhindern soll.** Wer eine

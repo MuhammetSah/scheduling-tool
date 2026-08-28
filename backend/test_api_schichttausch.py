@@ -719,7 +719,7 @@ def test_ein_antrag_auf_eine_person_ohne_schicht_bleibt_offen(hr_client):
 
 
 def test_eine_umbesetzte_schicht_laesst_sich_nicht_mehr_genehmigen(hr_client):
-    """Aus dem Review zu PR #30, und der ernsteste der drei Befunde.
+    """Beim Nachpruefen gefunden, und der ernsteste der drei Befunde.
 
     Zugestimmt haben zwei bestimmte Menschen zu zwei bestimmten Schichten.
     Setzt die Personalabteilung eine davon zwischendurch von Hand um, tauschte
@@ -826,7 +826,7 @@ def test_die_unveraenderte_genehmigung_geht_weiterhin_durch(hr_client):
 
 
 def test_eine_kurze_pause_zaehlt_in_die_tagesarbeitszeit(hr_client):
-    """Ebenfalls aus dem Review zu PR #30.
+    """Ebenfalls beim Nachpruefen gefunden.
 
     perform_swap() reichte die Zeiten des Platzes weiter, aber nicht seine
     break_minutes. Ohne sie liest die Pruefung die gesetzliche Mindestpause -
@@ -865,7 +865,7 @@ def test_eine_kurze_pause_zaehlt_in_die_tagesarbeitszeit(hr_client):
 
 
 def test_die_lage_der_pause_reist_beim_tausch_mit(hr_client):
-    """Aus dem Review zu PR #31, und dieselbe Lehre wie eine Etappe zuvor.
+    """Beim Nachpruefen gefunden, und dieselbe Lehre wie eine Etappe zuvor.
 
     perform_swap() reichte break_minutes weiter, break_start aber nicht. Damit
     war die Pruefung nach Paragraph 4 Satz 3 im Tauschweg wirkungslos, obwohl

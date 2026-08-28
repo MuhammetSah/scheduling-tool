@@ -29,7 +29,7 @@ function Schicht({ shift, t, nochOffen }) {
   // beides erzählt im ersten Fall etwas Falsches.
   //
   // "Vor der Zustimmung" heißt jeder Stand außer den beiden, in denen sie
-  // feststeht - aus dem Review zu PR #30: ein zurückgezogener oder
+  // feststeht - beim Nachprüfen gefunden: ein zurückgezogener oder
   // abgelehnter Antrag hat ebenfalls keine, und "entfallen" wäre auch dort
   // gelogen.
   if (!shift) {

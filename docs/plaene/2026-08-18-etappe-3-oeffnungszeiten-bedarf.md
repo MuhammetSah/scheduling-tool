@@ -8,7 +8,7 @@
 
 **Spec:** [`docs/entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.1–4.3, 6, 7 und „Etappe 3".
 
-**Setzt auf:** Etappe 2 (`etappe-2-individuelle-zeiten`, PR #13). Die Deckungslücken-Rechnung braucht `assignment_hours()` aus Etappe 2 — eine Zuweisung mit eigenen Zeiten deckt genau diese Zeiten ab, nicht die der Schichtart.
+**Setzt auf:** Etappe 2 (`etappe-2-individuelle-zeiten`). Die Deckungslücken-Rechnung braucht `assignment_hours()` aus Etappe 2 — eine Zuweisung mit eigenen Zeiten deckt genau diese Zeiten ab, nicht die der Schichtart.
 
 ## Globale Rahmenbedingungen
 

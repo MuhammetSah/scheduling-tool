@@ -292,7 +292,7 @@ def test_ein_mitarbeiter_sieht_seine_eigenen_nachweise(hr_client):
     assert [q['name'] for q in daten['qualifications']] == ['Ersthelfer']
 
 
-# ---------- Aus dem Review zu PR #32 ----------
+# ---------- Beim Nachpruefen gefunden ----------
 
 
 def test_ein_nicht_listenwert_loescht_nichts(hr_client):
