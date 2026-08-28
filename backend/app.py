@@ -2246,6 +2246,7 @@ def fetch_schedule(year, month):
         'distribution': build_distribution(assignments, active_employees),
         'coverage_gaps': coverage_gaps_for_month(cursor, year, month, assignments),
         'average_hours': average_hours_exceeded(cursor, year, month),
+        'qualification_shortfalls': qualification_shortfalls(cursor, assignments),
         'holidays': [{'date': tag.isoformat(), 'name': name}
                      for tag, name in holidays_for_month(cursor, year, month).items()],
     }
@@ -2461,6 +2462,17 @@ def get_schedule(year, month):
     schedule['absences'] = [a for a in schedule['absences'] if a['employee_id'] == linked_employee_id]
     schedule.pop('distribution', None)
     schedule.pop('coverage_gaps', None)
+    # average_hours names colleagues who are over § 3's eight-hour average, with
+    # their hours. It was going out under this scope while the paragraph above
+    # promised the opposite: "not the workload comparison, which is a management
+    # view". Empty on most months, which is why it went unnoticed - a month in
+    # which someone is over the line would have handed every employee account
+    # that person's name and how far over they are. Whether a colleague works
+    # too much is between them and HR.
+    schedule.pop('average_hours', None)
+    # Same reason as coverage_gaps: which shift the business cannot staff, and
+    # how many people hold which certificate, is HR's picture of the roster.
+    schedule.pop('qualification_shortfalls', None)
     schedule['scope'] = 'own'
     schedule['unfilled_count'] = 0
     schedule['linked_employee_id'] = linked_employee_id
@@ -4723,6 +4735,120 @@ def average_hours_exceeded(cursor, year, month):
             'average_per_working_day': round(minutes / 60 / working_days, 1),
         })
     return over
+
+
+def qualification_shortfalls(cursor, assignments):
+    """Shift types whose certificate holders cannot possibly fill their slots.
+
+    The gap list says how many people are missing. It never says why, because
+    the arithmetic behind it (coverage_model.coverage_gaps) knows only bands
+    and covered intervals - by design. That leaves one case badly unexplained,
+    and it is the case a business runs into first: a shift type that requires a
+    certificate almost nobody holds. A month planned that way comes out with a
+    row of identical gaps, six visibly free people beside them, and nothing
+    anywhere saying that the Fruehdienst wants a first-aider and exactly one
+    person on the roster is one. The reasonable conclusion from that screen is
+    that the generator is broken.
+
+    So this reports only what can be *proved* from counting, never a guess at
+    the cause: on a date where a shift type has more slots than there are people
+    allowed to take it at all, the surplus cannot be staffed by anyone. That
+    statement holds whatever else is going on - absences, hours, rest - which is
+    why it is safe to put in front of HR without hedging.
+
+    Which is also why it stays silent about every other reason a slot went
+    unfilled. A gap caused by weekly hours would not be helped by "8 of 8 hold
+    the certificate"; it would be led away from the real cause. Nothing to
+    prove, nothing said.
+
+    Counted as able to take the shift: active, not anonymised, holding every
+    required certificate valid on that date (holds_qualification_on()'s
+    reading), and not shut out by allowed_shift_types. Deliberately *not*
+    counted: availability windows, absences, hours. Those vary per date in ways
+    a ceiling should not pretend to know, and every one of them can only make
+    the real number smaller - so the ceiling stays a ceiling.
+    """
+    unfilled = {}
+    slots = {}
+    for a in assignments:
+        shift_type_id = a['shift_type_id']
+        if shift_type_id is None:
+            # A block that matched no shift type requires no certificate.
+            continue
+        key = (a['date'], shift_type_id)
+        slots[key] = slots.get(key, 0) + 1
+        if a['employee_id'] is None:
+            unfilled[key] = unfilled.get(key, 0) + 1
+    if not unfilled:
+        return []
+
+    verlangt = qualification_requirements(cursor)
+    if not verlangt:
+        return []
+
+    cursor.execute('SELECT id, name FROM shift_types')
+    schichtnamen = {row['id']: row['name'] for row in cursor.fetchall()}
+    namen = qualification_names(cursor)
+
+    cursor.execute('SELECT id FROM employees WHERE active = 1 AND anonymized_at IS NULL')
+    aktive = [row['id'] for row in cursor.fetchall()]
+    if not aktive:
+        # Every block is a gap, and /setup-status says so as a defect. Repeating
+        # it here as a certificate problem would point at the wrong thing.
+        return []
+
+    cursor.execute('SELECT employee_id, shift_type_id FROM employee_allowed_shift_types')
+    erlaubt = {}
+    for row in cursor.fetchall():
+        erlaubt.setdefault(row['employee_id'], set()).add(row['shift_type_id'])
+
+    cursor.execute('SELECT employee_id, qualification_id, valid_until FROM employee_qualifications')
+    besitzt = {}
+    for row in cursor.fetchall():
+        besitzt.setdefault(row['employee_id'], {})[row['qualification_id']] = row['valid_until']
+
+    def faehig(employee_id, shift_type_id, iso_date):
+        eigene = erlaubt.get(employee_id)
+        if eigene and shift_type_id not in eigene:
+            return False
+        held = besitzt.get(employee_id, {})
+        for qualification_id in verlangt[shift_type_id]:
+            valid_until = held.get(qualification_id, False)
+            if valid_until is False:
+                return False
+            if valid_until and iso_date > valid_until:
+                return False
+        return True
+
+    schlimmste = {}
+    for (iso_date, shift_type_id), offen in sorted(unfilled.items()):
+        if shift_type_id not in verlangt:
+            continue
+        gebraucht = slots[(iso_date, shift_type_id)]
+        koennen = sum(1 for employee_id in aktive
+                      if faehig(employee_id, shift_type_id, iso_date))
+        if koennen >= gebraucht:
+            continue
+        bisher = schlimmste.get(shift_type_id)
+        # The worst date leads, but the count of affected dates is what says
+        # whether this is one awkward Tuesday or the whole month - so it is
+        # carried over when a later date takes the lead, not restarted.
+        if bisher is None or gebraucht - koennen > bisher['slots'] - bisher['eligible']:
+            schlimmste[shift_type_id] = {
+                'shift_type_id': shift_type_id,
+                'shift_type_name': schichtnamen.get(shift_type_id),
+                'date': iso_date,
+                'slots': gebraucht,
+                'eligible': koennen,
+                'unfilled': offen,
+                'active_employees': len(aktive),
+                'qualifications': sorted(
+                    namen[q] for q in verlangt[shift_type_id] if q in namen),
+                'dates_affected': bisher['dates_affected'] if bisher else 0,
+            }
+        schlimmste[shift_type_id]['dates_affected'] += 1
+
+    return sorted(schlimmste.values(), key=lambda e: (e['shift_type_name'] or '', e['date']))
 
 
 def effective_bands_by_date(cursor, year, month, bands_by_weekday=None):

@@ -277,6 +277,11 @@ const de = {
     entrySingular: '{date}, {start}–{end}: 1 Person fehlt',
     entryPlural: '{date}, {start}–{end}: {n} Personen fehlen',
   },
+  qualificationShortfalls: {
+    title: 'Woran es dabei liegt',
+    entry: '{shiftType} verlangt: {qualifications}. {eligible} von {active} Mitarbeitenden können diese Schicht übernehmen, gebraucht werden {slots} an einem Tag — an {days} Tagen dieses Monats bleibt deshalb etwas offen.',
+    hint: 'Gezählt ist, wer den Nachweis gültig hat und für diese Schichtart zugelassen ist. Urlaub, Krankheit, feste Zeiten und Arbeitszeitgrenzen kommen obendrauf — die tatsächliche Zahl kann also nur kleiner sein. Abhilfe: jemanden qualifizieren, den Bedarf senken oder die Anforderung an der Schichtart streichen.',
+  },
 
   sundayWork: {
     title: 'Sonn- und Feiertagsarbeit',
@@ -702,6 +707,11 @@ const en = {
     title: 'Open Coverage Gaps',
     entrySingular: '{date}, {start}–{end}: 1 person missing',
     entryPlural: '{date}, {start}–{end}: {n} people missing',
+  },
+  qualificationShortfalls: {
+    title: 'Why that is',
+    entry: '{shiftType} requires: {qualifications}. {eligible} of {active} employees can take this shift, {slots} are needed on a single day — so on {days} days this month something has to stay open.',
+    hint: 'Counted are those who hold the certificate validly and are allowed to work this shift type. Leave, sickness, fixed hours and working-time limits come on top — the real number can only be smaller. Ways out: qualify someone, lower the demand, or drop the requirement from the shift type.',
   },
 
   sundayWork: {
