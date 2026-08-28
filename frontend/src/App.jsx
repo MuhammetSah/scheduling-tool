@@ -42,8 +42,11 @@ function LanguageToggle() {
   const { lang, setLang, t } = useTranslation()
   return (
     <div className="view-toggle" role="group" aria-label={t('nav.languageLabel')}>
+      {/* aria-pressed sagt der Sprachausgabe, welche Sprache gerade gilt -
+          die Klasse "active" sagt es nur dem Auge. */}
       <button
         type="button"
+        aria-pressed={lang === 'de'}
         className={lang === 'de' ? 'active' : ''}
         onClick={() => setLang('de')}
       >
@@ -51,6 +54,7 @@ function LanguageToggle() {
       </button>
       <button
         type="button"
+        aria-pressed={lang === 'en'}
         className={lang === 'en' ? 'active' : ''}
         onClick={() => setLang('en')}
       >

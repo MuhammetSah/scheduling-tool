@@ -168,3 +168,52 @@ describe('SchedulePage: was noch fehlt', () => {
     expect(screen.queryByText(/Bevor der erste Plan/)).not.toBeInTheDocument()
   })
 })
+
+// ---------- Der Ansichts-Umschalter sagt, was gewählt ist ----------
+//
+// Welche Ansicht gilt, stand bisher ausschliesslich in einer CSS-Klasse. Eine
+// Sprachausgabe las zwei gleichwertige Schaltflächen vor, ohne zu sagen,
+// welche gerade greift — und ohne role/aria-label nicht einmal, dass sie
+// zusammengehören.
+
+async function zeigenMitPlan(setFlash = vi.fn()) {
+  api.get.mockImplementation(pfad => {
+    if (pfad.startsWith('/schedules/')) return Promise.resolve(leererPlan())
+    if (pfad === '/shift-types') {
+      return Promise.resolve([{ id: 1, name: 'Tag', start_time: '08:00',
+                                end_time: '16:00', color: '#3366cc',
+                                required_qualifications: [] }])
+    }
+    if (pfad === '/setup-status') return Promise.resolve({ ready: true, missing: [], notes: [] })
+    return Promise.resolve([])
+  })
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <LanguageProvider>
+          <SchedulePage setFlash={setFlash} user={HR} />
+        </LanguageProvider>
+      </MemoryRouter>
+    )
+  })
+}
+
+describe('SchedulePage: der Ansichts-Umschalter', () => {
+  it('meldet die gewählte Ansicht über aria-pressed', async () => {
+    await zeigenMitPlan()
+
+    expect(screen.getByRole('button', { name: 'Kalender', pressed: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tabelle', pressed: false })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tabelle' }))
+
+    expect(screen.getByRole('button', { name: 'Tabelle', pressed: true })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Kalender', pressed: false })).toBeInTheDocument()
+  })
+
+  it('fasst die beiden Knöpfe als benannte Gruppe zusammen', async () => {
+    await zeigenMitPlan()
+
+    expect(screen.getByRole('group', { name: 'Ansicht' })).toBeInTheDocument()
+  })
+})

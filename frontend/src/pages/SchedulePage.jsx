@@ -416,9 +416,15 @@ function SchedulePage({ setFlash, user }) {
 
         {schedule && (
           <div className="toolbar">
-            <div className="view-toggle">
+            {/* aria-pressed, nicht nur die Klasse "active": welche Seite
+                gewaehlt ist, stand bisher ausschliesslich in der Farbe. Eine
+                Sprachausgabe las hier zwei gleichwertige Schaltflaechen vor,
+                ohne zu sagen, welche gerade gilt - und ohne role/aria-label
+                nicht einmal, dass sie zusammengehoeren. */}
+            <div className="view-toggle" role="group" aria-label={t('schedule.viewToggleLabel')}>
               <button
                 type="button"
+                aria-pressed={view === 'calendar'}
                 className={view === 'calendar' ? 'active' : ''}
                 onClick={() => setView('calendar')}
               >
@@ -426,6 +432,7 @@ function SchedulePage({ setFlash, user }) {
               </button>
               <button
                 type="button"
+                aria-pressed={view === 'table'}
                 className={view === 'table' ? 'active' : ''}
                 onClick={() => setView('table')}
               >

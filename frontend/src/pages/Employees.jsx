@@ -418,8 +418,12 @@ function Employees({ setFlash }) {
             <div className="field">
               <label>{t('employees.availabilityModeLabel')}</label>
               <div className="view-toggle" role="group" aria-label={t('employees.availabilityModeLabel')}>
+                {/* aria-pressed: welcher Modus gilt, entscheidet, ob die
+                    Fensterliste darunter ueberhaupt eine Bedeutung hat - das
+                    ausschliesslich ueber die Farbe zu sagen ist zu wenig. */}
                 <button
                   type="button"
+                  aria-pressed={form.availability_mode !== 'windows'}
                   className={form.availability_mode !== 'windows' ? 'active' : ''}
                   onClick={() => setForm(f => ({ ...f, availability_mode: 'anytime' }))}
                 >
@@ -427,6 +431,7 @@ function Employees({ setFlash }) {
                 </button>
                 <button
                   type="button"
+                  aria-pressed={form.availability_mode === 'windows'}
                   className={form.availability_mode === 'windows' ? 'active' : ''}
                   onClick={() => setForm(f => ({ ...f, availability_mode: 'windows' }))}
                 >
