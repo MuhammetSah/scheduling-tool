@@ -4,7 +4,7 @@
 **Projekt:** scheduling-tool-main (Schichtplan-Tool)
 **Übergeordnete Spec:** [`2026-08-16-zeitachsen-dienstplan-design.md`](2026-08-16-zeitachsen-dienstplan-design.md) §10, Etappe 5
 **Vorgänger:** [`2026-08-22-etappe-4-zuschnitt-design.md`](2026-08-22-etappe-4-zuschnitt-design.md) §3
-**Status:** Entwurf, mit dem Nutzer abgestimmt
+**Status:** Entwurf, entschieden
 
 ---
 

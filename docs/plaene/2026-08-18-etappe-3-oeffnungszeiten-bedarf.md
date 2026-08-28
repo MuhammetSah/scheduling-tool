@@ -239,7 +239,7 @@ Erwartet: „no such table: business_hours" und Verwandtes. Prüfe, dass die Feh
 
 - [ ] **Schritt 4: Postgres-Gegenprobe**
 
-In `backend/test_migrations_postgres.py` Entsprechungen für den Standard, die Eindeutigkeit und den Rundlauf ergänzen. Orientiere dich strikt an den vorhandenen Tests derselben Datei. **Lokal nicht ausführbar** — weise das im Bericht ehrlich als „nicht lokal verifiziert, `backend-postgres` in der CI ist die Probe" aus.
+In `backend/test_migrations_postgres.py` Entsprechungen für den Standard, die Eindeutigkeit und den Rundlauf ergänzen. Strikt an den vorhandenen Tests derselben Datei orientieren. **Lokal nicht ausführbar** — gilt damit als „nicht lokal verifiziert, `backend-postgres` in der CI ist die Probe".
 
 - [ ] **Schritt 5: Rot-Nachweis für die Wiederholbarkeit**
 
@@ -329,7 +329,7 @@ def test_band_within_prueft_vollstaendige_enthaltung():
 
 - [ ] **Schritt 2: Test laufen lassen, Fehlschlag bestätigen**
 
-Erwartet: `ModuleNotFoundError: No module named 'coverage'` — **Achtung:** es gibt ein PyPI-Paket namens `coverage`. Prüfe, dass der Fehler wirklich auf die fehlende lokale Datei zeigt und nicht versehentlich ein installiertes Paket trifft. Ist `coverage` im venv installiert, benenne das Modul in `coverage_model.py` um und passe diesen Plan im Bericht an — ein Namenskonflikt mit einem installierten Paket ist ein echter Fallstrick, kein Detail.
+Erwartet: `ModuleNotFoundError: No module named 'coverage'` — **Achtung:** es gibt ein PyPI-Paket namens `coverage`. Prüfe, dass der Fehler wirklich auf die fehlende lokale Datei zeigt und nicht versehentlich ein installiertes Paket trifft. Ist `coverage` im venv installiert, das Modul in `coverage_model.py` umbenennen und diesen Plan nachziehen — ein Namenskonflikt mit einem installierten Paket ist ein echter Fallstrick, kein Detail.
 
 - [ ] **Schritt 3: Die Funktionen schreiben**
 
@@ -601,7 +601,7 @@ git commit -m "feat: Deckungsluecken auf der Zeitachse melden"
 
 Starte beide Server und bediene die Oberfläche. Diese Durchstiche willst du selbst gesehen haben: Öffnungszeit ändern und neu laden; einen Tag auf geschlossen setzen und sehen, dass der Bedarfseditor dort keine Bänder mehr zulässt; zwei überlappende Bänder anlegen und die Ablehnung sehen; eine Deckungslücke im Plan erscheinen und nach dem Besetzen verschwinden sehen.
 
-**Trenne im Bericht ausdrücklich, was du ausgeführt und gesehen hast, von dem, was du nur durchdacht hast.**
+**Am Ende trennen, was ausgeführt und gesehen wurde, von dem, was nur durchdacht ist.**
 
 ```bash
 git commit -m "feat: Editoren fuer Oeffnungszeiten und Bedarf"

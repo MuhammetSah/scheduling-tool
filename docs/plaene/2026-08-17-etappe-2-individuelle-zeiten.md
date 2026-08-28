@@ -238,7 +238,7 @@ def test_zeitmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwenden(fres
     assert '0005_assignment_times' in migrations.applied_versions()
 ```
 
-**Bevor du das übernimmst:** `migrations.apply_one(version)` ist im Test oben eine Annahme. Sieh in `backend/migrations.py` nach, wie die bestehenden Tests einzelne Versionen anwenden, und benutze exakt den vorhandenen Weg. Wenn es keinen gibt, staffle stattdessen über `apply_pending()` vor dem Anlegen der `0005`-Datei — erfinde keine neue öffentliche Funktion im Runner nur für einen Test.
+**Vor dem Übernehmen:** `migrations.apply_one(version)` ist im Test oben eine Annahme. In `backend/migrations.py` nachsehen, wie die bestehenden Tests einzelne Versionen anwenden, und exakt den vorhandenen Weg benutzen. Gibt es keinen, stattdessen über `apply_pending()` vor dem Anlegen der `0005`-Datei staffeln — keine neue öffentliche Funktion im Runner nur für einen Test.
 
 - [ ] **Schritt 2: Tests laufen lassen, Fehlschlag bestätigen**
 
@@ -377,7 +377,7 @@ cursor.execute(
 assert cursor.fetchone()[0] == 'YES'
 ```
 
-**Du kannst diese Tests lokal nicht ausführen** (kein Postgres auf dem Rechner). Weise das im Bericht ehrlich als „nicht lokal verifiziert, der CI-Job `backend-postgres` ist die Probe" aus — eine behauptete Verifikation, die nicht stattgefunden hat, ist der schwerste Fehler, den du hier machen kannst.
+**Diese Tests laufen lokal nicht** (kein Postgres auf dem Rechner). Sie gelten als „nicht lokal verifiziert, der CI-Job `backend-postgres` ist die Probe" — eine behauptete Verifikation, die nicht stattgefunden hat, wäre der schwerste Fehler an dieser Stelle.
 
 - [ ] **Schritt 5: Rot-Nachweis für den Rundlauf**
 
@@ -966,7 +966,7 @@ git commit -m "feat: individuelle Zeiten ueber die API setzen"
 - Modify: `frontend/src/components/ShiftCell.jsx`, `frontend/src/components/ScheduleGrid.jsx`, `frontend/src/components/CalendarView.jsx`, `frontend/src/i18n/translations.js`, ggf. `frontend/src/App.css`
 - Nicht anfassen: Backend
 
-Es gibt weiterhin **keine Frontend-Testinfrastruktur, und du baust in dieser Aufgabe keine auf.** Verifikation ist `npm run lint`, `npm run build` und das tatsächliche Bedienen der Oberfläche.
+Es gibt weiterhin **keine Frontend-Testinfrastruktur, und in dieser Aufgabe kommt keine dazu.** Verifikation ist `npm run lint`, `npm run build` und das tatsächliche Bedienen der Oberfläche.
 
 - [ ] **Schritt 1: Zeiten pro Person anzeigen**
 
@@ -993,7 +993,7 @@ Gib ihm eine: eine zusätzliche, letzte Spalte, die nur erscheint, wenn es an mi
 
 `CalendarView.jsx` gruppiert dynamisch (Zeile 80-81) und braucht nur zwei Rückfallwerte: `slots[0].shift_type_name` ist `null` → derselbe Text, und `slots[0].shift_type_color` ist `null` → eine neutrale Farbe aus dem Stylesheet.
 
-**Eine Schaltfläche zum Anlegen eines freien Blocks baust du nicht.** Sie steht nicht im Umfang dieser Etappe; erzeugt werden solche Blöcke erst vom Planer in Etappe 4.
+**Eine Schaltfläche zum Anlegen eines freien Blocks kommt hier nicht dazu.** Sie steht nicht im Umfang dieser Etappe; erzeugt werden solche Blöcke erst vom Planer in Etappe 4.
 
 - [ ] **Schritt 4: Texte**
 
@@ -1019,7 +1019,7 @@ Diese Durchstiche willst du selbst gesehen haben:
 3. „Standard" drücken, neu laden — die Zeile erbt wieder die Zeit der Schicht.
 4. Den Datums-Override der ganzen Zelle ändern — die Person mit eigener Zeit bleibt davon unberührt, alle anderen ziehen mit.
 
-**Trenne im Bericht ausdrücklich, was du tatsächlich ausgeführt und gesehen hast, von dem, was du nur durchdacht hast.** Eine ehrliche Lücke ist akzeptiert; eine behauptete Verifikation, die nicht stattgefunden hat, ist der schwerste Fehler.
+**Am Ende trennen, was tatsächlich ausgeführt und gesehen wurde, von dem, was nur durchdacht ist.** Eine ehrliche Lücke ist in Ordnung; eine behauptete Verifikation, die nicht stattgefunden hat, ist der schwerste Fehler.
 
 ```bash
 git commit -m "feat: individuelle Zeiten pro Person in der Planansicht"

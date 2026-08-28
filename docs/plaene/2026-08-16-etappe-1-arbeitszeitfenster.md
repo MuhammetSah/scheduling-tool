@@ -465,7 +465,7 @@ Alle neuen Zeichenketten in beiden Sprachen, mit Umlauten — in Etappe 0 war ei
 
 - [ ] **Schritt 5: Lint, Build, Commit**
 
-Es gibt weiterhin keine Frontend-Testinfrastruktur. Bau sie **nicht** in dieser Aufgabe auf. Trenne im Bericht ausdrücklich, was du verifiziert und was du nur durchdacht hast; wenn du beide Server startest und die Oberfläche bedienst, schreib das dazu — in Etappe 0 wurde der schwerwiegendste Frontend-Fehler genau dadurch gefunden.
+Es gibt weiterhin keine Frontend-Testinfrastruktur. Sie kommt **nicht** in dieser Aufgabe dazu. Am Ende festhalten, was tatsächlich verifiziert und was nur durchdacht ist; beide Server zu starten und die Oberfläche zu bedienen gehört ausdrücklich dazu — in Etappe 0 wurde der schwerwiegendste Frontend-Fehler genau so gefunden.
 
 ---
 

@@ -33,8 +33,8 @@ wann, welche Methode, welcher Pfad, welcher Status. Eine Stelle, lückenlos per 
 keine vergessene Route — und **ohne Anfrageinhalte**, also ohne das Art.-9-Problem.
 
 **Gebaut wird die zweite.** Sie beantwortet die Frage, die wirklich gestellt wird — *wer hat
-diese Zuweisung angefasst und wann* —, ohne eine Entscheidung vorwegzunehmen, die dem Nutzer
-gehört. Was sie nicht beantwortet, ist *worauf* etwas geändert wurde; das steht ausdrücklich
+diese Zuweisung angefasst und wann* —, ohne eine Entscheidung vorwegzunehmen, die dem
+Betreiber gehört. Was sie nicht beantwortet, ist *worauf* etwas geändert wurde; das steht ausdrücklich
 unter „nicht dabei" und ist der Preis.
 
 ## 3. Was protokolliert wird
@@ -68,7 +68,7 @@ lassen, indem man das Konto löscht, ist kein Protokoll.
 findet. Der Name daneben ist die Kopie, die den Vorgang lesbar hält.
 
 **Das ist zugleich ein DSGVO-Thema**, kein gelöstes: ein Protokoll über benannte Personen ist
-personenbezogen und braucht eine Aufbewahrungsfrist. Die festzulegen ist Sache des Nutzers und
+personenbezogen und braucht eine Aufbewahrungsfrist. Die festzulegen ist Sache des Betreibers und
 gehört zum DSGVO-Teil, nicht hierher. Der Abschnitt „Offen" im Handoff hält es fest.
 
 ## 5. Datenmodell
@@ -141,5 +141,5 @@ vor, die die Einträge nicht haben.
 | Risiko | Gegenmaßnahme |
 |---|---|
 | Das Protokoll kippt eine Anfrage | `try/except` um den Schreibvorgang, mit eigenem Test (§6, §9) |
-| Die Tabelle wächst unbegrenzt | Real, und bewusst offen: die Frist ist eine Entscheidung des Nutzers. Bei dieser Größenordnung — ein Betrieb, wenige Schreibzugriffe am Tag — ist es Jahre hin unkritisch, aber es steht im Handoff |
+| Die Tabelle wächst unbegrenzt | Real, und bewusst offen: die Frist ist eine Entscheidung des Betreibers. Bei dieser Größenordnung — ein Betrieb, wenige Schreibzugriffe am Tag — ist es Jahre hin unkritisch, aber es steht im Handoff |
 | Einträge verschwinden mit dem Konto | Kein Fremdschlüssel, Name mitgeschrieben, eigener Test (§4, §9) |

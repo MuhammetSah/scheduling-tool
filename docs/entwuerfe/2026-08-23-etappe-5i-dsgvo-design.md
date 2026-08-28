@@ -3,7 +3,7 @@
 **Datum:** 2026-08-23
 **Projekt:** scheduling-tool-main (Schichtplan-Tool)
 **Übergeordnete Spec:** [`2026-08-16-zeitachsen-dienstplan-design.md`](2026-08-16-zeitachsen-dienstplan-design.md) §10
-**Status:** Entwurf, mit dem Nutzer abgestimmt
+**Status:** Entwurf, entschieden
 
 ---
 

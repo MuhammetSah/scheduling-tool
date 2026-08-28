@@ -236,7 +236,7 @@ Jede Etappe bekommt ihren **eigenen Umsetzungsplan** und wird abgeschlossen (gr�
 
 ### Etappe 1 — Arbeitszeitfenster
 
-`employee_availability`, `availability_mode`, Filter im Planer, Warnung bei Handkorrektur, Editor in `Employees.jsx`. **Nach dieser Etappe funktioniert dein Kernwunsch bereits** — Anna 08:00–14:00 wird respektiert.
+`employee_availability`, `availability_mode`, Filter im Planer, Warnung bei Handkorrektur, Editor in `Employees.jsx`. **Nach dieser Etappe steht der Kern bereits** — Anna 08:00–14:00 wird respektiert.
 
 ### Etappe 2 — Individuelle Zeiten pro Zuweisung
 

@@ -57,7 +57,7 @@ Datumsfehler, der in UTC unsichtbar ist, eine Reihe Stellen, an denen das Werkze
 und nichts darüber sagt, und drei Stellen, an denen das README nicht mehr stimmte. Alles im eigenen
 Abschnitt weiter unten.
 
-**Das Nächste ist der Datenbankzyklus.** Der Nutzer hat am 23.08.2026 entschieden: die Instanz
+**Das Nächste ist der Datenbankzyklus.** Am 23.08.2026 entschieden: die Instanz
 ablaufen lassen und **eine neue 30-Tage-Instanz** aufziehen. Damit ist es kein Termin, sondern ein
 wiederkehrender Vorgang; der erste Durchlauf fällt auf den 07.09.2026. Das Blatt dafür steht in
 [`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md). **Seit Etappe 16 hängt daran eine zweite
@@ -72,13 +72,13 @@ heißt entweder jeden Zyklus zu sichern und zurückzuspielen oder einen bezahlte
 und beides ist eine Entscheidung des Betreibers.
 
 Der Sprung vom Bestandsstand `0007` auf `0017` ist geprobt (Etappe 11), die neue Instanz selbst
-liegt beim Nutzer.
+liegt beim Betrieb.
 
 **Die Roadmap ist abgearbeitet.** Etappe 8 brachte den geführten Schichttausch, Etappe 9 die
 letzten beiden ArbZG-Regeln, Etappe 10 die Nachweise. Damit ist jeder Punkt umgesetzt, den das
 Entwurfsdokument und das README als offen führten.
 
-**Was jetzt kommt, ist vollständig eine Festlegung des Nutzers.** Es gibt keine Fortsetzung mehr,
+**Was jetzt kommt, ist vollständig eine Frage des Betriebs.** Es gibt keine Fortsetzung mehr,
 die sich aus dem Vorhandenen ergibt. Was sich beim Bauen aufgedrängt hat und bewusst liegen blieb,
 steht in den Specs unter „Bewusst nicht dabei" — jeweils mit dem Grund. Die auffälligsten:
 
@@ -100,9 +100,8 @@ längst behoben, und ungeprüft danach zu arbeiten hieße, Vorhandenes zu „rep
 
 **Lies vorher zwei Abschnitte:** Fallstricke dieses Projekts und Zurückgestellte Befunde.
 
-**Was beim Nutzer liegt und nicht bei dir:** der Umgang mit der ablaufenden Datenbank
-(07.09.2026), das Datenbankpasswort und die IP-Freigabe. Details unter „Offen — liegt beim
-Nutzer“. Zugangsdaten fasst du nicht an, auch nicht auf Aufforderung.
+**Was nicht am Code hängt:** der Umgang mit der ablaufenden Datenbank (07.09.2026), das
+Datenbankpasswort und die IP-Freigabe. Details unter „Offen — liegt beim Betrieb“.
 
 ## Aktueller Stand
 
@@ -418,7 +417,7 @@ Auch das Arbeitszeitrecht allein zerfällt in drei:
 | **5d** | Feiertagskalender mit Bundeslandauswahl | ✅ umgesetzt, siehe unten |
 | **5e** | `shift_requirements` entfernen — das lose Ende aus Etappe 4 | ✅ umgesetzt, siehe unten |
 
-Zwei Entscheidungen dazu sind mit dem Nutzer bereits gefallen und gelten für 5b und 5c:
+Zwei Entscheidungen dazu sind bereits gefallen und gelten für 5b und 5c:
 
 - **Durchsetzung gemischt.** Die Sonntagsregeln gehören hart in den Generator — sie hängen an
   Vergangenheit und Gegenwart und sind beim Planen entscheidbar. Der Achtstundenschnitt wird
@@ -531,7 +530,7 @@ bedingungslose Fassung auch teuer: die Suite lief 100 statt 42 Sekunden.
 
 ### Herausgelöst: Etappe 5d — Feiertagskalender
 
-Der Nutzer hatte zunächst einen eingebauten Kalender mit Bundeslandauswahl für 5b gewählt. Beim
+Zunächst war ein eingebauter Kalender mit Bundeslandauswahl für 5b vorgesehen. Beim
 Ausarbeiten zeigte sich, dass er **keine Regel durchsetzt**: § 11 Abs. 3 für Feiertage ist
 durch die Sechstageregel abgedeckt, § 9 wird über die Öffnungszeiten entschieden, und § 11
 Abs. 1 betrifft nur Sonntage. Was bleibt, ist Kennzeichnung und Warnung — echter Nutzen, aber
@@ -1153,7 +1152,7 @@ Branch löschen, Deploy prüfen, Handoff nachziehen. Ein Merge löst einen Deplo
 ausstehende Migrationen auf die Produktionsdatenbank anwendet — das gehört auf die Liste, nicht
 in die Hoffnung.
 
-Was hier nicht entschieden wird, steht unter „Offen — liegt beim Nutzer": Zugangsdaten,
+Was hier nicht entschieden wird, steht unter „Offen — liegt beim Betrieb": Zugangsdaten,
 Passwortrotation, Entscheidungen über die Datenbankinstanz.
 
 ## Fallstricke dieses Projekts — das Wichtigste in Kürze
@@ -1286,7 +1285,7 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     schuldet die Prüfung dahinter; wer sie nicht leisten will, nennt das Feld anders. Dasselbe
     Muster wie beim leeren Plan in Etappe 11: Erfolg melden und nichts tun.
 
-## Offen — liegt beim Nutzer
+## Offen — liegt beim Betrieb
 
 **Erledigt am 22.08.2026:** Etappe 2 und 3 gemergt und deployt (PR #13, #14), alle Migrationen
 `0001`–`0007` in Produktion angewandt, der Nachtschicht-Fehler in `window_contains_shift()`
@@ -1295,7 +1294,7 @@ ist der verbliebene Rest.
 
 ### Der Datenbankzyklus — alle 30 Tage, erster Durchlauf 07.09.2026
 
-**Der Nutzer hat am 23.08.2026 entschieden: die Instanz ablaufen lassen und eine neue
+**Am 23.08.2026 entschieden: die Instanz ablaufen lassen und eine neue
 30-Tage-Instanz aufziehen.** Kein bezahlter Plan. Damit ist es kein Termin, sondern ein
 wiederkehrender Vorgang.
 
@@ -1365,7 +1364,7 @@ Teil des Dumps.
   Instanz ablaufen zu lassen, erledigt sich das für diese Datenbank von selbst: das Passwort
   verschwindet am 07.09. mit ihr. Zwei Dinge bleiben und liegen beim Nutzer: die **neue**
   Datenbank bekommt ein neues Passwort, nicht dasselbe wieder — und falls dasselbe Passwort
-  noch anderswo benutzt wird, gilt es dort weiter als offengelegt. Das kann nur der Nutzer
+  noch anderswo benutzt wird, gilt es dort weiter als offengelegt. Das lässt sich nur vor Ort
   prüfen.
 - **IP-Freigabe an der Datenbank aufräumen.** Am 22.08. wurde eine aktuelle IP ergänzt, damit
   der Dump laufen konnte — der alte Eintrag `88.130.158.137/32` vom 08.08. war durch die

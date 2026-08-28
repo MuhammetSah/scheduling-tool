@@ -4,7 +4,7 @@
 **Projekt:** scheduling-tool-main (Schichtplan-Tool)
 **Übergeordnete Spec:** [`2026-08-16-zeitachsen-dienstplan-design.md`](2026-08-16-zeitachsen-dienstplan-design.md) §10, Etappe 5
 **Geschwister:** [`5a — Ruhepausen`](2026-08-22-etappe-5a-ruhepausen-design.md)
-**Status:** Entwurf, mit dem Nutzer abgestimmt
+**Status:** Entwurf, entschieden
 
 ---
 
@@ -58,7 +58,7 @@ Bedingung, die der Planer überhaupt tragen kann, und keine Auslegung des Gesetz
 
 ## 4. Warum der Feiertagskalender herausgelöst wurde
 
-Der Nutzer hatte zunächst einen eingebauten Kalender mit Bundeslandauswahl gewählt. Beim
+Zunächst war ein eingebauter Kalender mit Bundeslandauswahl vorgesehen. Beim
 Ausarbeiten zeigte sich, dass er im gewählten Zuschnitt **keine Regel durchsetzt**:
 
 - § 11 Abs. 3 für Feiertage ist durch die Sechstageregel abgedeckt (§2);

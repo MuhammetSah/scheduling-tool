@@ -3,7 +3,7 @@
 **Datum:** 2026-08-22
 **Projekt:** scheduling-tool-main (Schichtplan-Tool)
 **Übergeordnete Spec:** [`2026-08-16-zeitachsen-dienstplan-design.md`](2026-08-16-zeitachsen-dienstplan-design.md) §5, §10
-**Status:** Entwurf, mit dem Nutzer abgestimmt
+**Status:** Entwurf, entschieden
 
 ---
 
@@ -19,8 +19,8 @@ Vorhabens: **den automatischen Zuschnitt.** Kann ein Block von niemandem ganz ab
 werden, wird er auf das Arbeitszeitfenster eines Mitarbeiters gekürzt, statt die Person zu
 verwerfen. Der ungedeckte Rest bleibt als benannte Lücke stehen.
 
-Dazu kommt — auf ausdrücklichen Wunsch des Nutzers und über den ursprünglichen Zuschnitt der
-Etappe hinaus — der **geteilte Dienst**: eine Person darf mehrere Blöcke am selben Tag
+Dazu kommt — bewusst über den ursprünglichen Zuschnitt der Etappe hinaus — der
+**geteilte Dienst**: eine Person darf mehrere Blöcke am selben Tag
 arbeiten, begrenzt durch eine tägliche Höchstarbeitszeit und die Ruhezeit zum Nachbartag.
 Damit rückt ein Teil des Arbeitszeitrechts aus Etappe 5 nach vorn.
 
