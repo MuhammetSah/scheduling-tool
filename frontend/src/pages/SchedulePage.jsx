@@ -343,24 +343,37 @@ function SchedulePage({ setFlash, user }) {
       {/* Nur solange wirklich etwas fehlt. Eine Tafel, die immer da ist, ist
           Möblierung; eine, die verschwindet, ist eine Antwort. Die Hinweise
           (Bundesland) stehen daneben, nicht darin — sie verhindern nichts. */}
-      {canEdit && setup && !setup.ready && (
+      {canEdit && setup && (!setup.ready || setup.notes.length > 0) && (
         <div className="panel">
-          <div className="panel-header">
-            <h2>{t('setup.title')}</h2>
-          </div>
-          <p className="hint">{t('setup.intro')}</p>
-          <ul className="item-list">
-            {setup.missing.map(eintrag => (
-              <li key={eintrag.key} className="item-row">
-                <span className="item-main">{eintrag.text}</span>
-                <div className="item-actions">
-                  <Link className="btn-secondary btn-small" to={eintrag.route}>
-                    {t('setup.goThere')}
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {!setup.ready && (
+            <>
+              <div className="panel-header">
+                <h2>{t('setup.title')}</h2>
+              </div>
+              <p className="hint">{t('setup.intro')}</p>
+              <ul className="item-list">
+                {setup.missing.map(eintrag => (
+                  <li key={eintrag.key} className="item-row">
+                    <span className="item-main">{eintrag.text}</span>
+                    <div className="item-actions">
+                      <Link className="btn-secondary btn-small" to={eintrag.route}>
+                        {t('setup.goThere')}
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {/* Die Hinweise überleben das Fertigwerden. Sie hingen bisher
+              innerhalb derselben Bedingung wie die Mängelliste und
+              verschwanden mit ihr — ausgerechnet in dem Moment, in dem sie
+              zählen: „für vier von vier Mitarbeitenden sind keine
+              Wochenstunden hinterlegt" ist die Auskunft, die man beim ersten
+              fertigen Plan braucht, nicht die, die man vorher kurz sieht.
+              Ein Mangel verschwindet, wenn er behoben ist; ein Hinweis
+              verschwindet, wenn er nicht mehr zutrifft — und das entscheidet
+              der Server, nicht diese Bedingung. */}
           {setup.notes.length > 0 && (
             <p className="hint">
               {setup.notes.map(hinweis => hinweis.text).join(' ')}

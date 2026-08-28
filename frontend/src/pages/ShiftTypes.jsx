@@ -157,40 +157,6 @@ function ShiftTypes({ setFlash }) {
         )}
       </div>
 
-      <div className="panel">
-        <div className="panel-header">
-          <h2>{t('shiftTypes.qualificationsTitle')}</h2>
-        </div>
-        <p className="hint">{t('shiftTypes.qualificationsHint')}</p>
-        <form className="toolbar" onSubmit={addQualification}>
-          <input
-            value={newQualification}
-            onChange={e => setNewQualification(e.target.value)}
-            required
-            aria-label={t('shiftTypes.qualificationNameAria')}
-            placeholder={t('shiftTypes.qualificationPlaceholder')}
-          />
-          <button type="submit">{t('common.add')}</button>
-        </form>
-        {qualifications.length === 0 ? (
-          <p className="empty-state">{t('shiftTypes.qualificationsEmpty')}</p>
-        ) : (
-          <ul className="item-list">
-            {qualifications.map(q => (
-              <li key={q.id} className="item-row">
-                <span className="item-title">{q.name}</span>
-                <div className="item-actions">
-                  <button className="btn-danger btn-small"
-                          onClick={() => deleteQualification(q.id, q.name)}>
-                    {t('common.delete')}
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
       {showForm && (
         <div className="panel">
           <h3>{form.id ? t('shiftTypes.editTitle') : t('shiftTypes.newTitle')}</h3>
@@ -239,6 +205,41 @@ function ShiftTypes({ setFlash }) {
           </form>
         </div>
       )}
+
+      <div className="panel">
+        <div className="panel-header">
+          <h2>{t('shiftTypes.qualificationsTitle')}</h2>
+        </div>
+        <p className="hint">{t('shiftTypes.qualificationsHint')}</p>
+        <form className="toolbar" onSubmit={addQualification}>
+          <input
+            value={newQualification}
+            onChange={e => setNewQualification(e.target.value)}
+            required
+            aria-label={t('shiftTypes.qualificationNameAria')}
+            placeholder={t('shiftTypes.qualificationPlaceholder')}
+          />
+          <button type="submit">{t('common.add')}</button>
+        </form>
+        {qualifications.length === 0 ? (
+          <p className="empty-state">{t('shiftTypes.qualificationsEmpty')}</p>
+        ) : (
+          <ul className="item-list">
+            {qualifications.map(q => (
+              <li key={q.id} className="item-row">
+                <span className="item-title">{q.name}</span>
+                <div className="item-actions">
+                  <button className="btn-danger btn-small"
+                          onClick={() => deleteQualification(q.id, q.name)}>
+                    {t('common.delete')}
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
     </>
   )
 }
