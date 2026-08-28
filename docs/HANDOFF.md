@@ -10,7 +10,7 @@ Schichtplan-Tool für Personalabteilungen. Flask-Backend (`backend/`), React 19 
 (`frontend/`). SQLite lokal, Postgres in Produktion — über eine **handgeschriebene
 Dialektschicht** in `backend/db.py`, kein ORM. Backend auf Render, Frontend auf Vercel.
 
-- Repo: https://github.com/MuhammetSah/scheduling-tool (öffentlich)
+- Repo: https://github.com/MuhammetSah/schichtplan-tool
 - Lokal: `C:\Users\muham\source\repos\scheduling-tool-main`
 - API: https://schichtplan-api.onrender.com
 - Render-Service `srv-d9r7b4ajobas73cplm1g`, Postgres `dpg-d9r7a7740ujc73arnp6g-a`
