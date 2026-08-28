@@ -128,3 +128,115 @@ describe('CoverageEditor closed-day rejection', () => {
     expect(screen.getByLabelText(START_LABEL)).toHaveValue('08:00')
   })
 })
+
+// ---------- Einen Tag auf andere Wochentage uebertragen ----------
+//
+// Mo-Fr fuenfmal von Hand einzugeben ist fuenfmal die Gelegenheit, sich zu
+// vertippen. Die Faelle hier sind die, bei denen eine Kopierfunktion
+// erfahrungsgemaess falsch gebaut wird: sie haengt an, statt zu ersetzen; sie
+// kopiert die Wochentagsnummer der Quelle mit; sie fragt nicht nach, bevor sie
+// etwas ueberschreibt; oder sie bietet sich auf einem leeren Tag an und raeumt
+// dann die Ziele leer.
+
+const COPY_BUTTON = 'Übertragen'
+const COPY_APPLY = 'Übernehmen'
+const COPY_WORKDAYS = 'Mo–Fr'
+
+async function oeffneUebertragung(setFlash = vi.fn()) {
+  await renderEditor(setFlash)
+  fireEvent.click(screen.getAllByRole('button', { name: COPY_BUTTON })[0])
+  return setFlash
+}
+
+describe('CoverageEditor: Übertragen auf andere Wochentage', () => {
+  it('bietet Übertragen nur an, wo es etwas zu übertragen gibt', async () => {
+    api.get.mockResolvedValue([makeBand(0, '08:00', '16:00', 2)])
+    await renderEditor(vi.fn())
+
+    // Genau ein Montag hat Bänder, also genau ein Knopf.
+    expect(screen.getAllByRole('button', { name: COPY_BUTTON })).toHaveLength(1)
+  })
+
+  it('überträgt die Bänder auf die gewählten Tage', async () => {
+    api.get.mockResolvedValue([makeBand(0, '08:00', '16:00', 3)])
+    await oeffneUebertragung()
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_WORKDAYS }))
+    fireEvent.click(screen.getByRole('button', { name: COPY_APPLY }))
+
+    // Montag plus Di-Fr: fünf Zeilen mit denselben Zeiten.
+    expect(screen.getAllByLabelText('Von').filter(f => f.value === '08:00')).toHaveLength(5)
+    expect(screen.getAllByLabelText('Benötigte Anzahl').filter(f => f.value === '3')).toHaveLength(5)
+  })
+
+  it('ersetzt vorhandene Bänder, statt sie zu ergänzen', async () => {
+    // Anhängen erzeugte auf dem Dienstag sofort eine Überschneidung - also
+    // genau den Zustand, den der Speichern-Knopf sperrt.
+    api.get.mockResolvedValue([
+      makeBand(0, '08:00', '16:00'),
+      makeBand(1, '10:00', '12:00'),
+    ])
+    window.confirm = vi.fn(() => true)
+    await oeffneUebertragung()
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_WORKDAYS }))
+    fireEvent.click(screen.getByRole('button', { name: COPY_APPLY }))
+
+    expect(screen.queryAllByDisplayValue('10:00')).toHaveLength(0)
+    expect(screen.queryByText(OVERLAP_WARNING)).toBeNull()
+    expect(screen.getByRole('button', { name: SAVE_BUTTON })).not.toBeDisabled()
+  })
+
+  it('fragt nach, bevor belegte Tage überschrieben werden', async () => {
+    api.get.mockResolvedValue([
+      makeBand(0, '08:00', '16:00'),
+      makeBand(1, '10:00', '12:00'),
+    ])
+    window.confirm = vi.fn(() => false)
+    await oeffneUebertragung()
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_WORKDAYS }))
+    fireEvent.click(screen.getByRole('button', { name: COPY_APPLY }))
+
+    expect(window.confirm).toHaveBeenCalled()
+    // Abgelehnt heisst unveraendert - der Dienstag behaelt sein eigenes Band.
+    expect(screen.getAllByDisplayValue('10:00')).toHaveLength(1)
+  })
+
+  it('fragt nicht nach, wenn alle Zieltage leer sind', async () => {
+    // Eine Rückfrage, die auch bei leeren Tagen kommt, wird weggeklickt, ohne
+    // gelesen zu werden - und dann auch die, auf die es ankommt.
+    api.get.mockResolvedValue([makeBand(0, '08:00', '16:00')])
+    window.confirm = vi.fn(() => true)
+    await oeffneUebertragung()
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_WORKDAYS }))
+    fireEvent.click(screen.getByRole('button', { name: COPY_APPLY }))
+
+    expect(window.confirm).not.toHaveBeenCalled()
+  })
+
+  it('schreibt beim Speichern den Zieltag, nicht den der Quelle', async () => {
+    // Der Fehler, der beim Kopieren am leichtesten passiert: das Objekt wird
+    // übernommen, aber `weekday` zeigt weiter auf den Montag.
+    api.get.mockResolvedValue([makeBand(0, '08:00', '16:00', 2)])
+    api.put.mockResolvedValue([])
+    await oeffneUebertragung()
+
+    fireEvent.click(screen.getByRole('button', { name: COPY_WORKDAYS }))
+    fireEvent.click(screen.getByRole('button', { name: COPY_APPLY }))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: SAVE_BUTTON }))
+    })
+
+    const gesendet = api.put.mock.calls[0][1]
+    expect([...new Set(gesendet.map(b => b.weekday))].sort()).toEqual([0, 1, 2, 3, 4])
+  })
+
+  it('macht ohne gewählten Zieltag nichts', async () => {
+    api.get.mockResolvedValue([makeBand(0, '08:00', '16:00')])
+    await oeffneUebertragung()
+
+    expect(screen.getByRole('button', { name: COPY_APPLY })).toBeDisabled()
+  })
+})

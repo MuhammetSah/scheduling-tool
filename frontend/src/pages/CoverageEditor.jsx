@@ -71,8 +71,13 @@ function groupByWeekday(bands) {
 }
 
 function CoverageEditor({ setFlash }) {
-  const { t, weekdayLabels } = useTranslation()
+  const { t, weekdayLabels, weekdayNames } = useTranslation()
   const [bandsByWeekday, setBandsByWeekday] = useState(groupByWeekday([]))
+  // Welcher Tag gerade seine Baender weitergeben will, und wohin. null heisst
+  // geschlossen - es ist immer hoechstens eine Uebertragung offen, weil zwei
+  // gleichzeitig offene Auswahlen nur die Frage aufwerfen, welche gilt.
+  const [copySource, setCopySource] = useState(null)
+  const [copyTargets, setCopyTargets] = useState([])
   // Local-only key for React list identity, stripped out again in
   // submitBands() before the payload goes to the API - same approach as
   // Employees.jsx's nextWindowKey for availability windows.
@@ -118,6 +123,69 @@ function CoverageEditor({ setFlash }) {
 
   function setRequiredCount(weekday, key, value) {
     updateBand(weekday, key, { required_count: Math.max(0, Number(value) || 0) })
+  }
+
+  // ---------- Einen Tag auf andere Wochentage uebertragen ----------
+  //
+  // Mo-Fr mit demselben Bedarf ist der haeufigste Fall, und ihn fuenfmal von
+  // Hand einzugeben ist fuenfmal die Gelegenheit, sich zu vertippen. Welche
+  // Tage gleich sind, entscheidet aber der Betrieb: eine fest verdrahtete
+  // Regel "Mo-Fr" wuerde eine Arbeitswoche behaupten, die dieses Werkzeug
+  // nicht kennt. Deshalb eine Auswahl, mit Mo-Fr und "Alle" als Abkuerzung.
+  //
+  // **Ersetzen, nicht ergaenzen.** Anhaengen erzeugte auf jedem Zieltag, der
+  // schon Baender hat, sofort eine Ueberschneidung - also genau den Zustand,
+  // den der Speichern-Knopf sperrt. Ersetzen ist zugleich das, was man meint,
+  // wenn man sagt "der Dienstag ist wie der Montag".
+
+  function toggleCopyPanel(weekday) {
+    if (copySource === weekday) {
+      setCopySource(null)
+      return
+    }
+    setCopySource(weekday)
+    setCopyTargets([])
+  }
+
+  function toggleCopyTarget(weekday) {
+    setCopyTargets(ziele => (ziele.includes(weekday)
+      ? ziele.filter(w => w !== weekday)
+      : [...ziele, weekday]))
+  }
+
+  function applyCopy() {
+    const quelle = bandsByWeekday[copySource].filter(hasValidTimes)
+    const ziele = copyTargets.filter(w => w !== copySource)
+    if (!quelle.length || !ziele.length) return
+
+    // Nur nachfragen, wo wirklich etwas ueberschrieben wird. Eine Rueckfrage,
+    // die auch bei leeren Tagen kommt, wird weggeklickt, ohne gelesen zu
+    // werden - und dann auch die, auf die es ankommt.
+    const belegte = ziele.filter(w => bandsByWeekday[w].some(hasValidTimes))
+    if (belegte.length && !window.confirm(t('coverageEditor.copyConfirmReplace', {
+      days: belegte.map(w => weekdayNames[w]).join(', '),
+      day: weekdayNames[copySource],
+    }))) return
+
+    setBandsByWeekday(g => {
+      const neu = { ...g }
+      for (const ziel of ziele) {
+        neu[ziel] = quelle.map(b => ({
+          ...b,
+          weekday: ziel,
+          _key: `b${++nextBandKey.current}`,
+        }))
+      }
+      return neu
+    })
+    setFlash({
+      type: 'success',
+      text: t('coverageEditor.copyDone', {
+        day: weekdayNames[copySource],
+        days: ziele.map(w => weekdayNames[w]).join(', '),
+      }),
+    })
+    setCopySource(null)
   }
 
   // Client-side mirror of the backend's overlap check, recomputed on every
@@ -172,10 +240,66 @@ function CoverageEditor({ setFlash }) {
             <div className="coverage-day" key={wd}>
               <div className="coverage-day-header">
                 <span className="coverage-day-label">{label}</span>
-                <button type="button" className="btn-secondary btn-small" onClick={() => addBand(wd)}>
-                  {t('coverageEditor.addBandButton')}
-                </button>
+                <div className="toolbar">
+                  {/* Nur wo es etwas zu uebertragen gibt. Ein Knopf, der auf
+                      einem leeren Tag die Ziele leerraeumt, waere eine
+                      Loeschfunktion mit dem Namen einer Kopierfunktion. */}
+                  {bandsByWeekday[wd].some(hasValidTimes) && (
+                    <button
+                      type="button"
+                      className="btn-secondary btn-small"
+                      title={t('coverageEditor.copyTitle')}
+                      aria-expanded={copySource === wd}
+                      onClick={() => toggleCopyPanel(wd)}
+                    >
+                      {t('coverageEditor.copyButton')}
+                    </button>
+                  )}
+                  <button type="button" className="btn-secondary btn-small" onClick={() => addBand(wd)}>
+                    {t('coverageEditor.addBandButton')}
+                  </button>
+                </div>
               </div>
+
+              {copySource === wd && (
+                <div className="coverage-copy">
+                  <p className="coverage-copy-heading">
+                    {t('coverageEditor.copyHeading', { day: weekdayNames[wd] })}
+                  </p>
+                  <div className="coverage-copy-days">
+                    {weekdayLabels.map((zielLabel, ziel) => ziel !== wd && (
+                      <label key={ziel} className="coverage-copy-day">
+                        <input
+                          type="checkbox"
+                          checked={copyTargets.includes(ziel)}
+                          onChange={() => toggleCopyTarget(ziel)}
+                        />
+                        {zielLabel}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="toolbar">
+                    <button type="button" className="btn-secondary btn-small"
+                            onClick={() => setCopyTargets([0, 1, 2, 3, 4].filter(z => z !== wd))}>
+                      {t('coverageEditor.copyWorkdays')}
+                    </button>
+                    <button type="button" className="btn-secondary btn-small"
+                            onClick={() => setCopyTargets([0, 1, 2, 3, 4, 5, 6].filter(z => z !== wd))}>
+                      {t('coverageEditor.copyAllDays')}
+                    </button>
+                    <button type="button" className="btn-small"
+                            disabled={copyTargets.length === 0}
+                            onClick={applyCopy}>
+                      {t('coverageEditor.copyApply')}
+                    </button>
+                    <button type="button" className="btn-secondary btn-small"
+                            onClick={() => setCopySource(null)}>
+                      {t('common.cancel')}
+                    </button>
+                  </div>
+                  <p className="hint">{t('coverageEditor.copyHint')}</p>
+                </div>
+              )}
 
               <div className="coverage-track">
                 {HOUR_TICKS.map(hour => (

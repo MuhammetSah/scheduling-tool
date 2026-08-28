@@ -245,6 +245,16 @@ const de = {
     overlapWarning: 'Diese Bänder überschneiden sich — bitte anpassen, bevor gespeichert werden kann.',
     flashSaved: 'Bedarfsbänder gespeichert.',
     tooltip: '{start}–{end}: {n} benötigt',
+    copyButton: 'Übertragen',
+    copyTitle: 'Die Bänder dieses Tages auf andere Wochentage übertragen',
+    copyHeading: '{day} übertragen auf:',
+    copyHint: 'Die gewählten Tage bekommen genau diese Bänder — vorhandene werden ersetzt, nicht ergänzt. Gespeichert wird erst mit „Speichern“.',
+    copyWorkdays: 'Mo–Fr',
+    copyAllDays: 'Alle',
+    copyApply: 'Übernehmen',
+    copyNothingToCopy: 'Dieser Tag hat noch keine vollständigen Bänder.',
+    copyConfirmReplace: '{days} hat bereits Bedarfsbänder. Sie werden durch die von {day} ersetzt. Fortfahren?',
+    copyDone: 'Die Bänder von {day} stehen jetzt auch auf {days}. Noch nicht gespeichert.',
   },
 
   averageHours: {
@@ -660,6 +670,16 @@ const en = {
     overlapWarning: 'These bands overlap — please adjust before this can be saved.',
     flashSaved: 'Coverage requirements saved.',
     tooltip: '{start}–{end}: {n} required',
+    copyButton: 'Copy',
+    copyTitle: "Copy this day's bands to other weekdays",
+    copyHeading: 'Copy {day} to:',
+    copyHint: 'The selected days get exactly these bands — existing ones are replaced, not added to. Nothing is stored until you press Save.',
+    copyWorkdays: 'Mon–Fri',
+    copyAllDays: 'All',
+    copyApply: 'Apply',
+    copyNothingToCopy: 'This day has no complete bands yet.',
+    copyConfirmReplace: '{days} already has coverage bands. They will be replaced by those from {day}. Continue?',
+    copyDone: "{day}'s bands now also apply to {days}. Not saved yet.",
   },
 
   averageHours: {
