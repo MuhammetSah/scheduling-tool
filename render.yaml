@@ -1,17 +1,38 @@
 # Render blueprint: creates the API and its database in one step.
 # Point Render at this repository and it will pick this file up.
 #
-# Two values still have to be set by hand in the Render dashboard, because they
-# depend on where the frontend ends up and on your mail provider:
+# Values still to be filled in by hand in the Render dashboard - they are all
+# declared below with `sync: false`, so Render asks for them at deploy time
+# instead of letting them go missing unnoticed:
 #   ALLOWED_ORIGINS  - the deployed frontend's origin, e.g. https://schichtplan.vercel.app
 #   APP_BASE_URL     - the same origin; invitation links are built from it
-#   SMTP_*           - see the README; without them invitations are only logged
+#   SMTP_*           - the mail account invitations go out from
+#
+# Ohne SMTP_HOST schreibt mailer.py die Einladung nur ins Server-Log statt sie
+# zu versenden. Fachlich heisst das: es laesst sich kein Mitarbeiterkonto
+# einrichten, und wer sein Passwort vergisst, kommt nicht zurueck. Das stand
+# frueher nur im README, waehrend diese Datei die Variablen gar nicht kannte -
+# eine fehlende Einstellung, nach der niemand gefragt wird, bleibt fehlend.
+# app.py warnt zusaetzlich beim Start, wenn sie in Produktion fehlt.
 services:
   - type: web
     name: schichtplan-api
     runtime: python
     rootDir: backend
     plan: free
+    # Frankfurt und nicht die Vorgabe. Renders Standard ist eine US-Region, und
+    # verarbeitet werden hier Namen, Arbeitszeiten und Krankmeldungen -
+    # letztere sind Gesundheitsdaten nach Art. 9 DSGVO. Eine US-Region macht
+    # daraus eine Drittlanduebermittlung, die nach Kapitel V begruendet werden
+    # muss; eine EU-Region nimmt die Frage aus der Dokumentation heraus, statt
+    # sie zu beantworten.
+    #
+    # ACHTUNG: Die Region eines bereits laufenden Dienstes laesst sich nicht
+    # nachtraeglich aendern - Render legt einen Dienst in der Region an, in der
+    # er entsteht. Fuer bestehende Instanzen wirkt diese Zeile erst, wenn sie
+    # neu aufgesetzt werden. Der naechste Datenbankzyklus (siehe
+    # docs/DATENBANKWECHSEL.md) ist genau dieser Moment.
+    region: frankfurt
     buildCommand: pip install -r requirements.txt
     # Der Planer rechnet bis zu 8 Sekunden (DEFAULT_TIME_BUDGET_SECONDS in
     # scheduler.py). Mit einem einzigen synchronen Worker antwortet die API in
@@ -83,7 +104,33 @@ services:
         sync: false
       - key: APP_BASE_URL
         sync: false
+      # Der Mailweg. Ohne SMTP_HOST bleibt jede Einladung im Log stehen - siehe
+      # den Kopf dieser Datei. Hier deklariert, damit Render beim Deploy danach
+      # fragt, statt dass es beim ersten vergeblich wartenden Mitarbeiter
+      # auffaellt.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: '587'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_USE_TLS
+        value: 'true'
+      - key: MAIL_FROM
+        sync: false
+      # Welcher Monat als "aktuell" gilt, wenn ein Mitarbeiterkonto Krankheit
+      # meldet. Ohne diese Zeile faellt timeutil.py ohnehin auf Europe/Berlin
+      # zurueck; sie steht hier, damit die Annahme sichtbar ist statt nur im
+      # Quelltext.
+      - key: APP_TIMEZONE
+        value: Europe/Berlin
 
 databases:
   - name: schichtplan-db
     plan: free
+    # Dieselbe Ueberlegung wie beim Dienst oben, und hier wiegt sie schwerer:
+    # in dieser Instanz liegen die Daten selbst. Auch sie laesst sich nur beim
+    # Anlegen setzen - der naechste Zyklus ist der Moment.
+    region: frankfurt

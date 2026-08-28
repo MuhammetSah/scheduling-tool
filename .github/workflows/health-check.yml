@@ -1,0 +1,61 @@
+name: Health check
+
+# Die Antwort auf "niemand merkt, wenn es ausfaellt".
+#
+# /health gibt es seit Etappe 14 und es liest wirklich aus der Datenbank, aber
+# gefragt hat bisher nur Render selbst - und Render meldet einen ungesunden
+# Dienst niemandem, es startet ihn neu. Der Keepalive-Auftrag daneben konnte
+# nichts melden, weil er mit `|| true` endete: er ist nie fehlgeschlagen, auch
+# nicht, als er es haette sollen.
+#
+# Dieser Auftrag schlaegt fehl, wenn der Dienst sich nicht gesund meldet, und
+# ein fehlgeschlagener Auftrag schickt GitHub von sich aus als Mail an den
+# Betreiber. Das ist eine Ueberwachung ohne einen weiteren Dienst, ohne Konto
+# und ohne Kosten - nicht so schnell wie ein bezahlter Uptime-Waechter, aber
+# der Unterschied zu "gar keine Meldung" ist der groessere.
+#
+# ACHTUNG: Wie jede geplante Ausfuehrung wertet GitHub den `schedule` nur aus
+# der Fassung auf dem Standard-Branch aus, und schaltet ihn nach sechzig Tagen
+# ohne Aktivitaet im Repository ab. Nach einer langen Ruhephase gehoert im
+# Actions-Reiter nachgesehen, ob er noch laeuft.
+
+on:
+  schedule:
+    # Stuendlich, nicht haeufiger. Eine Ueberwachung, die bei jedem Deploy
+    # anschlaegt, wird nach der dritten Mail ignoriert - und damit waere sie
+    # schlechter als keine.
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  API: https://schichtplan-api.onrender.com
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: /health abfragen und bei Fehlern laut scheitern
+        run: |
+          set -o pipefail
+          # Zwei Versuche mit einer Pause dazwischen: Render faehrt den freien
+          # Plan hoch, wenn er schlaeft, und der erste Aufruf kann in die
+          # Kaltstartzeit laufen. Ein Neustart ist kein Ausfall.
+          for versuch in 1 2; do
+            if antwort=$(curl -fsS -m 60 "$API/health"); then
+              echo "$antwort"
+              case "$antwort" in
+                *'"status":"ok"'*) exit 0 ;;
+              esac
+              echo "::warning::Versuch $versuch: /health antwortet, meldet aber keinen gesunden Zustand."
+            else
+              echo "::warning::Versuch $versuch: /health nicht erreichbar (oder 503)."
+            fi
+            if [ "$versuch" = 1 ]; then sleep 90; fi
+          done
+          echo "::error::Der Dienst meldet sich nicht gesund."
+          echo "::error::Zuerst pruefen, ob DATABASE_URL noch auf eine lebende Instanz zeigt -"
+          echo "::error::am wahrscheinlichsten nach einem Datenbankzyklus, siehe docs/DATENBANKWECHSEL.md."
+          exit 1

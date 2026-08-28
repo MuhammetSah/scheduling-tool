@@ -30,9 +30,27 @@ on:
     - cron: '*/14 * * * *'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
+env:
+  API: https://schichtplan-api.onrender.com
+
 jobs:
+  # Wachhalten und mehr nicht. Fehler werden hier bewusst geschluckt: dieser
+  # Auftrag laeuft alle vierzehn Minuten, und ein einzelner Aussetzer waehrend
+  # eines Deploys ist keine Meldung wert.
+  #
+  # /health statt der Wurzel, obwohl es hier nur ums Wachhalten geht: die
+  # Wurzel beweist nur, dass Python laeuft. Wer im Actions-Protokoll
+  # nachsieht, warum etwas nicht ging, findet so nebenbei den Zustand der
+  # Datenbank statt einer Begruessung.
+  #
+  # Gemeldet wird ein Ausfall nicht hier, sondern in health-check.yml - eine
+  # Ueberwachung, die alle vierzehn Minuten anschlaegt, wird nach der dritten
+  # Mail ignoriert.
   ping:
     runs-on: ubuntu-latest
     steps:
       - name: Ping the API
-        run: curl -fsS -m 30 https://schichtplan-api.onrender.com/ || true
+        run: curl -fsS -m 30 "$API/health" || true
