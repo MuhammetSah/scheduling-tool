@@ -1,10 +1,10 @@
-"""Der Bestandsweg: eine gefuellte Datenbank vom Stand 0007 auf 0017 heben.
+"""Der Bestandsweg: eine gefuellte Datenbank vom Stand 0007 auf den heutigen heben.
 
 Der Weg auf eine LEERE Datenbank ist gut abgesichert - genau den faehrt der
 backend-postgres-Job bei jedem Lauf. Ungeprueft war der andere: das Backup vom
 22.08.2026 steht auf schema_migrations mit sieben Zeilen, also auf dem Stand
-von 0007, und wer es zurueckspielt, laesst zehn Migrationen ueber echte Daten
-laufen. Darunter der Tabellenneubau in 0012, das DROP in 0010 und die
+von 0007, und wer es zurueckspielt, laesst alle folgenden Migrationen ueber echte
+Daten laufen. Darunter der Tabellenneubau in 0012, das DROP in 0010 und die
 Zustandsumstellung, die vorhandene Plaene anfasst.
 
 Genau dieser Pfad zaehlt am 07.09.2026, wenn die Instanz ablaeuft und der
@@ -160,12 +160,22 @@ def gehobener_bestand(pg_bestand):
 
 
 def test_der_sprung_von_0007_auf_heute_laeuft_durch(gehobener_bestand):
-    """Der Kern: zehn Migrationen ueber gefuellte Tabellen, ohne Fehler."""
+    """Der Kern: alle Migrationen ab 0008 ueber gefuellte Tabellen, ohne Fehler.
+
+    Das Ziel wird nicht beim Namen genannt, sondern aus available_versions()
+    genommen. Die vorige Fassung verankerte '0017_qualifications' fest und fiel
+    damit in dem Moment, in dem eine 0018 dazukam - und weil dieser Test nur
+    gegen echtes Postgres laeuft, faellt er ausgerechnet dort auf, wo man es am
+    spaetesten sieht: im CI, nach dem Push. Ein Test, der bei jeder neuen
+    Migration von Hand nachgezogen werden muss, prueft nicht die Migration,
+    sondern das Nachziehen.
+    """
     migrations, _schema_url, _schema, neu = gehobener_bestand
 
     assert '0008_max_daily_hours' in neu
-    assert '0017_qualifications' in neu
-    assert migrations.applied_versions()[-1] == '0017_qualifications'
+    letzte = migrations.available_versions()[-1]
+    assert letzte in neu
+    assert migrations.applied_versions()[-1] == letzte
 
 
 def test_kein_mitarbeiter_geht_verloren(gehobener_bestand):

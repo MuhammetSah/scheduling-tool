@@ -1126,6 +1126,20 @@ Kopfzahlen je Wochentag auf der Schichtart (seit `0010` weg), einen Gunicorn-Auf
 Workern (`render.yaml` startet einen) und ein Repository, in dem dieses Projekt neben einem
 Ticket-System liegt (tut es nicht).
 
+**Der Befund, den nur Postgres zeigt.** 49 Backend-Tests laufen ausschliesslich
+gegen eine echte Postgres-Instanz und werden ohne sie stillschweigend uebersprungen —
+jeder lokale Lauf meldete also gruen, waehrend `test_migrations_bestand.py` weiterhin
+`0017_qualifications` als neueste Migration festschrieb. Mit `0018` faellt dieser Test,
+und gesagt haette es einem erst der CI-Job nach dem Push. Er nimmt sein Ziel jetzt aus
+`available_versions()`, statt es beim Namen zu nennen. **Die Lehre steht schon unter
+„Arbeitsweise": vor dem Merge selbst pruefen, besonders `backend-postgres`** — hier ist
+der Beleg dafuer, warum. Ein lokal installiertes Postgres genuegt:
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:5433/postgres PGSSLMODE=disable \
+  python -m pytest --ignore=test_scheduler.py
+```
+
 **Betrieb.** `render.yaml` setzt jetzt `region: frankfurt` für Dienst und Datenbank und deklariert
 die `SMTP_*`-Variablen mit `sync: false`, damit Render beim Deploy danach fragt; die App warnt
 zusätzlich beim Start, wenn sie in Produktion ohne `SMTP_HOST` läuft. Die Region wirkt nur auf neu
