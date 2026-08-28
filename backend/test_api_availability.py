@@ -1,6 +1,6 @@
 """Arbeitszeitfenster ueber die API: lesen, schreiben, End-to-End im Planer.
 
-Deckt Task 3 aus dem Etappenplan ab. Reine Serialisierungs-/Validierungstests
+Deckt Aufgabe 3 aus dem Etappenplan ab. Reine Serialisierungs-/Validierungstests
 gegen die HTTP-Schicht, plus ein End-to-End-Test, der beweist, dass die drei
 Teilaufgaben der Etappe tatsaechlich zusammenspielen (Schema, Planer,
 API-Anbindung).
@@ -502,7 +502,7 @@ def test_pruefung_nutzt_die_per_datum_ueberschriebene_uhrzeit_statt_der_nominale
 
 
 def test_verfuegbarkeitseintrag_ohne_objekt_ist_400_statt_500(hr_client):
-    """Ergaenzung zum Review von Task 3: ein Listenelement, das kein Objekt ist,
+    """Ergaenzung zum Review von Aufgabe 3: ein Listenelement, das kein Objekt ist,
     darf keinen AttributeError (500) ausloesen. Der Nachbar-Block fuer
     unavailable_dates ein paar Zeilen weiter oben macht das schon richtig vor."""
     antwort = hr_client.post('/employees', json={

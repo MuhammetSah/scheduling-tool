@@ -389,6 +389,22 @@ TRANSLATIONS = {
         'en': 'Without a federal state the tool knows no public holidays and says '
               'nothing about them. A plan is still produced.',
     },
+    'setup_note_no_weekly_hours': {
+        'de': 'Für {n} von {gesamt} aktiven Mitarbeitenden sind keine Wochenstunden '
+              'hinterlegt. Für sie gilt dann keine Wochengrenze — nur die '
+              'Tageshöchstarbeitszeit und die Ruhezeit. Ein Plan entsteht trotzdem.',
+        'en': '{n} of {gesamt} active employees have no weekly hours on file. No '
+              'weekly ceiling applies to them — only the daily maximum and the rest '
+              'period. A plan is still produced.',
+    },
+    'employee_deactivated_still_assigned': {
+        'de': '{name} ist noch auf {n} Schichten ab dem {ab} eingeteilt. Inaktiv zu '
+              'setzen nimmt sie nicht aus dem Plan — die Zuweisungen müssen von Hand '
+              'umbesetzt werden.',
+        'en': '{name} is still assigned to {n} shifts from {ab} onwards. Marking them '
+              'inactive does not take them out of the plan — those assignments have '
+              'to be reassigned by hand.',
+    },
     'plan_too_large': {
         'de': 'Dieser Monat ist mit {blocks} Blöcken zu groß für die Planung — '
               'mehr als {limit} kann die Suche derzeit nicht abtragen. Weniger '
@@ -546,6 +562,24 @@ TRANSLATIONS = {
     'free_block_label': {
         'de': 'Dienst',
         'en': 'Shift',
+    },
+    # Kopfzeile der CSV. Einzeln als Schluessel und nicht als eine Zeile, damit
+    # exports.py die Reihenfolge besitzt und diese Datei nur die Woerter.
+    'csv_header_date': {'de': 'Datum', 'en': 'Date'},
+    'csv_header_weekday': {'de': 'Wochentag', 'en': 'Weekday'},
+    'csv_header_start': {'de': 'Beginn', 'en': 'Start'},
+    'csv_header_end': {'de': 'Ende', 'en': 'End'},
+    'csv_header_break': {'de': 'Pause (Min.)', 'en': 'Break (min)'},
+    'csv_header_working_hours': {'de': 'Arbeitszeit (Std.)', 'en': 'Working time (h)'},
+    'csv_header_shift_type': {'de': 'Schichtart', 'en': 'Shift type'},
+    'csv_header_employee': {'de': 'Mitarbeiter', 'en': 'Employee'},
+    'ical_calendar_name': {
+        'de': 'Schichtplan {month} {year}',
+        'en': 'Shift schedule {month} {year}',
+    },
+    'ical_break_note': {
+        'de': 'Pause {minutes} Min.',
+        'en': 'Break {minutes} min',
     },
     'limit_must_be_int': {
         'de': 'limit muss eine positive ganze Zahl sein',

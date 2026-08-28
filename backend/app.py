@@ -19,9 +19,9 @@ import security
 import timeutil
 from block_planner import build_month_blocks
 from coverage_model import band_within, coverage_gaps, first_overlapping_pair, trim_band_to_hours
-from exports import schedule_to_csv, schedule_to_ical
+from exports import CSV_HEADER_KEYS, schedule_to_csv, schedule_to_ical
 from holidays import REGIONS, holidays_in_range
-from db import get_db_connection as _open_db_connection, init_db, WEEKDAYS
+from db import get_db_connection as _open_db_connection, init_db, MONTHS, WEEKDAYS
 from i18n import DEFAULT_LANG, resolve_lang, t
 from scheduler import (
     MAX_AVERAGE_DAILY_HOURS, MAX_CONSECUTIVE_DAYS, MIN_FREE_SUNDAYS_PER_YEAR, _ranges_overlap,
@@ -84,6 +84,20 @@ security.register_security_headers(app)
 
 init_db()
 
+# Beim Start sagen, was im Betrieb fehlt. Ohne SMTP schreibt mailer.py die
+# Einladung ins Log statt sie zu versenden - fachlich heisst das: es laesst
+# sich kein Mitarbeiterkonto einrichten, und wer sein Passwort vergisst, kommt
+# nicht zurueck. Das faellt sonst erst auf, wenn jemand vergeblich auf eine
+# Mail wartet, und dann sieht es nach einem Fehler des Mailservers aus statt
+# nach einer fehlenden Einstellung. Eine Warnung und kein Abbruch: eine
+# Bereitstellung ohne Mail ist unvollstaendig, aber sie soll benutzbar bleiben.
+if security.is_production() and not mailer.smtp_configured():
+    app.logger.warning(
+        'SMTP_HOST ist nicht gesetzt: Einladungen und Passwort-Links werden nur '
+        'ins Log geschrieben, nicht versendet. Ohne SMTP kann kein '
+        'Mitarbeiterkonto eingerichtet und kein vergessenes Passwort ersetzt '
+        'werden - siehe render.yaml und README > Operations.')
+
 
 @app.before_request
 def resolve_request_lang():
@@ -96,6 +110,8 @@ def resolve_request_lang():
     # Kurze Kennung, die in der Fehlerantwort und im Log steht, damit eine
     # Nutzermeldung ("Fehler a1b2c3d4") im Protokoll wiederfindbar ist.
     g.request_id = uuid.uuid4().hex[:8]
+    # Hoechstens einmal am Tag und danach ohne Abfrage - siehe dort.
+    run_daily_retention_purge()
 
 
 # Requests that change nothing are not worth a row, and the two that carry a
@@ -206,50 +222,87 @@ EMPLOYEE_ROLE = 'employee'
 # The fix is a second, cookie-independent channel: a signed, stateless bearer
 # token (itsdangerous - already a Flask dependency, no new package) returned
 # in the login/register body and sent back as `Authorization: Bearer <token>`.
-# That header isn't a cookie, so ITP has no opinion about it. Stateless means
-# there is nothing to look up per request, but also nothing to revoke - the
-# tradeoff is a fixed expiry rather than a server-side logout; acceptable for
-# this app's threat model. The cookie path is left in place unchanged (it
-# still works for same-site/local-dev use), so current_user_id() below tries
-# it first and only falls back to the header if there's no session.
+# That header isn't a cookie, so ITP has no opinion about it. The cookie path
+# is left in place unchanged (it still works for same-site/local-dev use), so
+# current_auth_claim() below tries it first and only falls back to the header.
+#
+# Stateless means there is nothing to look up per request. It used to mean
+# nothing could be revoked either, and that turned out to be a hole rather
+# than a tradeoff: "Passwort zuruecksetzen" empties users.hash, so the old
+# password stops working - but the token minted with it kept authenticating
+# every request for up to thirty days. HR resetting an account because a phone
+# went missing achieved nothing at all against the device that still held the
+# token. users.token_epoch (migration 0018) closes that without a session
+# table: the counter travels inside the signed token and is compared against
+# the column on every request, and bumping the column invalidates every token
+# of that account at once.
 AUTH_TOKEN_MAX_AGE_SECONDS = 30 * 24 * 3600  # 30 days
 _auth_serializer = URLSafeTimedSerializer(app.secret_key, salt='auth-token')
 
 
-def issue_auth_token(user_id):
-    return _auth_serializer.dumps({'user_id': user_id})
+def issue_auth_token(user_id, token_epoch=0):
+    return _auth_serializer.dumps({'user_id': user_id, 'epoch': token_epoch})
 
 
 def verify_auth_token(token):
+    """(user_id, epoch) from a valid token, or (None, None).
+
+    A token minted before migration 0018 carries no `epoch`; it reads as 0,
+    which is the column's default. That is deliberate - the upgrade must not
+    sign everybody out, only the next reset should.
+    """
     try:
         data = _auth_serializer.loads(token, max_age=AUTH_TOKEN_MAX_AGE_SECONDS)
     except (BadSignature, SignatureExpired):
-        return None
-    return data.get('user_id')
+        return None, None
+    return data.get('user_id'), data.get('epoch', 0)
 
 
-def current_user_id():
+def current_auth_claim():
+    """(user_id, epoch) the request presents, from cookie or bearer token.
+
+    The epoch is carried on both channels, not only the bearer one: the cookie
+    survives a password reset just as happily, and a rule that holds on one
+    path and not the other is the kind of gap this whole change exists to
+    close.
+    """
     user_id = session.get('user_id')
     if user_id:
-        return user_id
+        return user_id, session.get('token_epoch', 0)
 
     auth_header = request.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         return verify_auth_token(auth_header[len('Bearer '):])
-    return None
+    return None, None
+
+
+def bump_token_epoch(cursor, user_id):
+    """Invalidates every token and cookie this account has out.
+
+    Called wherever the password stops being the one the holder knows: when an
+    invitation is redeemed, and when HR re-invites (which revokes the current
+    password). Both are moments at which somebody expects existing access to
+    end.
+    """
+    cursor.execute('UPDATE users SET token_epoch = token_epoch + 1 WHERE id = ?', (user_id,))
 
 
 def load_current_user():
     """The signed-in account, or None. Read fresh so a role change takes effect."""
-    user_id = current_user_id()
+    user_id, epoch = current_auth_claim()
     if not user_id:
         return None
 
     connection = get_db()
     cursor = connection.cursor()
-    cursor.execute('SELECT id, username, role, employee_id FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT id, username, role, employee_id, token_epoch FROM users WHERE id = ?',
+                   (user_id,))
     user = cursor.fetchone()
-    return dict(user) if user else None
+    if not user:
+        return None
+    if (user['token_epoch'] or 0) != (epoch or 0):
+        return None
+    return dict(user)
 
 
 def is_hr(user):
@@ -503,7 +556,9 @@ def register():
     auth_token = None
     if first_account:
         session['user_id'] = user_id
-        auth_token = issue_auth_token(user_id)
+        # A brand new account starts at epoch 0 - the column's default.
+        session['token_epoch'] = 0
+        auth_token = issue_auth_token(user_id, 0)
 
     return jsonify({
         'id': user_id,
@@ -560,14 +615,16 @@ def login():
         security.record_attempt(cursor, username, request.remote_addr, succeeded=True)
         connection.commit()
 
+    epoch = user['token_epoch'] or 0
     session.clear()
     session['user_id'] = user['id']
+    session['token_epoch'] = epoch
     return jsonify({
         'id': user['id'],
         'username': user['username'],
         'role': user['role'],
         'employee_id': user['employee_id'],
-        'auth_token': issue_auth_token(user['id']),
+        'auth_token': issue_auth_token(user['id'], epoch),
     }), 200
 
 
@@ -617,6 +674,10 @@ def redeem_invitation(token):
 
     cursor.execute('UPDATE users SET hash = ? WHERE id = ?',
                    (generate_password_hash(password), invitation['user_id']))
+    # Setting a new password ends every session that ran on the old one. Whoever
+    # follows a reset link expects exactly that, and without it the link would
+    # hand out access beside an old credential rather than instead of it.
+    bump_token_epoch(cursor, invitation['user_id'])
     # Single use: the link stops working the moment it has been redeemed.
     cursor.execute('DELETE FROM password_invitations WHERE id = ?', (invitation['id'],))
     connection.commit()
@@ -627,7 +688,6 @@ def redeem_invitation(token):
 
 @app.route('/me', methods=['GET'])
 def me():
-    user_id = current_user_id()
     connection = get_db()
     cursor = connection.cursor()
 
@@ -635,14 +695,12 @@ def me():
     # whether this is a fresh install that still needs its first account.
     setup_required = count_users(cursor) == 0
 
-    if not user_id:
-        return jsonify({'message': t(g.lang, 'not_signed_in'), 'setup_required': setup_required}), 401
-
-    cursor.execute('SELECT id, username, role, employee_id FROM users WHERE id = ?', (user_id,))
-    user = cursor.fetchone()
-
+    # Goes through load_current_user() rather than reading the id itself, so
+    # this route applies the same token_epoch check as every guarded one -
+    # otherwise a revoked credential would still be greeted by name here.
+    user = load_current_user()
     if not user:
-        # The account was deleted while the cookie was still around.
+        # No credential, a deleted account, or one whose tokens were revoked.
         session.clear()
         return jsonify({'message': t(g.lang, 'not_signed_in'), 'setup_required': setup_required}), 401
 
@@ -1072,7 +1130,8 @@ def update_employee(employee_id):
     connection = get_db()
     cursor = connection.cursor()
     cursor.execute('SELECT * FROM employees WHERE id = ?', (employee_id,))
-    if not cursor.fetchone():
+    vorher = cursor.fetchone()
+    if not vorher:
         return jsonify({'message': t(g.lang, 'employee_not_found')}), 404
 
     name = (data.get('name') or '').strip()
@@ -1099,7 +1158,44 @@ def update_employee(employee_id):
         employee = serialize_employee(cursor, cursor.fetchone())
     except ValueError as e:
         return jsonify({'message': str(e)}), 400
+    employee['warnings'] = deactivation_warnings(cursor, vorher, employee)
     return jsonify(employee)
+
+
+def deactivation_warnings(cursor, vorher, nachher):
+    """Sagt es, wenn jemand inaktiv gesetzt wird und trotzdem im Plan steht.
+
+    "Inaktiv" heisst hier nur: der Generator zieht diese Person nicht mehr
+    heran. Bereits geschriebene - und womoeglich laengst veroeffentlichte -
+    Zuweisungen bleiben unberuehrt, und das ist richtig so: sie stillschweigend
+    zu leeren wuerde einen freigegebenen Dienstplan hinter dem Ruecken aller
+    aendern und die Arbeitszeitaufzeichnung nach Paragraph 16 Abs. 2 ArbZG
+    verkuerzen.
+
+    Nur gesagt wurde es bisher nicht. Wer jemanden inaktiv setzt, weil die
+    Person den Betrieb verlaesst, sah eine Erfolgsmeldung und danach einen
+    Plan, in dem sie weiterhin zwanzig Schichten hat - ohne einen Hinweis
+    darauf irgendwo. Deshalb eine Warnung statt einer Sperre: die Entscheidung
+    bleibt bei HR, die Tatsache steht jetzt daneben.
+
+    Nur ab heute. Vergangene Schichten sind Aufzeichnung, keine Planung, und
+    sie aufzuzaehlen waere ein Hinweis, gegen den sich nichts tun laesst.
+    """
+    # bool(): Postgres liefert fuer BOOLEAN True/False, SQLite 0/1, und
+    # serialize_employee() macht daraus wieder einen Wahrheitswert - drei
+    # Schreibweisen desselben Sachverhalts, die hier auf eine kommen.
+    if not (bool(vorher['active']) and not bool(nachher['active'])):
+        return []
+
+    ab = timeutil.today_local().isoformat()
+    cursor.execute(
+        'SELECT COUNT(*) AS n FROM shift_assignments WHERE employee_id = ? AND date >= ?',
+        (nachher['id'], ab))
+    offen = cursor.fetchone()['n']
+    if not offen:
+        return []
+    return [t(g.lang, 'employee_deactivated_still_assigned',
+              name=nachher['name'], n=offen, ab=ab)]
 
 
 @app.route('/employees/<int:employee_id>/availability', methods=['GET'])
@@ -1290,16 +1386,79 @@ def purge_expired_personal_data(cursor):
     return removed
 
 
+# Der Name der Zeile, in der steht, wann zuletzt aufgeraeumt wurde. Bewusst
+# nicht in KNOWN_SETTINGS: er ist Buchfuehrung des Werkzeugs ueber sich selbst,
+# keine Einstellung, die jemand trifft.
+PURGE_MARKER_SETTING = 'last_retention_purge'
+
+# Solange dieser Prozess heute schon aufgeraeumt hat, kostet die Pruefung
+# unten keine einzige Abfrage.
+_purge_checked_on = None
+
+
+def run_daily_retention_purge():
+    """Raeumt hoechstens einmal am Tag auf, ausgeloest von der ersten Anfrage.
+
+    Die Aufbewahrungsfrist stand bisher in der Einstellung und im README, aber
+    ausgefuehrt wurde sie nur beim Start - also bei einem Deploy - oder wenn
+    jemand von Hand darauf drueckte. Genau das trifft der Dauerbetrieb nicht:
+    der Keepalive-Auftrag haelt den Dienst rund um die Uhr wach, ein Deploy
+    kann Wochen ausbleiben, und die Schaltflaeche druecken heisst, daran zu
+    denken. Krankmeldungen sind Gesundheitsdaten nach Art. 9 DSGVO; eine Frist,
+    die nur laeuft, wenn jemand daran denkt, ist keine.
+
+    Kein Scheduler, und ohne einen auszukommen ist der ganze Punkt: das
+    Datum der letzten Ausfuehrung steht in der Datenbank, und wer es als
+    erster auf heute setzt, raeumt auf. Das bedingte UPDATE entscheidet das
+    in einer Anweisung - zwei Prozesse koennen es nicht beide gewinnen, und
+    einen Lock braucht es dafuer nicht.
+
+    Fehler bleiben Fehler dieser Funktion, nicht der Anfrage: ein Aufraeumen,
+    das eine Planaenderung scheitern laesst, waere schlimmer als eines, das
+    einen Tag spaeter laeuft. Dieselbe Ueberlegung wie beim Protokoll.
+    """
+    global _purge_checked_on
+    heute = timeutil.today_local().isoformat()
+    if _purge_checked_on == heute:
+        return
+
+    try:
+        connection = get_db()
+        cursor = connection.cursor()
+        cursor.execute('UPDATE settings SET value = ? WHERE name = ? AND value < ?',
+                       (heute, PURGE_MARKER_SETTING, heute))
+        gewonnen = cursor.rowcount == 1
+        if not gewonnen:
+            # Entweder hat heute schon jemand aufgeraeumt, oder die Zeile gibt
+            # es noch nicht - der erste Start nach dieser Aenderung.
+            cursor.execute('SELECT value FROM settings WHERE name = ?', (PURGE_MARKER_SETTING,))
+            if cursor.fetchone() is None:
+                cursor.execute('INSERT INTO settings (name, value) VALUES (?, ?)',
+                               (PURGE_MARKER_SETTING, heute))
+                gewonnen = True
+        if gewonnen:
+            entfernt = purge_expired_personal_data(cursor)
+            app.logger.info('Aufbewahrungsfrist angewandt: %s', entfernt)
+        connection.commit()
+        _purge_checked_on = heute
+    except Exception:
+        app.logger.exception('Aufbewahrungsfrist konnte nicht angewandt werden')
+
+
 @app.route('/retention/purge', methods=['POST'])
 @hr_required
 def purge_retention():
     """Run the clean-up now, and say what it did.
 
-    There is no scheduler: the hosting plan in use offers none, and pretending
-    otherwise would be worse than saying so. The purge also runs at startup,
-    which in practice means on every deploy. An instance left running for
-    months without a restart will not clean up on its own until someone presses
-    this - which is exactly why it reports counts rather than a bare "done".
+    The tool has no scheduler and does not pretend to. What it does have since
+    run_daily_retention_purge() is a once-a-day pass triggered by the first
+    request of the day, so the retention period no longer depends on somebody
+    remembering this button - which is what it did while the keepalive job kept
+    the instance awake for weeks on end.
+
+    The button stays, because "run it now and tell me what went" is a different
+    question from "does it run at all", and it is the one somebody asks after
+    changing the period.
     """
     connection = get_db()
     cursor = connection.cursor()
@@ -1605,8 +1764,12 @@ def resend_invitation(account_id):
 
     token = issue_invitation(cursor, account_id)
     # Re-inviting also revokes the current password, so a forgotten one can be
-    # replaced without HR ever setting it.
+    # replaced without HR ever setting it - and with it every token and cookie
+    # already issued on that password. This is the path HR uses when a device
+    # goes missing or somebody leaves; revoking only the password would have
+    # left the running session reading the roster for another thirty days.
     cursor.execute("UPDATE users SET hash = '' WHERE id = ?", (account_id,))
+    bump_token_epoch(cursor, account_id)
     connection.commit()
 
     sent = mailer.send_invitation(recipient_email, account['username'], token, INVITATION_VALID_DAYS, lang=g.lang)
@@ -2392,8 +2555,14 @@ def export_employee_ical(employee_id):
         return jsonify({'message': t(g.lang, 'schedule_not_published_yet')}), 404
 
     text = schedule_to_ical(
-        rows, t(g.lang, 'free_block_label'),
-        datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
+        # Der Kalendername sagt, was der Kalender enthaelt. Frueher stand dort
+        # dieselbe Ersatzbeschriftung wie auf einem Block ohne Vorlage, und im
+        # Telefon hiess der abonnierte Dienstplan dann schlicht "Dienst".
+        rows, t(g.lang, 'ical_calendar_name',
+                month=MONTHS[g.lang][month - 1], year=year),
+        datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'),
+        break_note=lambda minuten: t(g.lang, 'ical_break_note', minutes=minuten),
+        free_block_label=t(g.lang, 'free_block_label'))
 
     return Response(
         text, mimetype='text/calendar; charset=utf-8',
@@ -2414,7 +2583,9 @@ def export_schedule_csv(year, month):
     if not schedule:
         return jsonify({'message': t(g.lang, 'no_schedule_generated_yet')}), 404
 
-    text = schedule_to_csv(rows, WEEKDAYS[g.lang])
+    text = schedule_to_csv(
+        rows, WEEKDAYS[g.lang],
+        {key: t(g.lang, f'csv_header_{key}') for key in CSV_HEADER_KEYS})
 
     return Response(
         text, mimetype='text/csv; charset=utf-8',
@@ -3171,6 +3342,23 @@ def setup_status():
         hinweise.append({'key': 'holiday_region', 'route': '/business-hours',
                          'text': t(g.lang, 'setup_note_holiday_region')})
 
+    # Ein Hinweis, kein Mangel: ohne Wochenstunden plant der Generator diese
+    # Person ohne jede Wochengrenze. Tageshoechstarbeitszeit und Ruhezeit
+    # greifen weiter, die Woche aber laeuft offen - im Probelauf eines vollen
+    # Monats kamen dabei 46,5 Stunden heraus, ohne dass irgendwo etwas stand.
+    # Das ist keine Regelverletzung und darf den Plan nicht aufhalten; es ist
+    # nur nichts, das man aus Versehen einstellen sollte.
+    cursor.execute('SELECT COUNT(*) AS n FROM employees '
+                   'WHERE active = 1 AND anonymized_at IS NULL')
+    aktive = cursor.fetchone()['n']
+    cursor.execute('SELECT COUNT(*) AS n FROM employees '
+                   'WHERE active = 1 AND anonymized_at IS NULL AND weekly_hours IS NULL')
+    ohne_wochenstunden = cursor.fetchone()['n']
+    if ohne_wochenstunden:
+        hinweise.append({'key': 'weekly_hours', 'route': '/employees',
+                         'text': t(g.lang, 'setup_note_no_weekly_hours',
+                                   n=ohne_wochenstunden, gesamt=aktive)})
+
     return jsonify({'ready': not fehlt, 'missing': fehlt, 'notes': hinweise})
 
 
@@ -3211,10 +3399,19 @@ def qualification_names(cursor):
 
 
 @app.route('/qualifications', methods=['GET'])
-@login_required
+@hr_required
 def list_qualifications():
-    """The catalogue. Readable by anyone signed in - it is a list of words,
-    and an employee needs it to make sense of their own certificates."""
+    """HR-only, like the roster.
+
+    Was @login_required, which let every employee account read the list of
+    certificates the business keeps. Nothing in the employee view asks for it -
+    only the roster and the shift-type editor do, and both are HR's. A read
+    that no screen needs is not a feature, it is surface.
+
+    An employee still gets the names of their own certificates: the Art. 15
+    export resolves them (see export_employee_data), so nothing is lost by
+    closing the catalogue.
+    """
     cursor = get_db().cursor()
     cursor.execute('SELECT id, name FROM qualifications ORDER BY name')
     return jsonify([dict(row) for row in cursor.fetchall()])
@@ -3821,7 +4018,7 @@ def replacement_suggestions(assignment_id):
 # two dicts a caller has already loaded rather than a cursor, so that the one
 # caller which needs it per date - the month loop in coverage_gaps_for_month(),
 # through _closed_on() and for the trimming window - can use it without turning
-# into the per-date query the Task 4 and Task 5 reviews rejected. Earlier
+# into the per-date query the Aufgabe 4 and Aufgabe 5 reviews rejected. Earlier
 # versions of this comment claimed the helper was already the shared read path
 # while nothing outside the tests actually called it; that is what this shape
 # fixes.
@@ -4053,7 +4250,7 @@ def business_hours_for(iso_date, weekday, hours_by_weekday, exceptions_by_date):
     `exceptions_by_date` from business_hours_exceptions_by_date(). It runs no
     query of its own, which is what lets coverage_gaps_for_month() call it once
     per date of the month without adding a single query - the N+1 constraint
-    from the Task 4 and Task 5 reviews is met by where the data is loaded, not
+    from the Aufgabe 4 and Aufgabe 5 reviews is met by where the data is loaded, not
     by avoiding this function.
 
     `weekday` is passed in rather than derived from `iso_date` because every
@@ -4249,8 +4446,8 @@ def update_coverage_requirements():
 # GET /schedules/<year>/<month> reports where a month's actual staffing falls
 # short of what /coverage-requirements demands. fetch_schedule() runs over
 # every day of the month, so reading coverage_requirements, business_hours or
-# business_hours_exceptions per date would be exactly the N+1 the Task 4 and
-# Task 5 reviews flagged. The three loader functions below each run exactly
+# business_hours_exceptions per date would be exactly the N+1 the Aufgabe 4 and
+# Aufgabe 5 reviews flagged. The three loader functions below each run exactly
 # once per call to fetch_schedule(), regardless of how many days the month
 # has; the precedence rule (exception beats weekday) is then replayed against
 # their results in memory by business_hours_for(), which is a pure function
@@ -4384,9 +4581,21 @@ def sunday_work_permitted(cursor):
     return read_settings(cursor).get('sunday_work_permitted') == 'yes'
 
 
+# Zeilen, die das Werkzeug ueber sich selbst fuehrt. Sie stehen in derselben
+# Tabelle, weil sie dieselbe Form haben, sind aber keine Einstellung: niemand
+# trifft sie, und in der Antwort von GET /settings zu stehen hiesse, sie als
+# eine anzubieten.
+INTERNAL_SETTINGS = frozenset({PURGE_MARKER_SETTING})
+
+
 def read_settings(cursor):
     cursor.execute('SELECT name, value FROM settings')
     return {row['name']: row['value'] for row in cursor.fetchall()}
+
+
+def public_settings(cursor):
+    return {name: value for name, value in read_settings(cursor).items()
+            if name not in INTERNAL_SETTINGS}
 
 
 def holiday_region(cursor):
@@ -4408,7 +4617,7 @@ def holidays_for_month(cursor, year, month):
 @app.route('/settings', methods=['GET'])
 @hr_required
 def get_settings():
-    return jsonify(read_settings(get_db().cursor()))
+    return jsonify(public_settings(get_db().cursor()))
 
 
 @app.route('/settings', methods=['PUT'])
@@ -4443,7 +4652,7 @@ def put_settings():
         cursor.execute('INSERT INTO settings (name, value) VALUES (?, ?)', (name, str(value)))
     connection.commit()
 
-    return jsonify(read_settings(cursor))
+    return jsonify(public_settings(cursor))
 
 
 @app.route('/holiday-regions', methods=['GET'])

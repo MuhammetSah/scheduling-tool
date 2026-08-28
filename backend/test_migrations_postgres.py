@@ -993,7 +993,7 @@ def test_ausnahme_ist_pro_datum_eindeutig(pg_db):
 
 def test_bedarfsbaender_starten_leer(pg_db):
     """Postgres-Gegenstueck zu derselben Pruefung in test_migrations.py:
-    Task 1 legt nur die Tabelle an, ohne Bedarf abzuleiten - das ist Task 3.
+    Aufgabe 1 legt nur die Tabelle an, ohne Bedarf abzuleiten - das ist Aufgabe 3.
     """
     migrations, schema_url, schema = pg_db
     migrations.apply_pending()
@@ -1021,7 +1021,7 @@ def test_bedarf_wird_aus_den_schichtarten_abgeleitet(pg_leere_migrationen):
 
     Tupelzugriff auf den Cursor (row[0], row[1], ...), nicht dict-Zugriff:
     psycopg2 ohne RealDictCursor liefert hier reine Tupel - dieselbe Falle,
-    die beim ersten Anlauf von Task 1 einen echten Fehler verursacht hat.
+    die beim ersten Anlauf von Aufgabe 1 einen echten Fehler verursacht hat.
     """
     migrations, verzeichnis, schema_url, schema = pg_leere_migrationen
     (verzeichnis / '0001_baseline.py').write_text(BASELINE_PATH.read_text(encoding='utf-8'), encoding='utf-8')

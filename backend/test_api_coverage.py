@@ -2,14 +2,14 @@
 /business-hours, GET/POST/DELETE /business-hours/exceptions sowie GET/PUT
 /coverage-requirements.
 
-Deckt Task 4 und Task 5 aus dem Etappenplan ab (siehe Task-Briefs). Task 4:
+Deckt Aufgabe 4 und Aufgabe 5 aus dem Etappenplan ab. Aufgabe 4:
 business_hours_for() liefert (open_time, close_time, closed) fuer ein Datum -
 eine Ausnahme schlaegt die Wochentagsregel vollstaendig. Diese Vorrangregel
 wird deshalb an zwei Stellen geprueft: direkt an business_hours_for() und
 ueber die Routen, die die zugrundeliegenden Zeilen offenlegen - siehe
 test_ausnahme_schlaegt_den_wochentag.
 
-Task 5: /coverage-requirements ersetzt beim PUT die Baender aller Wochentage
+Aufgabe 5: /coverage-requirements ersetzt beim PUT die Baender aller Wochentage
 vollstaendig (dieselbe Semantik wie /business-hours). Drei Regeln werden
 serverseitig geprueft: Baender desselben Wochentags duerfen sich nicht
 ueberlappen (halboffene Grenze [start, end)), ein Band muss innerhalb der
@@ -236,7 +236,7 @@ def test_nicht_hr_konto_bekommt_403_business_hours(hr_client):
     assert antwort.status_code == 403
 
 
-# ---------- Task 5: GET/PUT /coverage-requirements ----------
+# ---------- Aufgabe 5: GET/PUT /coverage-requirements ----------
 
 def test_baender_setzen_und_lesen(hr_client):
     """PUT ersetzt vollstaendig, GET liest den neuen Bestand zurueck."""
@@ -486,7 +486,7 @@ def test_nicht_hr_konto_bekommt_403_coverage_requirements(hr_client):
     assert schreiben.status_code == 403
 
 
-# ---------- Task 6: Deckungsluecken im Plan (GET /schedules/<jahr>/<monat>) ----------
+# ---------- Aufgabe 6: Deckungsluecken im Plan (GET /schedules/<jahr>/<monat>) ----------
 #
 # 2026-09-01 ist ein Dienstag (Wochentag 1) - derselbe Tag, den
 # test_api_assignment_times.py schon fuer aehnliche Zwecke benutzt.

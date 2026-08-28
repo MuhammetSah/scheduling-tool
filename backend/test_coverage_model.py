@@ -182,7 +182,7 @@ def test_trim_band_to_hours_schneidet_auf_das_oeffnungsfenster_zu():
     }
 
 
-# ---------- coverage_gaps(): Deckungsluecken als reine Funktion (Task 6) ----------
+# ---------- coverage_gaps(): Deckungsluecken als reine Funktion (Aufgabe 6) ----------
 
 def test_volle_deckung_erzeugt_keine_luecke():
     """Bedarf 3 von 08:00-16:00, drei Intervalle decken genau das ab -> keine Luecke."""

@@ -22,6 +22,16 @@ WEEKDAYS = {
     'en': ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
 }
 
+# Neben den Wochentagen, weil sie dasselbe sind: Beschriftungen, die kein
+# Satz sind und deshalb nicht in i18n.py mit seinen Vorlagen passen. Gebraucht
+# fuer den Namen des iCal-Kalenders.
+MONTHS = {
+    'de': ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+           'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'],
+    'en': ['January', 'February', 'March', 'April', 'May', 'June',
+           'July', 'August', 'September', 'October', 'November', 'December'],
+}
+
 
 def use_postgres():
     return bool(os.environ.get('DATABASE_URL'))

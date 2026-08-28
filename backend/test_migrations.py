@@ -723,10 +723,10 @@ def test_ausnahme_ist_pro_datum_eindeutig(fresh_db):
 
 
 def test_bedarfsbaender_starten_leer(fresh_db):
-    """Task 1 legt nur die Tabelle an, ohne Bedarf abzuleiten - das war die
-    Abgrenzung zwischen Task 1 und Task 3.
+    """Aufgabe 1 legt nur die Tabelle an, ohne Bedarf abzuleiten - das war die
+    Abgrenzung zwischen Aufgabe 1 und Aufgabe 3.
 
-    Seit Task 3 (0007_derive_coverage.py) existiert die Ableitung, aber
+    Seit Aufgabe 3 (0007_derive_coverage.py) existiert die Ableitung, aber
     fresh_db hat nach der Baseline-Migration keine Schichtarten - und ohne
     Schichtarten leitet 0007 nichts ab (siehe deren eigener Waechter). Der
     Test bleibt deshalb bewusst unveraendert gueltig; die eigentliche Probe

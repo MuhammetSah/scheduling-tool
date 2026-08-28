@@ -1,14 +1,14 @@
 """assignment_hours(): die Zeitaufloesung einer Zuweisung an einer Stelle.
 
-Deckt Task 2 aus dem Etappenplan ab. Ueberwiegend Funktionstests der Vorrangregel
+Deckt Aufgabe 2 aus dem Etappenplan ab. Ueberwiegend Funktionstests der Vorrangregel
 (eigene Zeiten > Datums-Override > Schichtart-Vorlage), direkt an assignment_hours()
 gefuehrt - keine HTTP-Assertions, weil kein Aufrufer von constraint_warnings() in
-dieser Aufgabe schon eigene Zeiten durchreicht (das kommt erst mit Task 5). Die
+dieser Aufgabe schon eigene Zeiten durchreicht (das kommt erst mit Aufgabe 5). Die
 letzten beiden Tests rufen deshalb ebenfalls direkt in constraint_warnings() hinein,
 statt ueber die HTTP-Route: sie sichern, dass die drei Stellen, die start_time/
 end_time an assignment_hours() weiterreichen, das auch tatsaechlich tun - etwas,
 das die Bestandssuite nicht pruefen kann, weil dort start_time in jeder Zeile NULL
-ist. Task 3 bis 5 bauen echte HTTP-Tests obendrauf.
+ist. Aufgabe 3 bis 5 bauen echte HTTP-Tests obendrauf.
 """
 
 
@@ -61,7 +61,7 @@ def test_block_ohne_vorlage_nutzt_seine_eigenen_zeiten(client):
 def test_block_ohne_vorlage_und_ohne_zeiten_liefert_keine_zeit(client):
     """(None, None) statt einer Ausnahme: der Aufrufer entscheidet, was das bedeutet.
 
-    Diese Kombination kann die API nicht erzeugen (Task 5 lehnt sie ab), aber
+    Diese Kombination kann die API nicht erzeugen (Aufgabe 5 lehnt sie ab), aber
     assignment_hours() darf an einer Altzeile nicht mit AttributeError sterben.
     """
     from app import assignment_hours, get_db
@@ -80,7 +80,7 @@ def test_block_ohne_vorlage_und_ohne_zeiten_liefert_keine_zeit(client):
 # das nicht pruefen: dort ist start_time in jeder Zeile NULL, Stufe 1 der
 # Vorrangregel feuert nie - fiele eines der drei Literale versehentlich auf None
 # zurueck statt den Parameter zu benutzen, bliebe die gesamte Suite gruen, bis
-# Task 5 die Aufrufer umstellt. 2026-09-01 ist ein Dienstag (Wochentag 1).
+# Aufgabe 5 die Aufrufer umstellt. 2026-09-01 ist ein Dienstag (Wochentag 1).
 
 def test_constraint_warnings_warnt_wenn_die_vorgeschlagene_zeit_das_fenster_verlaesst(hr_client):
     """Anna darf laut Fenster dienstags nur 06:00-14:00 arbeiten. Die vorgeschlagene
@@ -144,13 +144,13 @@ def test_constraint_warnings_warnt_nicht_wenn_die_vorgeschlagene_zeit_ins_fenste
     assert warnungen == []
 
 
-# ---------- fetch_schedule() liefert die tatsaechlichen Zeiten (Task 3) ----------
+# ---------- fetch_schedule() liefert die tatsaechlichen Zeiten (Aufgabe 3) ----------
 #
 # Anders als oben: hier geht es um die HTTP-Antwort von GET /schedules/<jahr>/<monat>,
 # nicht um assignment_hours() direkt - fetch_schedule() loest die drei Vorrangstufen
 # in der eigenen Schleife auf, weil es die Overrides vorab in einen Dict laedt statt
 # pro Zeile nachzufragen (siehe Kommentar in app.py). Eigene Zeiten auf einer
-# Zuweisung kann die API noch nicht setzen (kommt erst mit Task 4/5), deshalb setzen
+# Zuweisung kann die API noch nicht setzen (kommt erst mit Aufgabe 4/5), deshalb setzen
 # die Tests unten sa.start_time/sa.end_time per direktem SQL - eine bewusste
 # Zwischenloesung, keine Bequemlichkeit.
 
@@ -229,7 +229,7 @@ def test_block_ohne_vorlage_erscheint_im_plan(hr_client):
     assert hr_client.put(f'/assignments/{platz_regulaer["id"]}',
                           json={'employee_id': kollegin['id']}).status_code == 200
 
-    # add_slot kennt shift_type_id IS NULL noch nicht (kommt erst mit Task 4/5)
+    # add_slot kennt shift_type_id IS NULL noch nicht (kommt erst mit Aufgabe 4/5)
     # - der freie Block wird deshalb per direktem SQL angelegt, bewusst als
     # Zwischenloesung fuer diesen Test.
     with hr_client.application.app_context():
@@ -365,7 +365,7 @@ def test_eigene_zeit_schlaegt_den_datums_override_im_plan(hr_client):
     # Bens eigene Zeit weicht bewusst sowohl vom Override als auch von der
     # Schichtart ab, damit keine der drei Stufen zufaellig gleich aussieht.
     # Direktes SQL, weil die API einer Zuweisung noch keine eigenen Zeiten
-    # geben kann (kommt erst mit Task 4/5) - dieselbe Zwischenloesung wie in
+    # geben kann (kommt erst mit Aufgabe 4/5) - dieselbe Zwischenloesung wie in
     # den Tests oben.
     with hr_client.application.app_context():
         connection = get_db()
@@ -391,10 +391,10 @@ def test_eigene_zeit_schlaegt_den_datums_override_im_plan(hr_client):
     assert kollegin_zeile['time_overridden'] is True
 
 
-# ---------- constraint_warnings() und add_slot() kommen ohne Schichtart aus (Task 4) ----------
+# ---------- constraint_warnings() und add_slot() kommen ohne Schichtart aus (Aufgabe 4) ----------
 #
 # shift_type_id ist in constraint_warnings() und add_slot() nicht nur ein Zeit-Ersatzteil
-# (das loest Task 2/assignment_hours() schon), sondern wird an zwei weiteren Stellen als
+# (das loest Aufgabe 2/assignment_hours() schon), sondern wird an zwei weiteren Stellen als
 # echter Fremdschluessel benutzt: die Schichtart-Restriktionspruefung und die
 # slot_index-Vergabe beim Anlegen eines Platzes. Beide Stellen gingen bislang von
 # "nie NULL" aus. Alle vier Tests fahren komplett ueber die HTTP-Routen, weil
@@ -426,7 +426,7 @@ def test_freier_block_loest_keine_schichtart_warnung_aus(hr_client):
         'date': '2026-09-01', 'shift_type_id': None,
         'start_time': '10:00', 'end_time': '14:00',
     }).json
-    # Seit Task 5 schreibt jeder PUT die Zeiten mit - ein Block ohne Vorlage
+    # Seit Aufgabe 5 schreibt jeder PUT die Zeiten mit - ein Block ohne Vorlage
     # braucht sie deshalb bei jedem Aufruf erneut, sonst haette er nach dem
     # PUT gar keine Zeit mehr, von der er erben koennte.
     antwort_frei = hr_client.put(f'/assignments/{platz_frei["id"]}', json={
@@ -580,10 +580,10 @@ def test_zweiter_freier_block_am_selben_tag_bekommt_den_naechsten_platz(hr_clien
     assert zuweisungen[zweiter.json['id']]['slot_index'] == 1
 
 
-# ---------- Zeiten ueber die API setzen (Task 5) ----------
+# ---------- Zeiten ueber die API setzen (Aufgabe 5) ----------
 #
 # Bis hierher konnte keine der drei Aufrufer-Stellen von constraint_warnings()
-# eigene Zeiten durchreichen - Task 2 hatte die Parameter nur angelegt, Task 4
+# eigene Zeiten durchreichen - Aufgabe 2 hatte die Parameter nur angelegt, Aufgabe 4
 # musste sie deshalb noch per direktem SQL an der Pruefung vorbeischmuggeln.
 # Diese Tests gehen ausschliesslich ueber PUT /assignments/<id> bzw.
 # POST /schedules/<jahr>/<monat>/slots, weil genau das die Verdrahtung ist,
