@@ -2,9 +2,19 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useTranslation } from '../i18n/context'
 
+// toLocaleDateString('sv-SE') and not toISOString(): the Date objects below are
+// local midnight, and toISOString() converts to UTC. East of Greenwich that
+// lands on the previous day, so in Berlin the picker offered 31 July as the
+// earliest day of August and refused 31 August as the latest - the server, which
+// works in the business's own timezone (backend/timeutil.py), then rejected the
+// first and would have accepted the second. Reporting sick on the last day of
+// the month was simply not possible through this form.
+//
+// The same trap, and the same fix, as the `today` in pages/Employees.jsx; 'sv-SE'
+// is the locale whose short date format is already ISO.
 function currentMonthRange() {
   const now = new Date()
-  const iso = d => d.toISOString().slice(0, 10)
+  const iso = d => d.toLocaleDateString('sv-SE')
   return {
     min: iso(new Date(now.getFullYear(), now.getMonth(), 1)),
     max: iso(new Date(now.getFullYear(), now.getMonth() + 1, 0)),

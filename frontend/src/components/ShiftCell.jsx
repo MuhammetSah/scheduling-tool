@@ -204,11 +204,17 @@ function AssignmentSlot({
   const [start, setStart] = useState('')
   const [end, setEnd] = useState('')
 
-  // Shown only when it deviates - same restraint as the times above, or the
-  // same number would sit on every row and the one that matters would drown.
   // `!= null` rather than a truthiness test on purpose: a stored 0 is the
   // statement "this block runs without a break", and that has to be visible.
   const breakDeviates = slot.break_minutes != null
+  // Die Pause, die fuer diesen Platz gilt. Frueher stand hier nur die
+  // abweichende, mit der Begruendung, die gesetzliche waere auf jeder Zeile
+  // dieselbe Zahl. Sie ist es nicht: sie haengt an der Spanne, und derselbe
+  // Tag traegt oft einen Achteinhalb-Stunden-Block mit dreissig Minuten neben
+  // einem Vierstundenblock ohne. Ganz wegzulassen hiess, die Zeit, die vom
+  // Dienst abgeht, nirgends zu zeigen.
+  const breakMinutes = breakDeviates ? slot.break_minutes : (slot.effective_break_minutes ?? 0)
+  const showBreak = breakDeviates || breakMinutes > 0
 
   const isAbsence = Boolean(slot.absence_type)
   const absenceLabel = absenceLabels[slot.absence_type] || slot.absence_type
@@ -296,9 +302,10 @@ function AssignmentSlot({
             {slot.start_time}–{slot.end_time}
           </span>
         )}
-        {breakDeviates && (
-          <span className="slot-break" title={t('shiftCell.breakTitle')}>
-            {t('shiftCell.breakShort', { minutes: slot.break_minutes })}
+        {showBreak && (
+          <span className={`slot-break ${breakDeviates ? 'slot-break-deviating' : ''}`}
+                title={t(breakDeviates ? 'shiftCell.breakTitle' : 'shiftCell.breakLegalTitle')}>
+            {t('shiftCell.breakShort', { minutes: breakMinutes })}
             {slot.break_start ? ` ${t('shiftCell.breakFrom')} ${slot.break_start}` : ''}
           </span>
         )}
@@ -350,9 +357,10 @@ function AssignmentSlot({
           <button type="button" className="cell-icon" title={t('shiftCell.editPersonTimeTitle')} onClick={startEditingTime}>
             ✎
           </button>
-          {breakDeviates && (
-            <span className="slot-break" title={t('shiftCell.breakTitle')}>
-              {t('shiftCell.breakShort', { minutes: slot.break_minutes })}
+          {showBreak && (
+            <span className={`slot-break ${breakDeviates ? 'slot-break-deviating' : ''}`}
+                  title={t(breakDeviates ? 'shiftCell.breakTitle' : 'shiftCell.breakLegalTitle')}>
+              {t('shiftCell.breakShort', { minutes: breakMinutes })}
               {slot.break_start ? ` ${t('shiftCell.breakFrom')} ${slot.break_start}` : ''}
             </span>
           )}

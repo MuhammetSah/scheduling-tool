@@ -232,8 +232,13 @@ function Employees({ setFlash }) {
       // ihn zu einem Sammelbecken zu machen — dasselbe, was den
       // Arbeitszeitfenstern in Etappe 4 eine eigene Route gebracht hat.
       let ziel = form.id
+      let warnungen = []
       if (ziel) {
-        await api.put(`/employees/${ziel}`, payload)
+        // Die Antwort trägt seit dem Betriebs-Durchgang eine Warnung, wenn
+        // hier jemand inaktiv gesetzt wird, der noch in einem laufenden Plan
+        // steht. Sie zu verwerfen wäre genau der stille Zustand, den sie
+        // beheben soll.
+        warnungen = (await api.put(`/employees/${ziel}`, payload)).warnings || []
       } else {
         ziel = (await api.post('/employees', payload)).id
         // Die neue Kennung sofort ins Formular. Schlägt der zweite Aufruf
@@ -243,8 +248,13 @@ function Employees({ setFlash }) {
       }
       await api.put(`/employees/${ziel}/qualifications`,
                     { qualifications: form.qualifications })
-      setFlash({ type: 'success',
-                 text: t(form.id ? 'employees.flashUpdated' : 'employees.flashCreated') })
+      const erledigt = t(form.id ? 'employees.flashUpdated' : 'employees.flashCreated')
+      // Als Warnung und an dieselbe Meldung gehängt: zwei setFlash()
+      // nacheinander zeigen nur die letzte, und eine Warnung bleibt seit
+      // Flash.jsx stehen, bis jemand sie wegklickt — was hier der Punkt ist.
+      setFlash(warnungen.length
+        ? { type: 'warning', text: `${erledigt} ${warnungen.join(' ')}` }
+        : { type: 'success', text: erledigt })
       setShowForm(false)
       load()
     } catch (err) {

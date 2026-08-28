@@ -123,10 +123,35 @@ describe('ShiftCell mit Ruhepausen', () => {
     expect(screen.getByText(/60/)).toBeInTheDocument()
   })
 
-  it('zeigt eine Pause, die der gesetzlichen entspricht, nicht an', () => {
-    // Dieselbe Zurueckhaltung wie bei den Zeiten: sonst staende auf jeder
-    // Zeile dieselbe Zahl, und die Abweichung ginge darin unter.
+  it('zeigt auch die gesetzliche Pause an', () => {
+    // Frueher ausgeblendet, mit der Begruendung, sonst staende auf jeder Zeile
+    // dieselbe Zahl. Sie steht dort nicht: die gesetzliche Pause haengt an der
+    // Spanne, und derselbe Tag traegt oft einen Achteinhalb-Stunden-Block mit
+    // dreissig Minuten neben einem Vierstundenblock ohne. Sie wegzulassen
+    // hiess, die Zeit, die vom Dienst abgeht, nirgends zu zeigen - und der
+    // Plan ist fuer die Belegschaft die einzige Stelle, an der der eigene
+    // Dienst ueberhaupt auftaucht.
     const { container } = renderCell(mitPause(null, 30))
+
+    const pause = container.querySelector('.slot-break')
+    expect(pause).not.toBeNull()
+    expect(pause.textContent).toContain('30')
+    // Und sie bleibt als die gesetzliche erkennbar, statt wie eine
+    // Entscheidung auszusehen, die jemand getroffen hat.
+    expect(pause.classList.contains('slot-break-deviating')).toBe(false)
+  })
+
+  it('hebt eine abweichende Pause von der gesetzlichen ab', () => {
+    const { container } = renderCell(mitPause(45, 45))
+
+    expect(container.querySelector('.slot-break').classList
+      .contains('slot-break-deviating')).toBe(true)
+  })
+
+  it('zeigt bei einem Block ohne gesetzliche Pause nichts an', () => {
+    // Vier Stunden verlangen keine - eine "0 Min. Pause" daneben waere eine
+    // Angabe ueber nichts.
+    const { container } = renderCell(mitPause(null, 0))
 
     expect(container.querySelector('.slot-break')).toBeNull()
   })

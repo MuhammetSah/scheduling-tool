@@ -18,4 +18,13 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
+  {
+    // Testdateien laufen unter Node, nicht im Browser. Nur hier, damit ein
+    // versehentliches `process` im Anwendungscode weiterhin auffaellt -
+    // dort gibt es keins.
+    files: ['**/*.test.{js,jsx}', 'src/test/**/*.{js,jsx}'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
 ])

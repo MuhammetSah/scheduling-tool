@@ -12,6 +12,7 @@ import AuditLog from './pages/AuditLog'
 import SwapRequests from './pages/SwapRequests'
 import SetPassword from './pages/SetPassword'
 import Flash from './Flash'
+import ErrorBoundary from './ErrorBoundary'
 import { api, UnauthorizedError } from './api'
 import { clearAuthToken } from './auth'
 import { useTranslation } from './i18n/context'
@@ -56,6 +57,21 @@ function LanguageToggle() {
         EN
       </button>
     </div>
+  )
+}
+
+/** <Routes> inside an error boundary that resets on navigation.
+ *
+ * The boundary needs the current path to key on, and useLocation() only works
+ * below <BrowserRouter> - hence a small component rather than the boundary
+ * being written out inline in App's tree.
+ */
+function RoutesWithBoundary({ children }) {
+  const location = useLocation()
+  return (
+    <ErrorBoundary key={location.pathname}>
+      <Routes>{children}</Routes>
+    </ErrorBoundary>
   )
 }
 
@@ -150,11 +166,16 @@ function App() {
 
         <Flash flash={flash} onClose={() => setFlash(null)} />
 
+        {/* Um die Routen und nicht um die ganze App: die Navigation und die
+            Sprachumschaltung sollen stehen bleiben, wenn eine Seite darunter
+            wirft. Der Schluessel auf dem Pfad setzt die Grenze beim Wechsel
+            zurueck - sonst bliebe die Fehlermeldung einer Seite stehen,
+            waehrend man laengst auf einer anderen ist. */}
         <main className={`page ${user ? 'page-wide' : ''}`}>
           {checkingSession ? (
             <p className="hint">{t('common.loading')}</p>
           ) : (
-            <Routes>
+            <RoutesWithBoundary>
               <Route path="/" element={
                 <RequireAuth user={user} setupRequired={setupRequired}>
                   <SchedulePage setFlash={setFlash} user={user} />
@@ -206,7 +227,7 @@ function App() {
                     : <Navigate to={user ? '/' : '/login'} replace />
               } />
               <Route path="*" element={<Navigate to={user ? '/' : (setupRequired ? '/register' : '/login')} replace />} />
-            </Routes>
+            </RoutesWithBoundary>
           )}
         </main>
         <footer className="footer">

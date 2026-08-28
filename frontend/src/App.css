@@ -673,6 +673,9 @@ button.btn-small {
 .calendar-shift-name {
   display: flex;
   align-items: center;
+  /* Umbrechen statt zusammenquetschen: seit die Pausenzeile dazugekommen ist,
+     traegt die Kopfzeile drei Angaben, und eine Kalenderspalte ist schmal. */
+  flex-wrap: wrap;
   gap: 0.3rem;
   font-size: 0.72rem;
   font-weight: 700;
@@ -683,6 +686,18 @@ button.btn-small {
   margin-left: auto;
   font-weight: 500;
   opacity: 0.8;
+}
+
+/* Die enthaltene Ruhepause. Bewusst leiser als die Zeiten daneben: sie
+   beantwortet eine Nachfrage, sie ist nicht die Ueberschrift. Auf eine eigene
+   Zeile, weil die Kopfzeile eines Blocks in einer schmalen Kalenderspalte
+   sonst umbricht. */
+.calendar-shift-break {
+  flex-basis: 100%;
+  text-align: right;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 .calendar-people {
@@ -751,13 +766,21 @@ button.btn-small {
   border-top: 1px dashed var(--border-color);
 }
 
-/* Abweichende Ruhepause einer Person - zurueckhaltend wie die individuelle
-   Zeit daneben, damit die Abweichung als Abweichung lesbar bleibt. */
+/* Die Ruhepause eines Platzes - zurueckhaltend wie die individuelle Zeit
+   daneben. Die gesetzliche steht gedaempft da, weil sie die Regel ist; eine
+   abweichende traegt zusaetzlich .slot-break-deviating und hebt sich ab, denn
+   sie ist eine Entscheidung, die jemand getroffen hat. */
 .slot-break {
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-muted);
   white-space: nowrap;
+  opacity: 0.8;
+}
+
+.slot-break-deviating {
+  font-weight: 700;
+  opacity: 1;
 }
 
 .cell-times {
@@ -1094,7 +1117,43 @@ button.btn-small {
   padding: 0.75rem 1rem;
   border-radius: 10px;
   font-weight: 500;
+  /* Flex statt text-align: seit die Meldung eine Schliessen-Schaltflaeche
+     traegt, muessen zwei Dinge nebeneinander liegen - der Text mittig, das
+     Kreuz rechts, ohne dass das Kreuz den Text aus der Mitte schiebt. */
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.flash-text {
+  flex: 1;
   text-align: center;
+}
+
+/* Erbt die Farbe der Meldung, statt eine eigene mitzubringen: dasselbe Kreuz
+   muss auf allen drei Untergruenden lesbar sein. */
+.flash-close {
+  flex: none;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.1rem 0.3rem;
+  cursor: pointer;
+  border-radius: 6px;
+  opacity: 0.65;
+}
+
+.flash-close:hover {
+  opacity: 1;
+  background-color: rgb(0 0 0 / 8%);
+}
+
+.flash-close:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 1px;
+  opacity: 1;
 }
 
 .flash-success {

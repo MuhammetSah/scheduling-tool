@@ -16,6 +16,7 @@ const de = {
 
   common: {
     loading: 'Lade …',
+    dismissMessage: 'Meldung schließen',
     username: 'Benutzername',
     password: 'Passwort',
     name: 'Name',
@@ -369,6 +370,7 @@ const de = {
     endAria: 'Ende',
     breakShort: 'Pause {minutes} Min.',
     breakTitle: 'Abweichende Ruhepause dieser Person',
+    breakLegalTitle: 'Die gesetzliche Ruhepause nach § 4 ArbZG für diese Spanne',
     breakAria: 'Ruhepause in Minuten',
     breakStartAria: 'Beginn der Ruhepause',
     breakFrom: 'ab',
@@ -399,6 +401,8 @@ const de = {
   calendar: {
     gapTitle: 'Unbesetzte Schicht',
     timeOverrideTitle: 'Nur an diesem Tag {start}–{end} statt {defaultStart}–{defaultEnd}',
+    breakShort: 'inkl. {minutes} Min. Pause',
+    breakTitle: 'Die Ruhepause nach § 4 ArbZG ist in dieser Zeitspanne enthalten und zählt nicht als Arbeitszeit',
     absenceTitle: '{name} ist {label} - Vertretung gesucht',
   },
 
@@ -414,6 +418,8 @@ const de = {
     submit: 'Eintragen',
     confirmCancel: '{label} für {date} wirklich zurücknehmen?',
     reportedFreedFlash: '{label} für {date} eingetragen. Die Schicht an diesem Tag ist jetzt wieder frei.',
+    otherMonthHint: 'Krank und Urlaub können Sie nur für den laufenden Monat selbst melden. Für alles andere wendet sich die Personalabteilung an Sie — oder Sie sich an sie.',
+    backToCurrentMonth: 'Zum laufenden Monat',
     reportedFlash: '{label} für {date} eingetragen.',
   },
 }
@@ -430,6 +436,7 @@ const en = {
 
   common: {
     loading: 'Loading …',
+    dismissMessage: 'Dismiss message',
     username: 'Username',
     password: 'Password',
     name: 'Name',
@@ -778,6 +785,7 @@ const en = {
     endAria: 'End',
     breakShort: '{minutes} min break',
     breakTitle: "This person's break, differing from the legal minimum",
+    breakLegalTitle: 'The break § 4 ArbZG requires for this span',
     breakAria: 'Break in minutes',
     breakStartAria: 'Start of the break',
     breakFrom: 'from',
@@ -808,6 +816,8 @@ const en = {
   calendar: {
     gapTitle: 'Unfilled shift',
     timeOverrideTitle: 'Only on this day {start}–{end} instead of {defaultStart}–{defaultEnd}',
+    breakShort: 'incl. {minutes} min break',
+    breakTitle: 'The break required by § 4 ArbZG falls inside these hours and does not count as working time',
     absenceTitle: '{name} is {label} - looking for cover',
   },
 
@@ -823,6 +833,8 @@ const en = {
     submit: 'Submit',
     confirmCancel: 'Really cancel {label} for {date}?',
     reportedFreedFlash: '{label} for {date} reported. The shift on that day is now open again.',
+    otherMonthHint: 'You can only report sick leave and holiday for the current month yourself. Anything else goes through HR.',
+    backToCurrentMonth: 'To the current month',
     reportedFlash: '{label} for {date} reported.',
   },
 }

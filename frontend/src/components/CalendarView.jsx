@@ -135,6 +135,21 @@ function CalendarView({ schedule, shiftTypes, highlightEmployeeId }) {
                       >
                         {slots[0].start_time}–{slots[0].end_time}{slots[0].time_overridden ? ' *' : ''}
                       </span>
+                      {/* Die Pause gehoert sichtbar an den Block. Sie wurde
+                          berechnet, im Generator erzwungen und von der
+                          Nettoarbeitszeit abgezogen - nur zu sehen war sie
+                          nirgends, und der Kalender ist fuer die Belegschaft
+                          die einzige Stelle, an der der eigene Dienst
+                          ueberhaupt auftaucht. "08:00-16:30" ohne ein Wort
+                          dazu liest sich als achteinhalb Stunden Arbeit.
+                          Der Wert haengt an der Spanne, ist also je Block
+                          verschieden - dreissig Minuten hier, keine beim
+                          Vierstundenblock daneben. */}
+                      {slots[0].effective_break_minutes > 0 && (
+                        <span className="calendar-shift-break" title={t('calendar.breakTitle')}>
+                          {t('calendar.breakShort', { minutes: slots[0].effective_break_minutes })}
+                        </span>
+                      )}
                     </div>
                     <ul className="calendar-people">
                       {slots

@@ -543,9 +543,27 @@ function SchedulePage({ setFlash, user }) {
 
       {/* Self-service only makes sense for the month it's actually restricted
           to server-side - showing it while browsing a different month would
-          be misleading, since it can never act on that month anyway. */}
-      {user?.employee_id && ym === currentMonthKey() && (
-        <AbsenceManager employeeId={user.employee_id} onChange={refreshSchedule} setFlash={setFlash} />
+          be misleading, since it can never act on that month anyway.
+
+          Aber wortlos zu verschwinden ist die andere Hälfte des Fehlers: wer
+          einen Monat weiterblättert, sieht die Tafel weggehen und liest das
+          als Fehler der Seite, nicht als Regel. Deshalb steht an ihrer Stelle
+          eine Zeile, die sagt, warum sie fort ist und wie sie wiederkommt. */}
+      {user?.employee_id && (
+        ym === currentMonthKey() ? (
+          <AbsenceManager employeeId={user.employee_id} onChange={refreshSchedule} setFlash={setFlash} />
+        ) : (
+          <div className="panel">
+            <h3>{t('absences.title')}</h3>
+            <p className="hint">
+              {t('absences.otherMonthHint')}{' '}
+              <button type="button" className="btn-secondary btn-small"
+                      onClick={() => handleMonthChange(currentMonthKey())}>
+                {t('absences.backToCurrentMonth')}
+              </button>
+            </p>
+          </div>
+        )
       )}
     </>
   )
