@@ -76,6 +76,18 @@ In Render, gleiche Region wie der Webdienst. **Nenne sie wieder `schichtplan-db`
 `render.yaml` verdrahtet `DATABASE_URL` über `fromDatabase: name: schichtplan-db`; ein anderer
 Name heißt, die Verdrahtung von Hand nachzuziehen.
 
+**Die Region ist hier zu entscheiden, und nur hier.** Render legt eine Instanz in der Region an,
+in der sie entsteht; nachträglich ändern lässt sie sich nicht. `render.yaml` steht seit dem
+Betriebs-Durchgang auf `region: frankfurt` — für Dienst und Datenbank —, aber die Zeile wirkt
+ausschließlich auf neu angelegte Ressourcen. Läuft die bisherige Instanz in einer US-Region, ist
+dieser Zyklus der Moment, an dem das ohne zusätzliche Migration zu beheben ist.
+
+Warum das mehr ist als eine Geschmacksfrage: verarbeitet werden Namen, Arbeitszeiten und
+Krankmeldungen, und letztere sind Gesundheitsdaten nach Art. 9 DSGVO. Eine US-Region macht daraus
+eine Drittlandübermittlung, die nach Kapitel V begründet werden muss. Eine EU-Region nimmt die
+Frage aus der Dokumentation heraus, statt sie zu beantworten. Der Auftragsverarbeitungsvertrag
+nach Art. 28 mit Render bleibt davon unberührt — der wird gebraucht, so oder so.
+
 **Das Passwort ist neu und gehört nirgendwo sonst hin.** Die Verbindungszeichenkette der neuen
 Instanz für die folgenden Schritte:
 

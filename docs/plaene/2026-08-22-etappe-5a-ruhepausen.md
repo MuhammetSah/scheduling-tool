@@ -1,14 +1,12 @@
 # Etappe 5a — Ruhepausen und Netto-Arbeitszeit: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development` (empfohlen) oder `superpowers:executing-plans`, um diesen Plan Aufgabe für Aufgabe umzusetzen. Die Schritte nutzen Checkbox-Syntax (`- [ ]`) zur Nachverfolgung.
-
 **Ziel:** Das Tool kennt Ruhepausen nach § 4 ArbZG und rechnet Arbeitszeit netto — die Spanne minus der Pause, wie § 2 Abs. 1 sie definiert.
 
 **Architektur:** Eine nullbare Spalte `shift_assignments.break_minutes`, deren `NULL` die gesetzliche Mindestpause für die Blocklänge bedeutet. Zwei reine Funktionen in `scheduler.py` lösen die zirkuläre Ableitung der Mindestpause auf. Fünf Stellen, die heute Arbeitszeit rechnen, rechnen danach netto; alle Stellen, die Anwesenheit rechnen, bleiben unverändert.
 
 **Tech Stack:** Python 3.13/3.14, Flask, SQLite lokal / Postgres in Produktion über die Dialektschicht in `backend/db.py` (kein ORM). Frontend React 19 + Vite, Tests pytest und Vitest.
 
-**Spec:** [`docs/superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md`](../specs/2026-08-22-etappe-5a-ruhepausen-design.md)
+**Spec:** [`docs/entwuerfe/2026-08-22-etappe-5a-ruhepausen-design.md`](../specs/2026-08-22-etappe-5a-ruhepausen-design.md)
 
 ## Globale Randbedingungen
 
@@ -17,7 +15,7 @@
 - **`ADD COLUMN` gehört in eine `.py`-Migration mit `table_columns()`-Wächter**, Muster aus `0001_baseline.py` und `0008_max_daily_hours.py`. Rundlauftest up → down → up ist Pflicht.
 - **Die 23 Tests in `backend/test_scheduler.py` bleiben unverändert.** Werden sie rot, ist die Änderung falsch, nicht der Test.
 - **Kommentarsprache folgt der Datei.** `app.py`, `db.py`, `scheduler.py`, `test_scheduler.py` englisch; `block_planner.py`, `coverage_model.py`, `security.py`, `timeutil.py`, `migrations.py` und die neueren Testdateien deutsch.
-- **Commit-Nachrichten deutsch, ohne Umlaute.** README englisch. Jeder Commit endet mit `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+- **Commit-Nachrichten deutsch, ohne Umlaute.** README englisch.
 - **Vor jedem Commit die Frage:** *Würde dieser Test fehlschlagen, wenn ich das Feature lösche?* Fünf wertlose Tests gab es im Projekt schon, einer davon in Etappe 4.
 - **Alle neuen Texte in beiden Sprachen**, `backend/i18n.py` und `frontend/src/i18n/translations.js`.
 - **Testlauf:** `cd backend && ./venv/Scripts/python.exe -m pytest -q -W error::DeprecationWarning`. Frontend: `cd frontend && npm test -- --run`.
@@ -37,7 +35,7 @@
 
 ---
 
-## Task 1: Die zwei Rechenfunktionen
+## Aufgabe 1: Die zwei Rechenfunktionen
 
 Der Kern. § 4 bemisst die Pause an der Arbeitszeit, die Arbeitszeit ist die Spanne minus der Pause — die Ableitung ist zirkulär und wird über „die kleinste Pause, die für die dabei herauskommende Arbeitszeit ausreicht" aufgelöst.
 
@@ -210,7 +208,7 @@ git commit -m "feat: gesetzliche Mindestpause und Netto-Arbeitszeit berechnen"
 
 ---
 
-## Task 2: Die Spalte und der Weg durch die API
+## Aufgabe 2: Die Spalte und der Weg durch die API
 
 **Files:**
 - Create: `backend/migrations/0009_break_minutes.py`
@@ -288,7 +286,7 @@ git commit -m "feat: Ruhepause je Zuweisung, nullbar mit gesetzlichem Standard"
 
 ---
 
-## Task 3: Netto-Arbeitszeit im Suchkern
+## Aufgabe 3: Netto-Arbeitszeit im Suchkern
 
 **Files:**
 - Modify: `backend/scheduler.py` — `build_slots()` (~155), `eligible_candidates()` (~446, ~454), `backtrack()` (~512, ~531)
@@ -296,7 +294,7 @@ git commit -m "feat: Ruhepause je Zuweisung, nullbar mit gesetzlichem Standard"
 - Test: `backend/test_scheduler_split_shifts.py` (erweitert), `backend/test_api_coverage.py` (erweitert)
 
 **Interfaces:**
-- Consumes: `net_working_minutes()` aus Task 1.
+- Consumes: `net_working_minutes()` aus Aufgabe 1.
 - Produces: Slots tragen zusätzlich `working_minutes`. `duration_minutes` **behält seine Bedeutung** — die Spanne. Kein Umdeuten.
 
 - [ ] **Schritt 1: Die fehlschlagenden Tests schreiben**
@@ -351,7 +349,7 @@ def test_die_pause_erzeugt_keine_deckungsluecke(hr_client):
 - [ ] **Schritt 2: Tests laufen lassen, Fehlschlag prüfen**
 
 Run: `cd backend && ./venv/Scripts/python.exe -m pytest test_scheduler_split_shifts.py -k netto -q`
-Erwartet: FAIL bei `test_die_tagesgrenze_rechnet_netto` (ein Block bleibt offen). Der Deckungstest muss von Anfang an **grün** sein — er sichert ab, dass Task 3 ihn nicht kaputtmacht.
+Erwartet: FAIL bei `test_die_tagesgrenze_rechnet_netto` (ein Block bleibt offen). Der Deckungstest muss von Anfang an **grün** sein — er sichert ab, dass Aufgabe 3 ihn nicht kaputtmacht.
 
 - [ ] **Schritt 3: `working_minutes` in die Slots**
 
@@ -381,7 +379,7 @@ git commit -m "feat: Tages- und Wochengrenze rechnen mit Netto-Arbeitszeit"
 
 ---
 
-## Task 4: Netto und Warnung auf dem Handkorrektur-Pfad
+## Aufgabe 4: Netto und Warnung auf dem Handkorrektur-Pfad
 
 **Files:**
 - Modify: `backend/app.py` — `constraint_warnings()`, Tagesgrenze (~1981) und Wochenstunden (~2010)
@@ -437,7 +435,7 @@ git commit -m "feat: Handkorrektur rechnet netto und warnt vor zu kurzer Pause"
 
 ---
 
-## Task 5: Frontend
+## Aufgabe 5: Frontend
 
 **Files:**
 - Modify: `frontend/src/components/ShiftCell.jsx`, `frontend/src/pages/SchedulePage.jsx` (der `reassign`-Aufruf muss die Pause mitschicken — Fallstrick 14)
@@ -471,7 +469,7 @@ git commit -m "refactor: Ruhepause je Person sichtbar und bearbeitbar"
 
 ---
 
-## Task 6: Dokumentation
+## Aufgabe 6: Dokumentation
 
 **Files:**
 - Modify: `README.md` — den Abschnitt „Split shifts and working-time law" um die Pausen ergänzen und § 4 aus der Liste des Nichtgeprüften herausnehmen (bis auf Satz 3); die Netto-Umstellung bei „Part-time / weekly hours" und bei der Tagesgrenze nennen; `Project Structure` um `test_working_time.py`; Migrationsliste um `0009`
@@ -491,16 +489,16 @@ git commit -m "refactor: Ruhepause je Person sichtbar und bearbeitbar"
 
 | Spec-Abschnitt | Aufgabe |
 |---|---|
-| §5 Migration `0009` | Task 2 |
-| §6 Netto/brutto, fünf Stellen | Task 3 (drei), Task 4 (zwei) |
-| §6.1 `working_minutes` neben `duration_minutes` | Task 3 |
-| §6.2 die zwei Funktionen und die 9:30-Kante | Task 1 |
-| §7 Generator setzt nichts, Handkorrektur warnt | Task 2 Schritt 4, Task 4 |
-| §8 API | Task 2 |
-| §9 Frontend | Task 5 |
-| §10 Tests | in jeder Aufgabe; die Deckungs-Gegenprobe in Task 3 |
-| §13 Risiko „Anwesenheit und Arbeitszeit verwechselt" | Task 3 Schritt 1, zweiter Test |
+| §5 Migration `0009` | Aufgabe 2 |
+| §6 Netto/brutto, fünf Stellen | Aufgabe 3 (drei), Aufgabe 4 (zwei) |
+| §6.1 `working_minutes` neben `duration_minutes` | Aufgabe 3 |
+| §6.2 die zwei Funktionen und die 9:30-Kante | Aufgabe 1 |
+| §7 Generator setzt nichts, Handkorrektur warnt | Aufgabe 2 Schritt 4, Aufgabe 4 |
+| §8 API | Aufgabe 2 |
+| §9 Frontend | Aufgabe 5 |
+| §10 Tests | in jeder Aufgabe; die Deckungs-Gegenprobe in Aufgabe 3 |
+| §13 Risiko „Anwesenheit und Arbeitszeit verwechselt" | Aufgabe 3 Schritt 1, zweiter Test |
 
-**Reihenfolge:** Task 1 muss zuerst, alles andere baut auf den zwei Funktionen. Task 3 und 4 sind unabhängig voneinander. Task 5 braucht Task 2.
+**Reihenfolge:** Aufgabe 1 muss zuerst, alles andere baut auf den zwei Funktionen. Aufgabe 3 und 4 sind unabhängig voneinander. Aufgabe 5 braucht Aufgabe 2.
 
-**Bewusst offen gelassen:** Task 4 Schritt 2 sagt „`SELECT` erweitern, wo nötig" statt die Abfragen auszuschreiben — welche der drei Abfragen in `constraint_warnings()` `break_minutes` schon mitbringt, entscheidet sich am Code, und alle drei aufzuzählen hieße den Bestand abzuschreiben.
+**Bewusst offen gelassen:** Aufgabe 4 Schritt 2 sagt „`SELECT` erweitern, wo nötig" statt die Abfragen auszuschreiben — welche der drei Abfragen in `constraint_warnings()` `break_minutes` schon mitbringt, entscheidet sich am Code, und alle drei aufzuzählen hieße den Bestand abzuschreiben.

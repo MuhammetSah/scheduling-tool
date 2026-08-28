@@ -1,14 +1,12 @@
 # Etappe 4 — Zuschnitt im Planer: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development` (empfohlen) oder `superpowers:executing-plans`, um diesen Plan Aufgabe für Aufgabe umzusetzen. Die Schritte nutzen Checkbox-Syntax (`- [ ]`) zur Nachverfolgung.
-
 **Ziel:** Der Planer baut seine Blöcke aus `coverage_requirements` statt aus `shift_requirements`, schneidet sie bei Bedarf auf die Arbeitszeitfenster der Mitarbeiter zu, und erlaubt den geteilten Dienst innerhalb der Grenzen des Arbeitszeitgesetzes.
 
 **Architektur:** Zweistufig. Stufe 1 (neu, `backend/block_planner.py`) ist deterministische Rechenlogik ohne Datenbank: aus Bedarfsbändern, Vorlagen und Fenstern wird eine Blockliste, strukturgleich zu dem, was `build_slots()` heute liefert. Stufe 2 ist der bestehende Backtracking-Suchkern, an drei eng umrissenen Stellen erweitert (Überschneidung statt Tagesbelegung, Ruhezeit zwischen Arbeitstagen, tägliche Höchstarbeitszeit).
 
 **Tech Stack:** Python 3.13/3.14, Flask, SQLite lokal / Postgres in Produktion über die handgeschriebene Dialektschicht in `backend/db.py` (kein ORM). Frontend React 19 + Vite, Tests pytest und Vitest.
 
-**Spec:** [`docs/superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md`](../specs/2026-08-22-etappe-4-zuschnitt-design.md)
+**Spec:** [`docs/entwuerfe/2026-08-22-etappe-4-zuschnitt-design.md`](../specs/2026-08-22-etappe-4-zuschnitt-design.md)
 
 ## Globale Randbedingungen
 
@@ -19,7 +17,6 @@
 - **Die Tabellenliste in `test_migrations.py` ist absichtlich fest verdrahtet.** Nicht in eine Ableitung zurückverwandeln.
 - **Kommentarsprache folgt der Datei.** `app.py`, `db.py`, `scheduler.py`, `test_scheduler.py` englisch; `coverage_model.py`, `security.py`, `timeutil.py`, `migrations.py` und die neueren Testdateien deutsch. `block_planner.py` ist deutsch (Nachbar von `coverage_model.py`). Zwei Sprachen in *einer* Datei sind der Fehler.
 - **Commit-Nachrichten deutsch, ohne Umlaute** (Projektkonvention: „Uebergabe", „Oeffnungszeiten"). README englisch.
-- **Jeder Commit endet mit** `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 - **Vor jedem Commit die Frage:** *Würde dieser Test fehlschlagen, wenn ich das Feature lösche?* Vier wertlose Tests gab es im Projekt schon.
 - **Zwei gleichnamige Testfunktionen im selben Modul überschreiben sich in Python still.** `pytest --collect-only` zeigt es.
 - **Alle neuen Texte in beiden Sprachen**, `backend/i18n.py` und `frontend/src/i18n/translations.js`.
@@ -47,7 +44,7 @@ Die Reihenfolge der Aufgaben ist so gewählt, dass jede für sich lauffähig und
 
 ---
 
-## Task 1: Route für eigene Arbeitszeitfenster
+## Aufgabe 1: Route für eigene Arbeitszeitfenster
 
 Vorarbeit 1 aus Spec §10. Heute hängen die Fenster ausschließlich an `PUT /employees/<id>` mit `@hr_required` — ein Mitarbeiter kann seine eigenen Arbeitszeiten nicht einsehen. Etappe 4 macht die Fenster zur zentralen Steuergröße der Planung; das wird damit unhaltbar.
 
@@ -192,7 +189,7 @@ git commit -m "feat: eigene Arbeitszeitfenster ueber eine eigene Route lesbar"
 
 ---
 
-## Task 2: Zellenkollision bei gleichzeitigen Blöcken
+## Aufgabe 2: Zellenkollision bei gleichzeitigen Blöcken
 
 Vorarbeit 2 aus Spec §10. `CalendarView.jsx` gruppiert die Zuweisungen eines Tages nach `shift_type_id` und zeigt als Zeitangabe der Gruppe `slots[0].start_time`–`slots[0].end_time`. `ShiftCell.jsx` tut dasselbe mit `sample = sorted[0]`.
 
@@ -307,7 +304,7 @@ git commit -m "fix: gleichzeitige Bloecke bekommen jeder ihr eigenes Zeitpaar"
 
 ---
 
-## Task 3: Tägliche Höchstarbeitszeit im Datenmodell
+## Aufgabe 3: Tägliche Höchstarbeitszeit im Datenmodell
 
 **Files:**
 - Create: `backend/migrations/0008_max_daily_hours.py`
@@ -438,7 +435,7 @@ git commit -m "feat: taegliche Hoechstarbeitszeit je Mitarbeiter"
 
 ---
 
-## Task 4: Stufe 1 — Bedarf mit Vorlagen decken (Phasen A und B)
+## Aufgabe 4: Stufe 1 — Bedarf mit Vorlagen decken (Phasen A und B)
 
 **Files:**
 - Create: `backend/block_planner.py`
@@ -670,7 +667,7 @@ git commit -m "feat: Stufe 1 deckt Bedarfsbaender mit Vorlagen"
 
 ---
 
-## Task 5: Stufe 1 — Zuschnitt auf Arbeitszeitfenster (Phasen C und D)
+## Aufgabe 5: Stufe 1 — Zuschnitt auf Arbeitszeitfenster (Phasen C und D)
 
 **Files:**
 - Modify: `backend/block_planner.py`
@@ -797,7 +794,7 @@ git commit -m "feat: Stufe 1 schneidet Bloecke auf Arbeitszeitfenster zu"
 
 ---
 
-## Task 6: Stufe 1 an den Generator anschließen
+## Aufgabe 6: Stufe 1 an den Generator anschließen
 
 **Files:**
 - Modify: `backend/scheduler.py` — `build_slots()` (155–188), `_search()` (Aufruf 305), `generate_schedule()` (508)
@@ -898,7 +895,7 @@ git commit -m "feat: der Planer baut seine Bloecke aus den Bedarfsbaendern"
 
 ---
 
-## Task 7: Geteilter Dienst im Suchkern
+## Aufgabe 7: Geteilter Dienst im Suchkern
 
 **Files:**
 - Modify: `backend/scheduler.py` — `_search()`: `day_usage` (317), `day_shift` (325), `rest_period_ok()` (338–364), `eligible_candidates()` (366–392), der Zuweisungs- und Rücknahmepfad in `backtrack()`
@@ -1059,7 +1056,7 @@ git commit -m "feat: geteilter Dienst mit Tagesgrenze und Ruhezeit nach ArbZG"
 
 ---
 
-## Task 8: Warnungen auf dem Handkorrektur-Pfad
+## Aufgabe 8: Warnungen auf dem Handkorrektur-Pfad
 
 **Files:**
 - Modify: `backend/app.py` — `constraint_warnings()` (1763)
@@ -1067,7 +1064,7 @@ git commit -m "feat: geteilter Dienst mit Tagesgrenze und Ruhezeit nach ArbZG"
 - Test: `backend/test_api_assignment_times.py`
 
 **Interfaces:**
-- Consumes: die in Task 7 erweiterten Prüfungen aus `scheduler.py`. **Nicht duplizieren** — `swap_assignments()` und `replacement_suggestions()` bauen auf `constraint_warnings()` auf, alle Pfade hängen an einer Implementierung.
+- Consumes: die in Aufgabe 7 erweiterten Prüfungen aus `scheduler.py`. **Nicht duplizieren** — `swap_assignments()` und `replacement_suggestions()` bauen auf `constraint_warnings()` auf, alle Pfade hängen an einer Implementierung.
 - Produces: drei neue i18n-Schlüssel: `warn_overlapping_blocks`, `warn_daily_hours_exceeded`, `warn_rest_period_split`.
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
@@ -1110,7 +1107,7 @@ git commit -m "feat: Handkorrektur warnt vor Ueberschneidung und Tagesgrenze"
 
 ---
 
-## Task 9: Bedarfszahlen aus dem Schichtart-Editor nehmen
+## Aufgabe 9: Bedarfszahlen aus dem Schichtart-Editor nehmen
 
 **Files:**
 - Modify: `frontend/src/pages/ShiftTypes.jsx`
@@ -1153,7 +1150,7 @@ git commit -m "refactor: Bedarf wird nur noch im Bedarfseditor gepflegt"
 
 ---
 
-## Task 10: Benchmark-Gegenprobe
+## Aufgabe 10: Benchmark-Gegenprobe
 
 **Files:**
 - Modify: `backend/benchmark.py`
@@ -1183,7 +1180,7 @@ git commit -m "test: Benchmark vergleicht alten und neuen Bedarfspfad"
 
 ---
 
-## Task 11: Dokumentation
+## Aufgabe 11: Dokumentation
 
 **Files:**
 - Modify: `README.md` — `Project Structure` um `block_planner.py` ergänzen; die Beschreibung des Planers auf die zwei Stufen umstellen; einen Abschnitt zum Arbeitszeitrecht mit der ausdrücklichen Abgrenzung aus Spec §3
@@ -1208,19 +1205,19 @@ git commit -m "docs: Etappe 4 beschreiben und das Handoff nachziehen"
 
 | Spec-Abschnitt | Aufgabe |
 |---|---|
-| §3 ArbZG umgesetzt (geteilter Dienst, Tagesgrenze, Ruhezeit) | Task 3, 7 |
-| §3 ArbZG abgegrenzt (Hinweis in der Oberfläche) | Task 3 Schritt 7, Task 11 |
-| §5.2 Phase A/B | Task 4 |
-| §5.2 Phase C/D | Task 5 |
-| §5.4 Schranken | Task 5 Schritt 3 |
-| §5.5 `MIN_BLOCK_MINUTES` | Task 4 (Konstante), Task 6 (Parameter) |
-| §6 Suchkern, drei Eingriffe | Task 7 |
-| §7 Migration `0008` | Task 3 |
-| §8 API | Task 1, 3, 6, 8 |
-| §9 Frontend | Task 2, 3, 9 |
-| §10 Vorarbeiten | Task 1, 2 |
+| §3 ArbZG umgesetzt (geteilter Dienst, Tagesgrenze, Ruhezeit) | Aufgabe 3, 7 |
+| §3 ArbZG abgegrenzt (Hinweis in der Oberfläche) | Aufgabe 3 Schritt 7, Aufgabe 11 |
+| §5.2 Phase A/B | Aufgabe 4 |
+| §5.2 Phase C/D | Aufgabe 5 |
+| §5.4 Schranken | Aufgabe 5 Schritt 3 |
+| §5.5 `MIN_BLOCK_MINUTES` | Aufgabe 4 (Konstante), Aufgabe 6 (Parameter) |
+| §6 Suchkern, drei Eingriffe | Aufgabe 7 |
+| §7 Migration `0008` | Aufgabe 3 |
+| §8 API | Aufgabe 1, 3, 6, 8 |
+| §9 Frontend | Aufgabe 2, 3, 9 |
+| §10 Vorarbeiten | Aufgabe 1, 2 |
 | §11 Deckungslücken fallen ab | kein Task — bewusst, `coverage_gaps_for_month()` bleibt unverändert |
 | §12 Tests | in jeder Aufgabe |
-| §2 Landminen | Task 6 Schritt 5 und 6 |
+| §2 Landminen | Aufgabe 6 Schritt 5 und 6 |
 
-**Offener Punkt für den Bearbeiter:** Task 1 Schritt 3 enthält eine Verzweigung („prüfen, ob `replace_employee_constraints()` sich auf den Fenster-Zweig beschränken lässt"). Das ist kein Platzhalter, sondern eine bewusst offengelassene Refaktorierungsentscheidung, die erst am Code entschieden werden kann — beide Wege sind beschrieben.
+**Offener Punkt für den Bearbeiter:** Aufgabe 1 Schritt 3 enthält eine Verzweigung („prüfen, ob `replace_employee_constraints()` sich auf den Fenster-Zweig beschränken lässt"). Das ist kein Platzhalter, sondern eine bewusst offengelassene Refaktorierungsentscheidung, die erst am Code entschieden werden kann — beide Wege sind beschrieben.

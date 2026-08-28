@@ -1,7 +1,8 @@
 # Handoff — Stand und offene Punkte
 
-Kompakte Übergabe, damit eine neue Sitzung ohne Vorwissen weiterarbeiten kann.
-Stand: 22.08.2026.
+Der laufende Arbeitsstand: was fertig ist, was offen liegt, und die Fallstricke, die dieses
+Projekt stellt. Gedacht als das, was man nach zwei Wochen Pause zuerst liest.
+Stand: 28.08.2026.
 
 ## Das Projekt
 
@@ -22,7 +23,7 @@ Etappe 3 (Öffnungszeiten und Bedarf) pflegt und wertet `coverage_requirements` 
 der Generator sie kennt: `build_slots()` baut weiterhin ausschließlich aus
 `shift_requirements`. Die Umstellung ist Etappe 4.
 
-## Erster Schritt einer neuen Sitzung
+## Wo es gerade steht
 
 Es ist nichts halb fertig. **Etappe 5 ist vollständig**, und **Etappe 6 hat die zurückgestellten
 Befunde abgearbeitet** — bis auf die zwei Leistungsbefunde, die ihre eigene Notiz „erst angehen,
@@ -42,12 +43,21 @@ wäre geraten.
 Gewicht, weil es keine fehlende Funktion war, sondern eine Lücke in einer bereits gegebenen
 Zusicherung.
 
+**Etappe 16 (28.08.2026) war ein Durchgang als Nutzer, keine neue Funktion** — das Werkzeug einmal
+so benutzt, wie eine Personalabteilung und ein Mitarbeiter es benutzen. Ergebnis: ein
+Sicherheitsbefund (ein Zurücksetzen, das die Sitzung nicht beendete, die es beenden sollte), ein
+Datumsfehler, der in UTC unsichtbar ist, eine Reihe Stellen, an denen das Werkzeug das Richtige tut
+und nichts darüber sagt, und drei Stellen, an denen das README nicht mehr stimmte. Alles im eigenen
+Abschnitt weiter unten.
+
 **Das Nächste ist der Datenbankzyklus.** Der Nutzer hat am 23.08.2026 entschieden: die Instanz
 ablaufen lassen und **eine neue 30-Tage-Instanz** aufziehen. Damit ist es kein Termin, sondern ein
 wiederkehrender Vorgang; der erste Durchlauf fällt auf den 07.09.2026. Das Blatt dafür steht in
-[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md).
+[`docs/DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md). **Seit Etappe 16 hängt daran eine zweite
+Entscheidung:** `render.yaml` steht auf `region: frankfurt`, und Render legt eine Region beim
+Anlegen fest — der Zyklus ist der Moment, an dem das ohne zusätzliche Migration wirkt.
 
-**Die Folge, die eine neue Sitzung kennen muss:** eine Datenbank, die alle 30 Tage neu anfängt,
+**Die Folge, die man kennen muss:** eine Datenbank, die alle 30 Tage neu anfängt,
 hält keine Arbeitszeitnachweise. § 16 Abs. 2 ArbZG verlangt zwei Jahre, und das ganze Werkzeug ist
 darauf gebaut — die Aufbewahrungsfrist nimmt Zuweisungen aus, Löschen anonymisiert. **Ein Zyklus
 ohne Rückspielen macht das zunichte.** Das ist eine Feststellung, keine Empfehlung: es aufzulösen
@@ -73,7 +83,7 @@ steht in den Specs unter „Bewusst nicht dabei" — jeweils mit dem Grund. Die 
 | Benachrichtigungen beim Tauschantrag | Es gibt keinen Versandweg außer den Einladungsmails |
 | Anforderungen am Bedarfsband statt an der Schichtart | Kostete die Einheit, die HR benennt und wiedererkennt |
 
-**Eine Erfahrung aus drei Aufräum-Etappen, die eine neue Sitzung sich sparen kann:** von den rund
+**Eine Erfahrung aus drei Aufräum-Etappen, die man sich sparen kann:** von den rund
 dreißig Einträgen dieser Liste waren **vier bereits erledigt**, ohne dass es jemand notiert hatte.
 Erledigtes ist deshalb durchgestrichen statt gelöscht — wer später liest, sieht dann, dass es
 geprüft wurde. Und jede der drei Etappen begann mit einer Prüfung, nicht mit einer Behebung.
@@ -118,8 +128,7 @@ Produktionsreife-Fundament. 17 Commits, Suite von 23 auf 66 Tests.
 
 ## Etappe 1 — abgeschlossen und gemergt
 
-Plan: [`docs/superpowers/plans/2026-08-16-etappe-1-arbeitszeitfenster.md`](superpowers/plans/2026-08-16-etappe-1-arbeitszeitfenster.md)
-Ledger: `.superpowers/sdd/2026-08-16-etappe-1-arbeitszeitfenster/progress.md` (gitignoriert)
+Plan: [`docs/plaene/2026-08-16-etappe-1-arbeitszeitfenster.md`](plaene/2026-08-16-etappe-1-arbeitszeitfenster.md)
 
 Ziel erreicht: „Anna arbeitet Mo–Fr 08:00–14:00" ist ausdrückbar, wird vom Planer als harte
 Bedingung respektiert und ist über das Mitarbeiterformular pflegbar.
@@ -178,8 +187,7 @@ sie, und weil `swap_assignments()` und `replacement_suggestions()` ihrerseits
 
 ## Etappe 2 — abgeschlossen
 
-Plan: [`docs/superpowers/plans/2026-08-17-etappe-2-individuelle-zeiten.md`](superpowers/plans/2026-08-17-etappe-2-individuelle-zeiten.md)
-Ledger: `.superpowers/sdd/2026-08-17-etappe-2-individuelle-zeiten/progress.md` (gitignoriert)
+Plan: [`docs/plaene/2026-08-17-etappe-2-individuelle-zeiten.md`](plaene/2026-08-17-etappe-2-individuelle-zeiten.md)
 
 Ziel erreicht: eine Zuweisung kann eigene Start-/Endzeiten tragen, die vor dem Datums-Override
 der Schichtart und vor deren üblicher Zeit gelten (drei Stufen, siehe unten), und ein
@@ -218,15 +226,14 @@ eine echte Schichtart zu, und es gibt bewusst keine Schaltfläche im Frontend da
 Datenmodell geht dem Planer damit absichtlich voraus — Etappe 4 baut darauf auf, ohne Schema
 und Algorithmus gleichzeitig ändern zu müssen.
 
-**Nächster Schritt einer neuen Sitzung war:** Abschluss-Review für Etappe 2 einholen, dann PR
+**Nächster Schritt war:** Abschluss-Review für Etappe 2 einholen, dann PR
 nach `main`. Stattdessen wurde — mangels Merge von PR #13 — direkt auf einem gestapelten Branch
 mit Etappe 3 weitergearbeitet (siehe dortiger Abschnitt und die Branch-Situation oben); die
 Gesamtdurchsicht für Etappe 2 steht weiterhin aus.
 
 ## Etappe 3 — abgeschlossen
 
-Plan: [`docs/superpowers/plans/2026-08-18-etappe-3-oeffnungszeiten-bedarf.md`](superpowers/plans/2026-08-18-etappe-3-oeffnungszeiten-bedarf.md)
-Ledger: `.superpowers/sdd/2026-08-18-etappe-3-oeffnungszeiten-bedarf/progress.md` (gitignoriert)
+Plan: [`docs/plaene/2026-08-18-etappe-3-oeffnungszeiten-bedarf.md`](plaene/2026-08-18-etappe-3-oeffnungszeiten-bedarf.md)
 
 Ziel erreicht: Öffnungszeiten sind pro Wochentag definierbar (mit datumsgenauen Ausnahmen),
 und Bedarf ist als Bänder auf der Zeitachse ausdrückbar — absolute Besetzungsstärke, nicht
@@ -277,10 +284,10 @@ Konflikt entstünde erst über die Wochenwiederholung hinweg, und das zu erkenne
 Woche als 10080-Minuten-Ring zu behandeln — bewusst nicht gebaut, siehe README.
 
 Diese Etappe hat zwei neue Fallstricke hervorgebracht — die gleichnamigen Testfunktionen bei
-Task 4/5 und `coverage.py` als verbotener Modulname; beide jetzt in der Liste "Fallstricke
+Aufgabe 4/5 und `coverage.py` als verbotener Modulname; beide jetzt in der Liste "Fallstricke
 dieses Projekts" unten als Punkte 15 und 16.
 
-**Nächster Schritt einer neuen Sitzung:** Eine gemeinsame Abschluss-Review-Runde für Etappe 2
+**Nächster Schritt:** Eine gemeinsame Abschluss-Review-Runde für Etappe 2
 UND Etappe 3 einholen (für Etappe 2 steht sie komplett aus, siehe oben; für Etappe 3 sind nur
 die acht Einzel-Task-Reviews gelaufen, keine Gesamtdurchsicht), dann beide PRs (#13 zuerst,
 danach #14) nach `main` mergen — in dieser Reihenfolge, weil #14 auf #13 aufbaut. Danach
@@ -288,8 +295,8 @@ Etappe 4 (Zuschnitt im Planer) auf einem neuen Branch ab `main` beginnen.
 
 ## Etappe 4 — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md`](superpowers/specs/2026-08-22-etappe-4-zuschnitt-design.md)
-Plan: [`docs/superpowers/plans/2026-08-22-etappe-4-zuschnitt.md`](superpowers/plans/2026-08-22-etappe-4-zuschnitt.md)
+Spec: [`docs/entwuerfe/2026-08-22-etappe-4-zuschnitt-design.md`](entwuerfe/2026-08-22-etappe-4-zuschnitt-design.md)
+Plan: [`docs/plaene/2026-08-22-etappe-4-zuschnitt.md`](plaene/2026-08-22-etappe-4-zuschnitt.md)
 PR #16, vierzehn Commits, gemergt am 22.08. 17:28 als `088fd7d`, Deploy live
 
 Ziel erreicht: der Planer baut aus `coverage_requirements` statt aus `shift_requirements`,
@@ -423,8 +430,8 @@ dem Planer mitgegeben werden — das ist der strukturelle Kern dieser Teilaufgab
 
 ## Etappe 5a — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md`](superpowers/specs/2026-08-22-etappe-5a-ruhepausen-design.md)
-Plan: [`docs/superpowers/plans/2026-08-22-etappe-5a-ruhepausen.md`](superpowers/plans/2026-08-22-etappe-5a-ruhepausen.md)
+Spec: [`docs/entwuerfe/2026-08-22-etappe-5a-ruhepausen-design.md`](entwuerfe/2026-08-22-etappe-5a-ruhepausen-design.md)
+Plan: [`docs/plaene/2026-08-22-etappe-5a-ruhepausen.md`](plaene/2026-08-22-etappe-5a-ruhepausen.md)
 PR #17, acht Commits, gemergt am 22.08. 18:29 als `c74032a`, Deploy live
 
 | Task | Stand | Commit |
@@ -482,8 +489,8 @@ Rundlauf von `0009` gegen Postgres läuft.
 
 ## Etappe 5b — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md`](superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md)
-Plan: [`docs/superpowers/plans/2026-08-22-etappe-5b-sonntage.md`](superpowers/plans/2026-08-22-etappe-5b-sonntage.md)
+Spec: [`docs/entwuerfe/2026-08-22-etappe-5b-sonntage-design.md`](entwuerfe/2026-08-22-etappe-5b-sonntage-design.md)
+Plan: [`docs/plaene/2026-08-22-etappe-5b-sonntage.md`](plaene/2026-08-22-etappe-5b-sonntage.md)
 PR #18, acht Commits, gemergt am 22.08. 21:22 als `a6e06e2`, Deploy live
 
 | Task | Stand | Commit |
@@ -536,7 +543,7 @@ keine Oberfläche berührt, die Warnungen kommen fertig übersetzt aus dem Backe
 
 ## Etappe 5e — die alte Bedarfsquelle entfernt
 
-Spec: [`docs/superpowers/specs/2026-08-22-etappe-5e-bedarfsquelle-design.md`](superpowers/specs/2026-08-22-etappe-5e-bedarfsquelle-design.md)
+Spec: [`docs/entwuerfe/2026-08-22-etappe-5e-bedarfsquelle-design.md`](entwuerfe/2026-08-22-etappe-5e-bedarfsquelle-design.md)
 
 Aufräumen, kein Nutzenversprechen an HR. `shift_requirements` wurde seit Etappe 4 geschrieben
 und gespeichert, aber von nichts mehr gelesen, was den Plan beeinflusst; die übergeordnete Spec
@@ -570,7 +577,7 @@ Drei Dinge, die beim Umsetzen auffielen:
 
 ## Etappe 5c — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-22-etappe-5c-durchschnitt-design.md`](superpowers/specs/2026-08-22-etappe-5c-durchschnitt-design.md)
+Spec: [`docs/entwuerfe/2026-08-22-etappe-5c-durchschnitt-design.md`](entwuerfe/2026-08-22-etappe-5c-durchschnitt-design.md)
 
 Die letzte offene Regel aus Etappe 4. `GET /schedules/<year>/<month>` liefert neben
 `coverage_gaps` jetzt `average_hours` — die Mitarbeiter, deren Arbeitszeit über 24 Wochen den
@@ -593,7 +600,7 @@ Kein Schemaeingriff.
 
 ## Etappe 5d — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-22-etappe-5d-feiertage-design.md`](superpowers/specs/2026-08-22-etappe-5d-feiertage-design.md)
+Spec: [`docs/entwuerfe/2026-08-22-etappe-5d-feiertage-design.md`](entwuerfe/2026-08-22-etappe-5d-feiertage-design.md)
 
 `backend/holidays.py`: neun bundesweite und zehn regionale Feiertage, Ostern über den anonymen
 gregorianischen Algorithmus, Buß- und Bettag als Mittwoch vor dem 23.11. Keine Bibliothek —
@@ -629,7 +636,7 @@ Bayern" allein wäre auch grün, wenn der Feiertag überall stünde.
 
 ## Etappe 5f — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-5f-veroeffentlichen-design.md`](superpowers/specs/2026-08-23-etappe-5f-veroeffentlichen-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-5f-veroeffentlichen-design.md`](entwuerfe/2026-08-23-etappe-5f-veroeffentlichen-design.md)
 
 `schedules.status` gab es seit dem ersten Commit und wurde von nichts gelesen — jeder Plan war
 sichtbar, sobald er erzeugt war. Jetzt ist er `draft` oder `published`, dazu `published_at`
@@ -658,7 +665,7 @@ gehört in eine eigene Aufgabe. Die Logik ist backendseitig durch zehn Tests ged
 
 ## Etappe 5g — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-5g-audit-log-design.md`](superpowers/specs/2026-08-23-etappe-5g-audit-log-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-5g-audit-log-design.md`](entwuerfe/2026-08-23-etappe-5g-audit-log-design.md)
 
 Ein `after_request`-Haken protokolliert jede verändernde Anfrage: Zeitpunkt, Benutzer, Methode,
 Pfad, Status. Eine Stelle, lückenlos per Konstruktion — und **ohne Anfrageinhalte**, weil die
@@ -687,7 +694,7 @@ Knopfdruck leert, ist kein Protokoll.
 
 ## Etappe 5h — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-5h-exporte-design.md`](superpowers/specs/2026-08-23-etappe-5h-exporte-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-5h-exporte-design.md`](entwuerfe/2026-08-23-etappe-5h-exporte-design.md)
 
 **Die Abhängigkeitsfrage aus dem Handoff hat sich aufgelöst, nicht gestellt.** iCal ist ein
 Textformat und braucht rund vierzig Zeilen, CSV steht in der Standardbibliothek. PDF und Excel
@@ -715,12 +722,12 @@ verschiebt die Termine — steht im README.
 
 ## Etappe 5i — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-5i-dsgvo-design.md`](superpowers/specs/2026-08-23-etappe-5i-dsgvo-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-5i-dsgvo-design.md`](entwuerfe/2026-08-23-etappe-5i-dsgvo-design.md)
 
 Zwei Festlegungen kamen vom Nutzer: **sechs Monate** Aufbewahrung, und beim Löschen wird
 **anonymisiert**. Beide prägen alles Weitere.
 
-**Der Konflikt, der zuerst zu klären war — und der nächsten Sitzung sofort auffallen wird, wenn
+**Der Konflikt, der zuerst zu klären war — und der beim nächsten Mal sofort auffällt, wenn
 sie ihn nicht kennt:** sechs Monate lassen sich *nicht* auf den Dienstplan anwenden.
 [§ 16 Abs. 2 ArbZG](https://www.gesetze-im-internet.de/arbzg/__16.html) verlangt, Nachweise über
 die acht Stunden hinausgehende Arbeitszeit **mindestens zwei Jahre** aufzubewahren. Einen Plan
@@ -770,7 +777,7 @@ Betreibers).
 
 ## Etappe 6a — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-6a-eingaben-design.md`](superpowers/specs/2026-08-23-etappe-6a-eingaben-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-6a-eingaben-design.md`](entwuerfe/2026-08-23-etappe-6a-eingaben-design.md)
 
 Die erste Etappe aus den zurückgestellten Befunden. Genommen wurde die Teilmenge mit einer
 gemeinsamen Eigenschaft: **eine Eingabe passiert die Prüfung und tut danach nichts.** Kein
@@ -799,7 +806,7 @@ Parser, nicht an den Aufrufstellen, die ihm gerade eingefallen sind.**
 
 ## Etappe 6b — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-6b-anmeldeweg-design.md`](superpowers/specs/2026-08-23-etappe-6b-anmeldeweg-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-6b-anmeldeweg-design.md`](entwuerfe/2026-08-23-etappe-6b-anmeldeweg-design.md)
 
 Beide Befunde am Anmeldeweg beschrieben denselben Mangel aus verschiedenen Richtungen: **die
 Grenze von zehn Versuchen je Viertelstunde ließ sich umgehen.**
@@ -823,14 +830,14 @@ mit 429 antwortet, ohne zu committen.
 
 **Auf SQLite bewusst kein Lock** — dieselbe Abwägung, die der Migrations-Runner notiert.
 
-**Das Wichtigste für eine neue Sitzung:** die beiden Race-Tests laufen **nur** im
+**Das Wichtigste dazu:** die beiden Race-Tests laufen **nur** im
 `backend-postgres`-Job. Ein grüner Job allein beweist nichts; er könnte übersprungen haben.
 Beim Merge von PR #27 wurde im Joblog nachgesehen, dass beide wirklich `PASSED` meldeten
 (474 passed, 0 skipped). Wer die Drosselung anfasst, macht das wieder.
 
 ## Etappe 6c — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-6c-reste-design.md`](superpowers/specs/2026-08-23-etappe-6c-reste-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-6c-reste-design.md`](entwuerfe/2026-08-23-etappe-6c-reste-design.md)
 
 Die letzten beiden Bündel: Eindeutigkeit auf `employee_availability` und die Testschulden.
 
@@ -854,7 +861,7 @@ Zweige dahinter gehört zum Umbau, nicht zur Umgebung.**
 
 ## Etappe 7 — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-7-monatsgrenze-design.md`](superpowers/specs/2026-08-23-etappe-7-monatsgrenze-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-7-monatsgrenze-design.md`](entwuerfe/2026-08-23-etappe-7-monatsgrenze-design.md)
 
 **Ein Monat ist ein Abrechnungszeitraum, keine Einheit der Ruhe.** Die elf Stunden aus § 5 Abs. 1
 ArbZG und das Wochenstundenziel liefen quer über die Monatsgrenze und hörten an ihr auf: beide
@@ -880,9 +887,9 @@ den Benchmark unverändert lässt.
 
 ## Etappe 8 — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-8-schichttausch-design.md`](superpowers/specs/2026-08-23-etappe-8-schichttausch-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-8-schichttausch-design.md`](entwuerfe/2026-08-23-etappe-8-schichttausch-design.md)
 
-**Die tragende Entscheidung, und die einzige, die eine neue Sitzung wirklich kennen muss:** ein von
+**Die tragende Entscheidung, und die einzige, die man wirklich kennen muss:** ein von
 Mitarbeitern beantragter Tausch wird **abgelehnt**, wenn er zwingendes Arbeitszeitrecht bräche
 (Ruhezeit, Tagesarbeitszeit, Pause, siebter Tag, Sonntagsbudget). Der Direkttausch der
 Personalabteilung **warnt weiterhin nur**.
@@ -913,7 +920,7 @@ dort steht*. Und `break_minutes` gehört zum Platz wie die Zeiten — was mitrei
 
 ## Etappe 9 — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-9-arbzg-rest-design.md`](superpowers/specs/2026-08-23-etappe-9-arbzg-rest-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-9-arbzg-rest-design.md`](entwuerfe/2026-08-23-etappe-9-arbzg-rest-design.md)
 
 **§ 4 Satz 3 war nicht prüfbar, weil das Modell fehlte.** Das Tool kannte nur `break_minutes` —
 eine Dauer ohne Uhrzeit. Eine halbe Stunde Pause ab Schichtbeginn erfüllt Satz 1, verstößt gegen
@@ -936,7 +943,7 @@ ganz mit"; **„ganz" heißt jedes Feld, nicht das zuletzt hinzugefügte.**
 
 ## Etappe 10 — abgeschlossen, gemergt, deployt
 
-Spec: [`docs/superpowers/specs/2026-08-23-etappe-10-qualifikationen-design.md`](superpowers/specs/2026-08-23-etappe-10-qualifikationen-design.md)
+Spec: [`docs/entwuerfe/2026-08-23-etappe-10-qualifikationen-design.md`](entwuerfe/2026-08-23-etappe-10-qualifikationen-design.md)
 
 Der letzte Punkt der Roadmap. **Die interessante Hälfte ist nicht die Zuordnung, sondern
 `valid_until`**: ein Ersthelferschein läuft nach zwei Jahren ab (DGUV Vorschrift 1 § 26), und ein
@@ -1066,31 +1073,83 @@ Umstellungsblattes hat damit **eine** Abfrage statt zweier indirekter.
 Am lebenden Dienst nachgesehen: `{"database":"ok","migrations":{"applied":17,"latest":
 "0017_qualifications"},"status":"ok"}`.
 
+## Etappe 16 — der Durchgang als Nutzer
+
+Keine neue Funktion, sondern ein anderer Blick: das Werkzeug einmal so durchgehen, wie eine
+Personalabteilung und wie ein Mitarbeiter es benutzen — nicht wie jemand, der es geschrieben hat.
+Ein voller September mit vier Leuten, ein Mitarbeiterkonto von der Einladung bis zum eigenen
+Kalender, und an jeder Stelle die Frage: was steht hier, und was müsste stehen?
+
+**Der eine Sicherheitsbefund.** „Passwort zurücksetzen" leerte `users.hash` — und das Bearer-Token,
+das mit dem alten Passwort erzeugt worden war, galt weiter, bis zu dreißig Tage. Der Griff, den man
+tut, wenn ein Telefon abhanden gekommen ist, tat nachweislich nichts: die alte Sitzung las weiter
+den Dienstplan. Am laufenden Dienst nachgestellt, bevor irgendetwas geändert wurde.
+`users.token_epoch` (Migration `0018`) schließt es ohne Sitzungstabelle: der Zähler wandert ins
+signierte Token, wird bei jeder Anfrage gegen die Spalte verglichen, und ein Zurücksetzen erhöht
+ihn. Dasselbe für das Cookie — eine Regel, die nur einen von zwei Anmeldewegen deckt, ist die
+Lücke, um die es geht. Ein Token ohne die Angabe zählt als 0, damit das Aufspielen niemanden
+abmeldet; erst das nächste Zurücksetzen wirkt.
+
+**Der eine echte Fehler.** Die Grenzen des Datumsfeldes in der Selbstmeldung wurden mit
+`toISOString()` auf lokaler Mitternacht gebaut. In Berlin heißt das: `min` steht auf dem letzten
+Tag des Vormonats, den der Server ablehnt, und `max` auf dem vorletzten des laufenden — **eine
+Krankmeldung für den letzten Tag des Monats war über das Formular nicht möglich.** In UTC
+unsichtbar, deshalb setzt der Regressionstest `TZ=Europe/Berlin` selbst, statt dem Runner zu
+trauen. `pages/Employees.jsx` hatte das richtige Muster samt Begründung längst danebenstehen.
+
+**Der Rest ist eine Sorte:** das Werkzeug tut das Richtige und sagt nichts darüber.
+
+- Inaktiv gesetzt und trotzdem im Plan — jetzt eine Warnung mit der Anzahl offener Schichten.
+- Die gesetzliche Pause wird berechnet, erzwungen, abgezogen — und war nirgends zu sehen. Jetzt im
+  Kalender, in der Tabelle, in der CSV und im iCal.
+- Die CSV-Kopfzeile war deutsch, während die Wochentage daneben übersetzt waren.
+- Der iCal-Kalender hieß „Dienst" statt nach seinem Monat.
+- Die Aufbewahrungsfrist lief nur beim Start oder auf Knopfdruck — und der Keepalive-Auftrag hält
+  den Dienst wochenlang wach. Jetzt einmal täglich, ausgelöst von der ersten Anfrage.
+- Ohne Wochenstunden gilt keine Wochengrenze; im Probelauf kamen 46,5-Stunden-Wochen heraus. Jetzt
+  ein Hinweis im Einrichtungsstand.
+- Ein Komponentenfehler nahm die ganze Seite (weiße Seite, keine Meldung) — jetzt eine Fehlergrenze
+  um die Routen.
+- Fehlermeldungen verschwanden nach vier Sekunden, ohne Schließen-Schaltfläche und ohne dass ein
+  Screenreader sie je vorgelesen hätte.
+- `/qualifications` war für jedes angemeldete Konto lesbar, obwohl keine Mitarbeiteransicht danach
+  fragt.
+
+**Und drei Stellen, an denen die Dokumentation nicht mehr stimmte:** das README beschrieb
+Kopfzahlen je Wochentag auf der Schichtart (seit `0010` weg), einen Gunicorn-Aufruf mit zwei
+Workern (`render.yaml` startet einen) und ein Repository, in dem dieses Projekt neben einem
+Ticket-System liegt (tut es nicht).
+
+**Betrieb.** `render.yaml` setzt jetzt `region: frankfurt` für Dienst und Datenbank und deklariert
+die `SMTP_*`-Variablen mit `sync: false`, damit Render beim Deploy danach fragt; die App warnt
+zusätzlich beim Start, wenn sie in Produktion ohne `SMTP_HOST` läuft. Die Region wirkt nur auf neu
+angelegte Ressourcen — **der nächste Datenbankzyklus ist der Moment**, und im Umstellungsblatt
+steht das jetzt bei Schritt 1. `health-check.yml` fragt stündlich `/health` ab und **lässt den
+Auftrag fehlschlagen**, wenn der Dienst sich nicht gesund meldet; ein fehlgeschlagener Actions-Lauf
+schickt GitHub von sich aus als Mail. Der Keepalive-Auftrag pingt weiter alle vierzehn Minuten und
+schluckt Fehler weiter — aber `/health` statt der Wurzel.
+
 ## Arbeitsweise
 
-Subagent-driven development (`superpowers:subagent-driven-development`): pro Aufgabe ein
-frischer Implementer, danach ein unabhängiger Reviewer, der dem Bericht des Implementers
-ausdrücklich **nicht** glauben darf. Bei Befunden Fix-Runden mit eng gefasstem Re-Review.
-Fortschritt im Ledger, nicht nur im Kopf — er überlebt eine Kontextverdichtung.
+Eine Etappe pro Zweig, und jede Etappe in derselben Reihenfolge: erst ein Entwurf unter
+`docs/entwuerfe/`, der die Entscheidungen samt Begründung festhält, dann ein Umsetzungsplan
+unter `docs/plaene/` mit Aufgaben in Checkbox-Form, dann die Umsetzung Aufgabe für Aufgabe.
 
-Skripte: `scripts/sdd-workspace`, `scripts/task-brief`, `scripts/review-package` unter
-`C:\Users\muham\.claude\plugins\cache\claude-plugins-official\superpowers\6.2.0\skills\subagent-driven-development\`
+**Nach der Umsetzung ein eigener Durchgang mit Abstand.** Nicht die eigene Zusammenfassung
+prüfen, sondern den Diff — und dabei ausdrücklich nicht glauben, was der Umsetzungsschritt über
+sich selbst behauptet. Die Befunde dieser Durchgänge stehen unten bei den Etappen; die
+nützlichsten sind durchweg die, bei denen die Umsetzung „fertig" gemeldet hatte.
 
-Modellwahl: Sonnet für Implementierung und Review, Opus für besonders riskante Reviews
-(Migrations-Runner, Auth-Pfad, Gesamt-Review).
+**Vor dem Merge selbst prüfen.** Alle vier CI-Jobs grün, besonders `backend-postgres`, der die
+lokal übersprungenen Tests fährt. Dann in einem Zug durch: pushen, PR, CI abwarten, mergen,
+Branch löschen, Deploy prüfen, Handoff nachziehen. Ein Merge löst einen Deploy aus, der
+ausstehende Migrationen auf die Produktionsdatenbank anwendet — das gehört auf die Liste, nicht
+in die Hoffnung.
 
-**Merges brauchen keine Rückfrage.** Der Nutzer hat das am 22.08.2026 ausdrücklich gesagt,
-nachdem dreimal vor einem fertigen, CI-grünen PR angehalten worden war. Eine fertige Etappe
-läuft damit in einem Zug durch: pushen, PR, CI abwarten, mergen, Branch löschen, Deploy prüfen,
-Handoff nachziehen. Vorher selbst prüfen bleibt Pflicht — alle vier CI-Jobs grün, besonders
-`backend-postgres`, der die lokal übersprungenen Tests fährt. Und ein Merge löst einen Deploy
-aus, der ausstehende Migrationen auf die Produktionsdatenbank anwendet; das gehört erwähnt,
-nicht erfragt.
-
-Nicht übertragen auf das, was unter „Offen — liegt beim Nutzer" steht: Zugangsdaten,
+Was hier nicht entschieden wird, steht unter „Offen — liegt beim Nutzer": Zugangsdaten,
 Passwortrotation, Entscheidungen über die Datenbankinstanz.
 
-## Fallstricke dieses Projekts — das Wichtigste für eine neue Sitzung
+## Fallstricke dieses Projekts — das Wichtigste in Kürze
 
 1. **Kein literales `?` in SQL, auch nicht in Kommentaren.** `_PostgresCursor` ersetzt es
    bedingungslos durch `%s`. Ein `?` in einem Migrations-Kommentar hätte beinahe die
@@ -1133,8 +1192,8 @@ Passwortrotation, Entscheidungen über die Datenbankinstanz.
     mitschicken. Das Frontend tut das; ein künftiger Aufrufer muss es auch.
 15. **Zwei gleichnamige Testfunktionen im selben Modul überschreiben sich in Python still.**
     Der erste verschwindet lautlos aus der Suite, ohne dass irgendetwas fehlschlägt. In
-    Etappe 3 gaben zwei Task-Briefs (4 und 5) denselben Testnamen vor; der Implementer von
-    Task 5 hat es bemerkt und beide eindeutig umbenannt. `pytest --collect-only` zeigt es.
+    Etappe 3 legten zwei Aufgaben (4 und 5) denselben Testnamen an; aufgefallen ist es erst bei
+    der zweiten, beide sind seitdem eindeutig benannt. `pytest --collect-only` zeigt es.
 16. **Jede Tabelle, in die eingefügt wird, braucht eine `id`-Spalte.** `_PostgresCursor.execute()`
     hängt an jedes `INSERT` ohne eigenes `RETURNING` ein `RETURNING id` an, damit `lastrowid`
     auch dort funktioniert. Eine Tabelle ohne `id` ist auf Postgres nicht beschreibbar — auf
@@ -1234,14 +1293,14 @@ ist der verbliebene Rest.
 wiederkehrender Vorgang.
 
 **Das Blatt dafür ist [`DATENBANKWECHSEL.md`](DATENBANKWECHSEL.md)** — dort steht der Durchlauf,
-nicht hier. Was eine neue Sitzung wissen muss:
+nicht hier. Was man wissen muss:
 
 - **Die Reihenfolge trägt.** Neue Instanz anlegen, *solange die alte läuft*; Schreiben beenden,
   dann sichern; **zurückspielen, bevor** `DATABASE_URL` umgebogen wird. Wer erst deployt und
   danach zurückspielt, läuft eine Weile gegen eine leere Datenbank — und `pg_restore --clean`
   wischt weg, was in der Zwischenzeit dort angelegt wurde.
 - **§ 16 Abs. 2 ArbZG steht dem Zyklus entgegen**, wenn nicht jeder Durchlauf gesichert und
-  zurückgespielt wird. Siehe oben unter „Erster Schritt einer neuen Sitzung".
+  zurückgespielt wird. Siehe oben unter „Wo es gerade steht".
 - **`pg_dump`/`pg_restore` sind nicht im PATH** — das stand weiter unten schon, und trotzdem
   riefen `DATENBANKWECHSEL.md` und das README sie bloß beim Namen auf. Eine Tatsache zu
   notieren und sie in derselben Anleitung zu missachten ist das eigentliche Versäumnis; der
@@ -1249,6 +1308,13 @@ nicht hier. Was eine neue Sitzung wissen muss:
 - Auf einer leeren neuen Datenbank laufen alle Migrationen beim Modulimport von selbst durch.
   `0007_derive_coverage` findet dort nichts zum Ableiten und tut nichts — der Wächter in der
   Migration, kein Fehler.
+- **Die Region wird hier entschieden und nur hier.** `render.yaml` steht seit Etappe 16 auf
+  `region: frankfurt` für Dienst und Datenbank, aber Render legt die Region beim Anlegen fest und
+  ändert sie nicht nachträglich. Läuft die bisherige Instanz in einer US-Region, ist dieser
+  Durchlauf die Gelegenheit. Verarbeitet werden Namen, Arbeitszeiten und Krankmeldungen; letztere
+  sind Gesundheitsdaten nach Art. 9 DSGVO, und eine US-Region macht daraus eine
+  Drittlandübermittlung nach Kapitel V. Der Auftragsverarbeitungsvertrag nach Art. 28 mit Render
+  wird davon unabhängig gebraucht.
 
 ### Das Backup — vorhanden und geprüft
 
@@ -1330,7 +1396,7 @@ Aus den Reviews, bewusst nicht behoben, für ein späteres Aufräumen:
 - `fetchSchedule()` schluckt jeden GET-Fehler zu `null`
 - `MIGRATIONS_DIR.iterdir()` wirft, wenn das Verzeichnis fehlt
 - ~~Zwei Validierungstests in `test_api_availability.py` prüfen nur den Status~~ — **erledigt in 6c**
-- ~~Frontend hat keinerlei Testinfrastruktur~~ — **erledigt in Etappe 3** (Task 8, Vitest +
+- ~~Frontend hat keinerlei Testinfrastruktur~~ — **erledigt in Etappe 3** (Aufgabe 8, Vitest +
   Testing Library, siehe dort)
 
 Neu aus dem Abschluss-Review von Etappe 1:
@@ -1440,7 +1506,7 @@ Neu aus Etappe 4:
 
 ## Roadmap
 
-Design: [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md)
+Design: [`docs/entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md`](entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md)
 
 - ~~**Etappe 4** — Zuschnitt im Planer~~ — **umgesetzt**, siehe oben. Der Planer baut aus
   `coverage_requirements`, schneidet auf die Arbeitszeitfenster zu und kann den geteilten

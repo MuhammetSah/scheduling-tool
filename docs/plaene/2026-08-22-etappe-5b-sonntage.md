@@ -1,21 +1,19 @@
 # Etappe 5b — Sechstageregel und freie Sonntage: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development` (empfohlen) oder `superpowers:executing-plans`. Die Schritte nutzen Checkbox-Syntax (`- [ ]`) zur Nachverfolgung.
-
 **Ziel:** Höchstens sechs Tage in Folge (§ 11 Abs. 3 über die Implikation) und mindestens 15 beschäftigungsfreie Sonntage im Kalenderjahr (§ 11 Abs. 1), beide hart im Generator und als Warnung auf dem Handkorrektur-Pfad.
 
 **Architektur:** Zwei Prüfungen in `eligible_candidates()`, die auf den in Etappe 4 eingeführten Tagesstrukturen aufsetzen. Neu ist, dass der Generator erstmals Vorgeschichte bekommt: `app.py` lädt zwei Zahlen je Mitarbeiter und gibt sie im Mitarbeiter-Dict mit.
 
 **Tech Stack:** Python 3.13/3.14, Flask, SQLite lokal / Postgres in Produktion. Frontend unverändert.
 
-**Spec:** [`docs/superpowers/specs/2026-08-22-etappe-5b-sonntage-design.md`](../specs/2026-08-22-etappe-5b-sonntage-design.md)
+**Spec:** [`docs/entwuerfe/2026-08-22-etappe-5b-sonntage-design.md`](../specs/2026-08-22-etappe-5b-sonntage-design.md)
 
 ## Globale Randbedingungen
 
 - **Kein literales `?` in SQL, auch nicht in Kommentaren.**
 - **Die 23 Tests in `backend/test_scheduler.py` bleiben unverändert.**
 - **Kommentarsprache folgt der Datei.** `app.py` und `scheduler.py` englisch, die neueren Testdateien deutsch.
-- **Commit-Nachrichten deutsch, ohne Umlaute.** Jeder Commit endet mit `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+- **Commit-Nachrichten deutsch, ohne Umlaute.**
 - **Vor jedem Commit:** *Würde dieser Test fehlschlagen, wenn ich das Feature lösche?*
 - **Kein Schemaeingriff.** Wenn diese Etappe eine Migration braucht, stimmt etwas nicht.
 - **Testlauf:** `cd backend && ./venv/Scripts/python.exe -m pytest -q -W error::DeprecationWarning`.
@@ -31,11 +29,11 @@
 | `backend/app.py` | Vorgeschichte laden, zwei neue Warnungen | geändert |
 | `backend/i18n.py` | Zwei neue Warnungstexte | geändert |
 
-**Reihenfolge:** Task 1 und 2 arbeiten am Suchkern und sind gegen von Hand gebaute Mitarbeiter-Dicts prüfbar. Task 3 verdrahtet sie mit echten Daten. Task 4 zieht den Handkorrektur-Pfad nach.
+**Reihenfolge:** Aufgabe 1 und 2 arbeiten am Suchkern und sind gegen von Hand gebaute Mitarbeiter-Dicts prüfbar. Aufgabe 3 verdrahtet sie mit echten Daten. Aufgabe 4 zieht den Handkorrektur-Pfad nach.
 
 ---
 
-## Task 1: Sechstageregel im Suchkern
+## Aufgabe 1: Sechstageregel im Suchkern
 
 **Files:**
 - Modify: `backend/scheduler.py` — `_search()`, neben `day_is_free()` und `rest_period_ok()`
@@ -210,7 +208,7 @@ git commit -m "feat: hoechstens sechs Tage in Folge im Suchkern"
 
 ---
 
-## Task 2: Sonntagsbudget im Suchkern
+## Aufgabe 2: Sonntagsbudget im Suchkern
 
 **Files:**
 - Modify: `backend/scheduler.py`
@@ -319,7 +317,7 @@ Die Prüfung in `eligible_candidates()`:
                     continue
 ```
 
-**Die Zählung über `day_hours` allein reicht nicht** — Blöcke ohne Zeiten stehen in `day_untimed`. Beim Umsetzen beide Mengen vereinigen, oder besser: eine kleine Hilfsfunktion `worked_dates(eid)`, die beide Schlüsselmengen zusammenführt, und die auch `works_on()` aus Task 1 benutzen kann.
+**Die Zählung über `day_hours` allein reicht nicht** — Blöcke ohne Zeiten stehen in `day_untimed`. Beim Umsetzen beide Mengen vereinigen, oder besser: eine kleine Hilfsfunktion `worked_dates(eid)`, die beide Schlüsselmengen zusammenführt, und die auch `works_on()` aus Aufgabe 1 benutzen kann.
 
 - [ ] **Schritt 3: Tests laufen lassen und committen**
 
@@ -331,7 +329,7 @@ git commit -m "feat: mindestens 15 beschaeftigungsfreie Sonntage im Jahr"
 
 ---
 
-## Task 3: Die Vorgeschichte laden
+## Aufgabe 3: Die Vorgeschichte laden
 
 **Files:**
 - Modify: `backend/app.py` — `load_employees_for_scheduling()` (~1228), Aufruf in `generate_schedule_route()`
@@ -371,7 +369,7 @@ def test_zweimal_erzeugen_ergibt_zweimal_denselben_plan(hr_client):
 - [ ] **Schritt 2: Fehlschlag prüfen**
 
 Run: `cd backend && ./venv/Scripts/python.exe -m pytest test_api_schedules.py -q`
-Erwartet: der neue Test ist **grün**, solange Task 3 nicht umgesetzt ist (ohne Vorgeschichte kann sie nichts falsch machen). Er wird erst nach Schritt 3 aussagekräftig — deshalb **nach** dem Verdrahten noch einmal laufen lassen und, falls er dann bricht, die Abgrenzung reparieren statt den Test.
+Erwartet: der neue Test ist **grün**, solange Aufgabe 3 nicht umgesetzt ist (ohne Vorgeschichte kann sie nichts falsch machen). Er wird erst nach Schritt 3 aussagekräftig — deshalb **nach** dem Verdrahten noch einmal laufen lassen und, falls er dann bricht, die Abgrenzung reparieren statt den Test.
 
 - [ ] **Schritt 3: Die Vorgeschichte laden**
 
@@ -404,7 +402,7 @@ git commit -m "feat: der Generator bekommt Vorgeschichte ueber den Monatsrand"
 
 ---
 
-## Task 4: Warnungen auf dem Handkorrektur-Pfad
+## Aufgabe 4: Warnungen auf dem Handkorrektur-Pfad
 
 **Files:**
 - Modify: `backend/app.py` — `constraint_warnings()`
@@ -427,7 +425,7 @@ Je eine Warnung mit Gegenprobe. Der Handkorrektur-Pfad rechnet gegen gespeichert
 
 ---
 
-## Task 5: Dokumentation
+## Aufgabe 5: Dokumentation
 
 **Files:**
 - Modify: `README.md` — der Abschnitt zum Arbeitszeitrecht um beide Regeln; die Liste des Nichtgeprüften kürzen; `Project Structure` um die neue Testdatei; Testzahl im Status
@@ -447,13 +445,13 @@ Je eine Warnung mit Gegenprobe. Der Handkorrektur-Pfad rechnet gegen gespeichert
 
 | Spec-Abschnitt | Aufgabe |
 |---|---|
-| §2 Sechstageregel | Task 1 |
-| §5 Vorgeschichte, §5.1 die Falle | Task 3 |
-| §5.2 ein Sonntag zählt einmal | Task 2, dritter Test |
-| §6.1 Kette in beide Richtungen | Task 1, dritter Test |
-| §6.2 Sonntagsbudget, negatives Budget | Task 2 |
-| §7 Handkorrektur | Task 4 |
+| §2 Sechstageregel | Aufgabe 1 |
+| §5 Vorgeschichte, §5.1 die Falle | Aufgabe 3 |
+| §5.2 ein Sonntag zählt einmal | Aufgabe 2, dritter Test |
+| §6.1 Kette in beide Richtungen | Aufgabe 1, dritter Test |
+| §6.2 Sonntagsbudget, negatives Budget | Aufgabe 2 |
+| §7 Handkorrektur | Aufgabe 4 |
 | §9 Tests | in jeder Aufgabe |
-| §3, §4, §8 — was nicht gebaut wird | Task 5 (Dokumentation) |
+| §3, §4, §8 — was nicht gebaut wird | Aufgabe 5 (Dokumentation) |
 
-**Offen gelassen:** Task 2 Schritt 2 skizziert die Zählung der Sonntage über `day_hours` und merkt selbst an, dass `day_untimed` fehlt. Das ist Absicht — die saubere Form ist eine gemeinsame Hilfsfunktion mit `works_on()` aus Task 1, und wie die genau aussieht, entscheidet sich am Code der vorigen Aufgabe.
+**Offen gelassen:** Aufgabe 2 Schritt 2 skizziert die Zählung der Sonntage über `day_hours` und merkt selbst an, dass `day_untimed` fehlt. Das ist Absicht — die saubere Form ist eine gemeinsame Hilfsfunktion mit `works_on()` aus Aufgabe 1, und wie die genau aussieht, entscheidet sich am Code der vorigen Aufgabe.

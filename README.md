@@ -4,7 +4,7 @@
 
 An automated shift-scheduling tool for HR teams, built with React (frontend) and Flask (backend). HR defines employees, their availability constraints, and shift types with staffing requirements; the tool generates a full monthly schedule via backtracking search and lets HR fine-tune the result by hand — including swapping shifts between employees.
 
-This is a standalone project living alongside the Support Ticket System in this repository, and the fourth project in a portfolio (after the portfolio website, the ticket system, and a paused API-integration project).
+It lives in its own repository and is the fourth project in a portfolio, after the portfolio website, a support-ticket system and a paused API-integration project.
 
 ## Grundidee
 
@@ -36,10 +36,10 @@ The tool is usable in **German or English** – see [Language](#language) below.
 - **Authentication and roles** – session-based login with hashed passwords (Werkzeug). Every route that touches staff data requires a session, and every route that *changes* anything requires the HR role. Registration is open only until the first account exists — a fresh install sends you straight to setup; afterwards only HR can create accounts, so nobody can sign themselves up and read the roster
 - **Nobody sets anyone else's password** – whoever creates an account never chooses its password. Creating one emails that person a one-time link (valid 7 days, single use) on which they pick a password nobody else has seen; until they do, the account cannot be signed into. This applies to employee *and* HR accounts alike — an employee's invitation goes to the address on their roster entry, an HR account carries its own. The only exception is the very first account on a fresh install, which sets its own password because there is nobody yet to invite it. Re-inviting issues a fresh link and revokes the current password, which doubles as the "forgotten password" path without anyone else learning the new one
 - **Two views of the plan** – a **calendar** laid out like a wall planner (one column per weekday, one row per week, each day listing its shifts and everyone working them), and a **table** for editing. HR gets both; employees get both read-only
-- **Several people per shift** – each shift type carries a required headcount *per weekday*, so a weekday can need 2 on the early shift and 3 on the late one while a Sunday needs 1 of each. The scheduler fills each of those places separately and the calendar lists everyone assigned
+- **Several people per shift** – how many people a weekday needs comes from the **coverage bands** (e.g. "Mon 08:00–12:00 → 2, 12:00–20:30 → 3"), not from the shift type. The planner turns those bands into blocks, fills each place separately, and the calendar lists everyone assigned. Head counts used to hang on the shift type; they moved to coverage bands in stage 3 and the planner stopped reading them in stage 4 (the table is gone since migration `0010`)
 - **Day-level changes** – beyond the shift type's usual hours (e.g. 08:00–16:30), HR can change what a shift runs on one single date without touching any other day, and can add or remove a place on a given day. Changed hours are marked with `*` in both views and can be reset to the shift type's default in one click
-- **Employee management** – name, optional email, optional monthly shift cap, an optional **weekly target-hours** figure for part-time staff, a **minimum rest period** between shifts (defaults to 11h, individually adjustable), an **availability mode** that is either unrestricted (`anytime`, the default — every employee's behaviour before this feature and after migration) or time-windowed (`windows` — available only inside specific weekday time slots, e.g. Mon–Fri 08:00–14:00; see [Availability windows](#availability-windows) below), recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave HR enters directly), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift")
-- **Shift type management** – name, start/end time, color, and required headcount per weekday (weekday and weekend staffing needs are often different)
+- **Employee management** – name, optional email, optional monthly shift cap, an optional **weekly target-hours** figure for part-time staff, a **minimum rest period** between shifts (defaults to 11h, individually adjustable), an **availability mode** that is either unrestricted (`anytime`, the default — every employee's behaviour before this feature and after migration) or time-windowed (`windows` — available only inside specific weekday time slots, e.g. Mon–Fri 08:00–14:00; see [Availability windows](#availability-windows) below), recurring weekday unavailability (e.g. no Wednesdays), one-off unavailable dates (vacation/sick leave HR enters directly), and an optional allow-list restricting an employee to specific shift types (e.g. "only early shift"). Marking somebody **inactive** takes them out of future generation but deliberately leaves their existing assignments alone — silently emptying a published plan would rewrite a roster behind everyone's back and shorten the working-time record § 16 Abs. 2 ArbZG requires. What was missing was saying so: HR marked a leaver inactive, got a success message, and the person stayed on twenty shifts with nothing anywhere pointing at it. Saving now answers with how many shifts from today onwards they still hold, as a warning that stays on screen until dismissed
+- **Shift type management** – a *template* and nothing more: name, start/end time, colour, and the certificates the shift requires. How many people are needed is a property of the day, not of the template, and lives in the coverage bands
 - **Opening hours and coverage bands** – HR can set when the business is open, per weekday, with one-off date exceptions (a holiday, a special opening), and — independently — how many people should be present across the day in absolute headcount bands (e.g. "08:00–12:00 → 2, 12:00–17:00 → 3"), validated against those opening hours. See [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) below for what these do today, and — just as important — what they deliberately don't do yet
 - **Automatic monthly schedule generation** via backtracking search, respecting weekly-hours caps and rest periods as hard constraints alongside the existing ones
 - **Manual editing** – reassign any shift slot to a different employee (or leave it unfilled), optionally giving that one slot its own start/end times on top of whatever the date and shift type would otherwise resolve to (see [Individual assignment times](#individual-assignment-times) below), with non-blocking warnings if the change violates that employee's usual constraints — including a weekly-hours overrun, too little rest before/after the shift, or (for a `windows`-mode employee) a shift outside their availability windows for that day — all judged against the hours the slot actually runs, so HR can always override, but never by accident
@@ -77,6 +77,8 @@ An empty database and an empty schedule look the same: "no plan has been generat
 **Only what genuinely prevents a plan.** Three things qualify: no active employee (every block would be a gap), no shift type (the route refuses outright), no coverage band (since block planning, that is the only thing the planner builds from). A list that also enumerated everything configurable would be a to-do list that never empties — and a list that never empties gets ignored.
 
 **`notes` is the other kind:** worth knowing, prevents nothing. Without a federal state the tool knows no public holiday and stays silent about them; the plan still comes out. So it sits beside the list, not in it, and *ready* stays *ready*.
+
+**The second note came out of planning a real month.** Weekly hours are optional on an employee, and an employee without them gets no weekly ceiling at all — the daily maximum and the rest period still apply, but nothing caps the week. Four employees created with the form's defaults and a full September produced weeks of 46.5 hours, and nothing anywhere said so. That is not a rule violation and must not hold a plan up, so it is a note: *N of M active employees have no weekly hours on file.* Exactly the shape the section above argues for — the tool telling you what it is about to do, rather than you finding out from the plan.
 
 **Deliberately in neither:** the § 10 question. "Not exempt" is not a missing answer — it is exactly what § 9 Abs. 1 says. Listing it as a defect would declare the normal case a failing.
 
@@ -132,6 +134,12 @@ Three details that decide whether an export works at all:
 - **The CSV uses semicolons and a BOM.** Both for Excel in German-speaking locales: without the semicolon everything lands in one column, without the BOM umlauts turn to mojibake. Inelegant and correct — an export that will not open in its target program is not an export.
 - **The download goes through an authenticated `fetch`, not a plain link.** The frontend and this API are on different domains, so a click on an `<a href>` would carry neither the bearer token nor, under Safari's ITP, the session cookie — and the file would come back as a `401`, or worse as an HTML error page saved under a `.ics` name.
 
+**The break belongs in both files, and used to be in neither.** Both exports showed only a break somebody had entered by hand, on the reasoning that the statutory one would be the same number on every row. It is not: § 4 makes it a function of the span, so the same day carries a 30-minute break on an 8½-hour block and none on the four-hour one beside it. In the CSV that left a blank break column next to a working-time column that had already subtracted it — 08:00, 16:30, blank, 8.0, with half an hour unaccounted for in a document somebody reconciles against payroll. Both now carry the break that actually applies; a hand-entered one still wins over it.
+
+**The CSV header follows the request language.** It was a German constant in `exports.py` while the weekday names beside it were already translated, so an English-speaking HR user got `Datum;Wochentag` with `Tuesday` underneath. A bilingual tool that ships its only printout in one language is monolingual at the point where it leaves the building.
+
+**The calendar is named after the month it holds** (`Schichtplan September 2026`). It used to reuse the same fallback label a block without a template gets, so a subscribed roster showed up on the phone as, simply, "Dienst". Two purposes, two strings.
+
 **No time zone in the iCal file.** The tool works in local time throughout and stores no zone; inventing one would be a claim the data does not support. A calendar in a different zone will therefore shift the events, which is stated here rather than left to be discovered.
 
 ## Data protection
@@ -146,7 +154,15 @@ What the period does cover is everything personal *around* that record: sick and
 
 **The one that gets missed:** an absence is stored in `employee_absences` *and* denormalised into the assignment it freed (`absence_type`, `absent_employee_id`). Clearing only the table would leave the health note sitting in the roster. Both are purged, and a test pins it.
 
-There is **no scheduler** on the hosting plan in use, so the purge runs at application start — in practice on every deploy — and on demand through `POST /retention/purge`, which reports what it removed rather than a bare "done". An instance left running for months will not clean up on its own until someone presses it. That is said plainly rather than papered over with a fake automatism.
+There is **no scheduler** on the hosting plan in use, and the purge used to run only at application start — in practice on every deploy — plus on demand through `POST /retention/purge`.
+
+**That was not enough, and the keepalive job is why.** A GitHub Actions workflow pings the API every fourteen minutes so the free plan never spins down, which means the process can stay up for weeks and a deploy can be just as far away. In between, nothing expired. A retention period that only runs when somebody remembers a button is not a retention period, and what it was failing to remove are sick notes — health data under Art. 9 GDPR.
+
+The purge now runs **once a day, triggered by the first request of that day** (`run_daily_retention_purge()`). No scheduler is needed for that and none is pretended: the date of the last run lives in a row of the `settings` table, and whoever sets it to today first — decided by a single conditional `UPDATE`, so two processes cannot both win — does the work. After that the process short-circuits on a module-level date and the check costs no query at all. A failure is logged and swallowed: a clean-up that breaks somebody's roster edit would be worse than one that runs a day late, the same call the audit log makes.
+
+That row is deliberately not one of `KNOWN_SETTINGS` and is filtered out of `GET /settings` — it is the tool's bookkeeping about itself, not a setting anybody chooses.
+
+`POST /retention/purge` stays, because "run it now and tell me what went" is a different question from "does it run at all" — and it is the one somebody asks right after changing the period.
 
 ### Deleting a person means anonymising the row
 
@@ -179,6 +195,20 @@ Both now happen inside a per-username Postgres advisory lock (`security.attempt_
 **Deliberately asymmetric: no lock on SQLite.** SQLite appears in this project only locally and only as a single process, so the race is not reachable there, and a lock without a reachable race is untested code on the path every developer uses daily. The same reasoning the migration runner records.
 
 The race is not asserted by argument but reproduced: two threads, each with its own connection and therefore its own Postgres session, with half a second between reading and writing so the race happens every time rather than occasionally. A flaky concurrency test is worse than none.
+
+## Revoking a sign-in
+
+There are two credentials, not one. The session cookie is the ordinary one; alongside it sits a signed, stateless bearer token, because Safari/WebKit's Intelligent Tracking Prevention drops a cross-site cookie however correctly it is configured, and the frontend and this API live on two different domains. A header is not a cookie, so ITP has no opinion about it.
+
+**Stateless meant unrevocable, and that was a hole rather than a tradeoff.** "Passwort zurücksetzen" on the Konten page empties `users.hash`, so the old password stops working immediately — and until now the token minted with that password kept authenticating every request for the rest of its thirty days. The one situation the button exists for is the one it did nothing about: a phone gone missing, somebody who has left. HR pressed it, saw a success message, and the old session went on reading the roster.
+
+`users.token_epoch` (migration `0018`) closes it without a session table. The counter is signed into the token and compared against the column on every request; incrementing the column invalidates every token that account has out, in one statement. It is incremented in exactly the two places where the password stops being the one its holder knows: redeeming an invitation, and re-inviting.
+
+**The cookie carries the same counter.** A rule that held on one of two sign-in paths and not the other would be the gap this change exists to close.
+
+**A token issued before the migration reads as epoch 0,** which is the column's default, so deploying this signs nobody out. Only the next reset does — which is the point. A security fix that arrives as an outage teaches people to postpone security fixes.
+
+**What this is still not.** Signing out is per device: it clears the cookie and discards this browser's copy of the token, and does not touch the account's other sessions. Ending *every* session is what the reset does, deliberately — "sign out here" and "lock everybody out" are different requests, and only one of them belongs on a logout button.
 
 ## The guided swap
 
@@ -226,6 +256,10 @@ And days change more than the law. If HR reassigns one of the two shifts by hand
 
 The one deliberate, narrow exception to "employee accounts are read-only": a signed-in employee can report their own sick or vacation days, but only for the current calendar month (checked against the server's own clock, never anything the browser sends). HR can do the same for any employee, any date, from the schedule table.
 
+**The date picker's bounds were wrong east of Greenwich, which is to say here.** They were built with `toISOString()` on a local-midnight `Date`, and that converts to UTC: in Berlin the first of the month came out as the last day of the *previous* one, and the last day of the month fell outside the range entirely. So the picker offered a date the server refuses and refused a date the server accepts — **reporting sick on the last day of the month was simply not possible through the form.** Invisible on a machine running in UTC, which is why the regression test pins `TZ=Europe/Berlin` rather than trusting the runner: in UTC the broken version passes. `pages/Employees.jsx` already had the right pattern (`toLocaleDateString('sv-SE')`) and a comment explaining why; this is what it looks like when that lesson does not travel.
+
+**The panel says why it is gone.** It only appears while the current month is on screen, because the server restricts self-service to that month anyway. Browsing forward used to make it vanish without a word, which reads as a page fault rather than a rule; in its place there is now a line saying what the limit is, and a button back to the current month.
+
 Reporting an absence for a day the employee already holds a shift on:
 
 - **frees the shift** – it goes back to being an ordinary unfilled slot (counted in `unfilled_count`, shown in the distribution panel, reassignable from the usual dropdown)
@@ -234,6 +268,14 @@ Reporting an absence for a day the employee already holds a shift on:
 - **feeds back into the scheduler** – a later regeneration of that month won't reassign the same person straight back onto a day they reported as unavailable
 
 HR gets a **"Vorschläge"/"Suggestions"** action on any freed slot: it re-runs the same eligibility checks used for manual reassignment (weekday/date availability, availability windows for `windows`-mode employees, allowed shift types, not already working that day, monthly cap, weekly-hours cap, rest period) against every active employee and ranks the eligible ones by current workload, so the least-loaded suitable person is offered first. Picking one is a normal reassignment — nothing special has to be undone if it turns out to be wrong.
+
+## When the interface itself goes wrong
+
+Two failure modes that belong to the frontend rather than to any feature.
+
+**A component that throws used to take the whole page.** React unmounts the entire tree on an uncaught render error, and with nothing catching it the result is a blank white page: no message, no navigation, no hint that reloading would help. For an employee checking tomorrow's shift on a phone that is indistinguishable from the tool being gone. `ErrorBoundary.jsx` now wraps the routes — inside the navigation, so the header and language toggle survive — and offers a message, a retry, and a way back to the schedule. It is keyed on the path, so navigating away clears it instead of leaving one page's error standing over another. Its text is hard-coded in both languages rather than translated, because it has to render even when the thing that broke *is* the language context.
+
+**Error messages disappeared before they could be read.** Every flash message was cleared after four seconds, including "this swap would fall below the rest period". Look away at the wrong moment and all that is left is a button that appeared to do nothing, with no way to find out why — the swap page had already grown its own exception for exactly this, which was the finding showing up in the wrong place. Successes still fade (they only confirm what you asked for); errors and warnings now stay until dismissed, and there is a close button, which there previously was not — `onClose` existed and only the timer ever called it. They also carry `role="alert"` / `role="status"`: a `div` appearing mid-tree is an event to the eye and nothing at all to a screen reader.
 
 ## Language
 
@@ -356,6 +398,8 @@ Note **9:30, not 9:00**. At a 9:30 span a 30-minute break still leaves exactly n
 **§ 4 Satz 3** — "no more than six hours of work at a stretch without a break" — needs the break's *position*, not just its length. That is modelled since a later stage; see [Where the break falls](#where-the-break-falls-and-whether-sunday-work-is-allowed-at-all). Still not modelled is the law's allowance to split a break into segments of at least 15 minutes each; what is stored is one total and one position.
 
 The one place § 4 can be broken at all is the manual-correction path: left alone the break is the legal minimum and every plan is compliant by construction, so only someone entering a shorter break by hand gets a warning — and it stays a warning.
+
+**And it is now visible.** The break was computed, enforced in the generator, and subtracted from every hours figure — and shown nowhere unless somebody had overridden it. The reasoning was that the statutory break would be the same number on every row, so printing it would be noise; that reasoning is wrong, because § 4 makes it a function of the span and a single day routinely carries a 30-minute block beside a 0-minute one. The effect was that the person whose break it is could not see it anywhere: the calendar is the only place an employee's own duty appears, and `08:00–16:30` with no word about a break reads as eight and a half hours of work. The calendar now writes *incl. 30 min break* under the block's hours, the schedule table shows the break that applies on each slot, and a hand-entered one is set in bold so it still reads as a decision somebody made rather than as the rule.
 
 ### Where the break falls, and whether Sunday work is allowed at all
 
@@ -574,8 +618,13 @@ schichtplan-tool/
 │   ├── test_api_einrichtung.py  # What is still missing, and what is only worth knowing
 │   ├── test_scheduler_grenze.py # The recursion ceiling, named rather than crashed into
 │   ├── test_api_gesundheit.py   # A health check that actually checks
+│   ├── test_api_token_widerruf.py  # That a password reset really ends the old session
+│   ├── test_api_betriebsblick.py   # What the tool now says instead of staying quiet
 ├── docs/
-│   └── DATENBANKWECHSEL.md     # The 30-day database cycle, one pass at a time
+│   ├── DATENBANKWECHSEL.md     # The 30-day database cycle, one pass at a time
+│   ├── HANDOFF.md              # Running state, decisions and this project's traps
+│   ├── entwuerfe/              # Per-stage design notes: the decision and its reasoning
+│   └── plaene/                 # Per-stage implementation plans, task by task
 │   ├── test_scheduler_rest_days.py     # Six-day rule and the yearly Sunday budget
 │   ├── test_api_eingaben.py    # Dates, weekdays and hours that used to slip through
 │   ├── test_api_security.py    # Throttling, the invited-account branch, security headers
@@ -585,6 +634,10 @@ schichtplan-tool/
 └── frontend/
     └── src/
         ├── App.jsx           # Routing, navigation, auth guarding & language toggle
+        ├── ErrorBoundary.jsx # Catches a render error so one component cannot blank the page
+        ├── ErrorBoundary.test.jsx
+        ├── Flash.jsx         # The one message line: errors stay, successes fade
+        ├── Flash.test.jsx
         ├── api.js            # Fetch helper (sends the X-Lang header)
         ├── i18n/
         │   ├── translations.js     # The full de/en dictionary + weekday/month labels
@@ -618,7 +671,8 @@ schichtplan-tool/
             ├── AverageHours.jsx    # Renders average_hours: who breaks § 3's average
             ├── AverageHours.test.jsx
             ├── Distribution.jsx    # Shifts-per-employee balance panel
-            └── AbsenceManager.jsx  # Employee self-service: report/cancel sick & vacation
+            ├── AbsenceManager.jsx  # Employee self-service: report/cancel sick & vacation
+            └── AbsenceManager.test.jsx
 ```
 
 ## Local Setup
@@ -694,17 +748,19 @@ The app runs on SQLite locally and **Postgres in production**, chosen automatica
 
 `frontend/vercel.json` already routes client-side paths back to `index.html`, so deep links like `/set-password?token=…` resolve instead of 404ing.
 
-**Mail.** Add `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD` and `MAIL_FROM` to the backend service to send invitations for real. Without them the app still works — invitations are written to the service log instead of being sent. `backend/.env.example` lists every variable.
+**Mail.** `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` and `MAIL_FROM` are declared in `render.yaml` with `sync: false`, so Render asks for them at deploy time; `SMTP_PORT` and `SMTP_USE_TLS` carry defaults. Without `SMTP_HOST` the app still starts, but invitations are only written to the service log instead of being sent — which in practice means **no employee account can be set up and nobody who forgets their password can get back in.** That used to be discoverable only by watching somebody wait for an email that never came; the app now logs a warning at startup when it is running in production without `SMTP_HOST`. `backend/.env.example` lists every variable.
 
 **First run.** Opening the deployed frontend lands on "Erstes Konto einrichten"; that first account is HR and sets its own password. Everyone after that is invited by email.
 
 ## Operations
 
-**Gunicorn.** `render.yaml`'s `startCommand` runs `gunicorn app:app --bind 0.0.0.0:$PORT --preload --workers 2 --threads 4 --timeout 60 --access-logfile -`, instead of Gunicorn's single-worker, single-thread default. The scheduler can run for up to `DEFAULT_TIME_BUDGET_SECONDS` (8s, `backend/scheduler.py`) computing a plan; a single synchronous worker would leave the API unresponsive to everyone else for that whole time. Two worker processes mean a second request can make real progress in parallel past Python's GIL while one worker is busy scheduling; the four threads per worker keep the rest of the API — which is mostly waiting on the database, not the CPU — responsive underneath. `--timeout 60` gives the scheduler room without leaving a genuinely stuck worker running forever. Each request opens its own database connection (`get_db()` in `backend/app.py`), so this setup caps concurrent connections at 8 (2 workers × 4 threads) — small by any commonly-known Postgres standard, though the free plan's exact connection ceiling hasn't been checked against these numbers.
+**Gunicorn.** `render.yaml`'s `startCommand` runs `gunicorn app:app --bind 0.0.0.0:$PORT --preload --threads 4 --timeout 60 --access-logfile -`, instead of Gunicorn's single-worker, single-thread default. The scheduler can run for up to `DEFAULT_TIME_BUDGET_SECONDS` (8s, `backend/scheduler.py`) computing a plan; a single synchronous worker would leave the API unresponsive to everyone else for that whole time. The four threads keep the rest of the API — which is mostly waiting on the database, not the CPU — responsive underneath while one of them schedules. `--timeout 60` gives the scheduler room without leaving a genuinely stuck worker running forever.
+
+**One worker, not two,** and the reasoning is written out in `render.yaml` itself: threads share the process's memory, a second worker doubles it, and the free plan has 512 MB. The argument that originally favoured two workers — parallel progress past the GIL — was outweighed once the migration race it was paired with got closed in code by the Postgres advisory lock in `backend/migrations.py` rather than only by `--preload`. Each request opens its own database connection (`get_db()` in `backend/app.py`), so this caps concurrent connections at 4 (1 worker × 4 threads); the free plan's exact connection ceiling hasn't been checked against that number. Anyone raising the worker count should measure memory first.
 
 **Why `--preload` is there, and why removing it would be dangerous.** `init_db()` (`backend/db.py`) runs at import time and applies any pending migrations. Without `--preload`, Gunicorn forks first and each worker imports `app.py` — and so runs `init_db()` — independently, with only a 0–100ms stagger between forks. On any deploy that ships a schema change, two workers can genuinely call `migrations.apply_pending()` at close to the same instant. The failure mode is not "one worker retries and moves on": a worker that raises during boot triggers Gunicorn's `WORKER_BOOT_ERROR`, which makes the arbiter's `reap_workers()` raise `HaltServer` — and the arbiter then shuts down **the entire service**, including the sibling worker that had already applied the migration successfully. That's a full outage on any deploy carrying a schema change, and this project has several planned. `--preload` closes it: it makes Gunicorn import the application (and therefore call `init_db()`) exactly once, in the master process, before forking any worker, so the race cannot occur. This is safe for this app specifically because `init_db()` closes its database connection before returning (see `finally: connection.close()` in `backend/migrations.py`'s `apply_pending()`), and nothing else at module level in `backend/app.py` holds a socket, file, or thread open that a fork would inherit badly — `logging.basicConfig()` only attaches a handler for stderr, which every forked child gets from Gunicorn regardless. Do not remove `--preload` as apparent clutter; it is the fix for the failure mode above, not a leftover.
 
-**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)), `0016_break_position` (adds `shift_assignments.break_start`, nullable), `0017_qualifications` (the certificate catalogue and its two link tables — see [Certificates a shift requires](#certificates-a-shift-requires)). To manage by hand:
+**Migrations.** The schema updates automatically on startup (`init_db()` delegates to `migrations.apply_pending()`). Applied as of this stage: `0001_baseline`, `0002_indexes`, `0003_login_attempts`, `0004_employee_availability`, `0005_assignment_times`, `0006_coverage` (creates `business_hours`, `business_hours_exceptions`, `coverage_requirements`), `0007_derive_coverage` (a one-time data migration that seeds `coverage_requirements` from the existing `shift_requirements` demand — see [Opening hours and coverage requirements](#opening-hours-and-coverage-requirements) above), `0008_max_daily_hours` (adds `employees.max_daily_hours`, `NOT NULL DEFAULT 10` — see [Split shifts and working-time law](#split-shifts-and-working-time-law)), `0009_break_minutes` (adds `shift_assignments.break_minutes`, nullable — see [Breaks and net working time](#breaks-and-net-working-time)), `0010_drop_shift_requirements` (drops the old per-weekday demand table; its contents were carried into `coverage_requirements` by `0007`), `0011_settings` (a key/value table for business-wide settings; the first key is `holiday_region` — see [Public holidays](#public-holidays)), `0012_publish_state` (adds `schedules.published_at` and turns every existing plan into a published one — see [Draft and published](#draft-and-published)), `0013_audit_log` (the change log — see [The change log](#the-change-log)), `0014_anonymisation` (adds `employees.anonymized_at` — see [Data protection](#data-protection)), `0015_swap_requests` (the guided swap — see [The guided swap](#the-guided-swap)), `0016_break_position` (adds `shift_assignments.break_start`, nullable), `0017_qualifications` (the certificate catalogue and its two link tables — see [Certificates a shift requires](#certificates-a-shift-requires)), `0018_token_epoch` (adds `users.token_epoch`, `NOT NULL DEFAULT 0` — see [Revoking a sign-in](#revoking-a-sign-in)). To manage by hand:
 
 ```bash
 cd backend
@@ -743,11 +799,19 @@ Restore:
 
 `APP_TIMEZONE` (default `Europe/Berlin`) is not required — it decides which calendar month counts as "current" when an employee reports their own sick/vacation day; set it only if the deployment serves a different timezone.
 
+**Hosting region.** `render.yaml` puts both the web service and the database in `frankfurt`. What is processed here is names, working hours and sick notes, and sick notes are health data under Art. 9 GDPR; Render's own default is a US region, which would make every one of those a third-country transfer needing a Chapter V justification. An EU region takes the question out of the documentation instead of answering it. **The line only affects newly created resources** — Render fixes a region at creation and does not move it — so for anything already running, the next database cycle is the moment it takes effect. The Art. 28 processing agreement with Render is a separate obligation and is needed either way; so is the Art. 30 record of processing activities. Neither is something code does.
+
+**Monitoring.** `.github/workflows/keepalive.yml` pings the API every fourteen minutes so the free plan does not spin down, and swallows failures on purpose — at that cadence a blip during a deploy is not worth a message. `.github/workflows/health-check.yml` is the one that *is*: hourly, against `/health`, and it **fails the job** when the service does not report healthy. A failed Actions run mails the repository owner, which is monitoring without a second service, an account or a bill.
+
+Both used to be one workflow that pinged `/` and ended in `|| true`. That combination meant the service counted as reachable as long as Python was running, and that the job could not fail even when it should have — it never reported anything, because it had no way to. If the database went down on a Saturday you found out on Monday from somebody who could not see their plan. `/health` actually reads from the database and answers `503` when it cannot (`backend/app.py`); `curl -f` turns that into a failure. Two attempts ninety seconds apart, because Render wakes the free plan on demand and the first call can land in the cold start.
+
+Neither replaces a proper uptime service, and hourly is a deliberate ceiling: a monitor that fires on every deploy gets ignored after the third mail, and an ignored monitor is worse than none. `/health` already returns what such a service would need.
+
 **Troubleshooting.** Every unexpected error response carries a `request_id`; the same identifier is written to the server log next to the exception (`app.logger.exception` in `backend/app.py`). Search the Render service's log output for that id to find the underlying stack trace — the exact path through Render's current dashboard UI hasn't been verified here.
 
 ## API Endpoints
 
-Everything except `/`, `/health`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one) — `/health` is public because a health check behind a login is one nobody can use, and it reports the schema version rather than anything about the workforce. Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes and reading `/employees/<id>/availability`, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
+Everything except `/`, `/health`, `/register`, `/login` and `/me` needs a signed-in session (`401` without one) — `/health` is public because a health check behind a login is one nobody can use, and it reports the schema version rather than anything about the workforce. Everything that changes data also needs the HR role (`403` for an employee account) — **except** the three `/employees/<id>/absences` routes and reading `/employees/<id>/availability`, which an employee account may also call, but only for its own `<id>` and (for POST/DELETE) only for a date in the current calendar month; HR is unrestricted on both. A handful of *reads* are HR-only too, for the same reason: `/employees`, `/setup-status`, `/audit-log`, `/accounts`, `/business-hours`, `/coverage-requirements`, `/settings` and — since it turned out no employee screen ever asked for it — `/qualifications`. What an employee account can read is its own plan, its own record, the shift types those refer to, and the colleague names a swap request needs. Every route's error/success messages are returned in whichever language the `X-Lang` request header names (German if omitted or unrecognized — see [Language](#language)).
 
 | Method | Route                          | Description                                              |
 |--------|----------------------------------|------------------------------------------------------------|
@@ -785,7 +849,7 @@ Everything except `/`, `/health`, `/register`, `/login` and `/me` needs a signed
 | GET    | `/schedules/<year>/<month>/export.csv` | The month as CSV, drafts included (HR)                          |
 | GET    | `/employees/<id>/data-export`     | Everything stored about one person, as JSON (self or HR)             |
 | GET    | `/colleagues`                     | Names and ids of the active workforce, for anyone signed in          |
-| GET/POST | `/qualifications`               | The certificate catalogue (read: signed in; write: HR)               |
+| GET/POST | `/qualifications`               | The certificate catalogue (HR)                                       |
 | DELETE | `/qualifications/<id>`            | Remove a certificate everywhere it appears (HR)                      |
 | PUT    | `/employees/<id>/qualifications`  | What this person holds, expiry dates included (HR)                   |
 | PUT    | `/shift-types/<id>/qualifications`| What this shift requires (HR)                                        |
@@ -812,10 +876,14 @@ Everything except `/`, `/health`, `/register`, `/login` and `/me` needs a signed
 
 ## Status
 
-Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (579 tests at the time of writing — `cd backend && pytest` prints the current number; 35 further tests are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, covering the coverage-band and opening-hours editors and the schedule cells' handling of blocks that run at different times on the same day), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+Built and tested locally through v1.4: an automated backend test suite that grows with the feature set (602 tests at the time of writing — `cd backend && pytest` prints the current number; a further 49 are Postgres-only and skip without a Postgres instance), a frontend component test suite (Vitest + Testing Library, 68 tests, covering the coverage-band and opening-hours editors, the schedule cells' handling of blocks that run at different times on the same day, the error boundary, the message line and the self-service date bounds), a benchmark against four alternative algorithms plus an exact solver, scripted end-to-end API walkthroughs (registration/invitation, weekly-hours and rest-period warnings across a month boundary, the full self-service-absence → replacement-suggestion → reassignment flow, and both languages), and a full browser walkthrough — including in English — of create → generate → reassign → swap → check balance. Frontend deployed on Vercel: [scheduling-tool-six.vercel.app](https://scheduling-tool-six.vercel.app/).
+
+**The most recent pass was a different kind of test:** working through the tool as HR and as an employee would, rather than as its author. It produced one security finding (a password reset that did not end the session it was meant to end), one date bug invisible in UTC and reproducible in Berlin, and a run of cases where the tool did the right thing and simply never said so — a person marked inactive who stays on next week's published shifts, a statutory break subtracted from every hour figure and shown nowhere, a retention period that only ran when somebody pressed a button. Those are written up where each belongs above; what they have in common is that no unit test would have found any of them.
 
 ## About This Project
 
 This is the "signature project" of a portfolio built while transitioning into web development — the most involved piece technically, centered on the scheduling algorithm rather than CRUD alone.
 
 The part worth reading is `backend/scheduler.py` together with `backend/benchmark.py`: the benchmark is what turned the planned v1.2 heuristic from "obviously an improvement" into a measured tradeoff, and changed the design from a fixed ordering to an adaptive one.
+
+The second thing worth reading is `docs/`: `entwuerfe/` holds the design note written before each stage — the decision and, more usefully, the reasoning and the alternatives rejected — and `plaene/` the implementation plan it turned into. `HANDOFF.md` carries the running state, the traps this codebase sets, and the findings from each review round, including the ones where the implementation had already reported itself finished.

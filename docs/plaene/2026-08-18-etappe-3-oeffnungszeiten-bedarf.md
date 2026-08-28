@@ -1,20 +1,18 @@
 # Etappe 3 — Öffnungszeiten und Bedarf auf der Zeitachse: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development` (empfohlen) oder `superpowers:executing-plans`, um diesen Plan Aufgabe für Aufgabe abzuarbeiten. Die Schritte nutzen Checkbox-Syntax (`- [ ]`).
-
 **Ziel:** Der Betrieb bekommt einen Rahmen und eine Bedarfskurve. Öffnungszeiten sagen, wann überhaupt gearbeitet wird; `coverage_requirements` sagt, wie viele Leute zu welcher Tageszeit da sein sollen — nicht mehr „montags braucht die Frühschicht 3 Leute", sondern „montags 08:00–12:00 zwei, 12:00–17:00 drei". Und der Plan meldet **Deckungslücken** auf der Zeitachse statt nur einer Zahl unbesetzter Schichten.
 
 **Architektur:** Drei neue Tabellen, zwei neue Editoren, eine neue Auswertung. **Der Planer wird nicht angefasst.** Er baut seine Slots weiterhin aus `shift_requirements`; `coverage_requirements` wird in dieser Etappe *gepflegt und ausgewertet*, aber noch nicht geplant. Das ist Absicht — siehe „Was NICHT in dieser Etappe passiert".
 
-**Tech-Stack:** Flask 3.1, SQLite lokal + Postgres in Produktion, React 19 + Vite, pytest 9. **Neu: Vitest + Testing Library** für das Frontend (siehe Task 8).
+**Tech-Stack:** Flask 3.1, SQLite lokal + Postgres in Produktion, React 19 + Vite, pytest 9. **Neu: Vitest + Testing Library** für das Frontend (siehe Aufgabe 8).
 
-**Spec:** [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.1–4.3, 6, 7 und „Etappe 3".
+**Spec:** [`docs/entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.1–4.3, 6, 7 und „Etappe 3".
 
 **Setzt auf:** Etappe 2 (`etappe-2-individuelle-zeiten`, PR #13). Die Deckungslücken-Rechnung braucht `assignment_hours()` aus Etappe 2 — eine Zuweisung mit eigenen Zeiten deckt genau diese Zeiten ab, nicht die der Schichtart.
 
 ## Globale Rahmenbedingungen
 
-- **Keine neuen Laufzeitabhängigkeiten** (aktuell fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata). Im Frontend kommen in Task 8 **Entwicklungsabhängigkeiten** dazu — das ist die einzige Ausnahme und nur dort erlaubt.
+- **Keine neuen Laufzeitabhängigkeiten** (aktuell fünf: flask, flask-cors, gunicorn, psycopg2-binary, tzdata). Im Frontend kommen in Aufgabe 8 **Entwicklungsabhängigkeiten** dazu — das ist die einzige Ausnahme und nur dort erlaubt.
 - **Alle 142 bestehenden Tests bleiben grün und warnungsfrei**, auch unter `-W error::DeprecationWarning`. Die 23 Tests in `backend/test_scheduler.py` bleiben zusätzlich **unverändert** — sie sind die Rückwärtskompatibilitätsgarantie.
 - **Alle CI-Jobs müssen grün bleiben**, insbesondere `backend-postgres`. Lokal läuft nur SQLite; Postgres-Verhalten nie aus SQLite schließen.
 - **Jede nutzersichtbare Meldung zweisprachig** — Backend über `backend/i18n.py` und `t(g.lang, key)`, Frontend über `frontend/src/i18n/translations.js`, `de` **und** `en`, mit echten Umlauten. Nie ein Literal.
@@ -24,7 +22,7 @@
 - Zeiten sind `"HH:MM"`-Strings. **`end <= start` bedeutet Überschreitung nach Mitternacht**, überall im Projekt.
 - Wochentagskonvention: 0 = Montag … 6 = Sonntag.
 - **Sprache: der Datei folgen, die du anfasst.** `app.py`, `db.py`, `scheduler.py`, `test_scheduler.py` und das Frontend sind englisch kommentiert; `security.py`, `timeutil.py`, `migrations.py`, die Migrationsdateien und die neueren Testdateien deutsch. README englisch, `docs/HANDOFF.md` deutsch.
-- Commit-Nachrichten auf Deutsch, Präfix `feat:`, `fix:`, `test:`, `chore:` oder `docs:`, mit angehängtem `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+- Commit-Nachrichten auf Deutsch, Präfix `feat:`, `fix:`, `test:`, `chore:` oder `docs:`.
 - Jede Aufgabe endet mit genau **einem** Commit und grüner CI.
 
 ---
@@ -76,7 +74,7 @@ Für jeden Wochentag: an jedem Zeitpunkt die Summe der `required_count` aller Sc
 
 Das Ergebnis ist per Konstruktion überlappungsfrei und bildet den bisherigen Bedarf exakt ab. Beispiel: Frühschicht 06:00–14:00 mit 2, Spätschicht 14:00–22:00 mit 3 ergibt `[06:00–14:00 → 2, 14:00–22:00 → 3]`. Überlappen sich zwei Schichtarten (Früh 06:00–14:00 mit 2, Zwischendienst 10:00–18:00 mit 1), entsteht `[06:00–10:00 → 2, 10:00–14:00 → 3, 14:00–18:00 → 1]`.
 
-**Diese Ableitung ist eine reine Funktion und wird als solche getestet** (Task 2), bevor sie irgendetwas in die Datenbank schreibt.
+**Diese Ableitung ist eine reine Funktion und wird als solche getestet** (Aufgabe 2), bevor sie irgendetwas in die Datenbank schreibt.
 
 ### Deckungslücken
 
@@ -120,7 +118,7 @@ Benachbarte Abschnitte mit gleichem `missing` werden zusammengefasst. Ist der Be
 | `frontend/src/pages/CoverageEditor.jsx` | **neu** — Bedarfsbänder als Balken über den Tag |
 | `frontend/src/components/CoverageGaps.jsx` | **neu** — die Lückenliste im Plan |
 | `frontend/src/i18n/translations.js`, `App.jsx`, `App.css` | Texte, Routen, Stil |
-| `frontend/vitest.config.js`, `frontend/src/test/` | **neu** — Testinfrastruktur (Task 8) |
+| `frontend/vitest.config.js`, `frontend/src/test/` | **neu** — Testinfrastruktur (Aufgabe 8) |
 | `README.md`, `docs/HANDOFF.md` | Dokumentation |
 
 `backend/scheduler.py` und `backend/test_scheduler.py` werden **nicht** angefasst.
@@ -133,7 +131,7 @@ Benachbarte Abschnitte mit gleichem `missing` werden zusammengefasst. Ist der Be
 |---|---|---|
 | 1 | Schema: die drei Tabellen | Fundament, ohne Ableitung — die kommt erst, wenn ihre Logik getestet ist |
 | 2 | `coverage.py`: Bedarfskurve als reine Funktion | Muss vor der Datenmigration stehen, sonst schreibt ungetestete Logik in die Datenbank |
-| 3 | Datenmigration: Ableitung anwenden | Benutzt Task 2, nachdem sie bewiesen ist |
+| 3 | Datenmigration: Ableitung anwenden | Benutzt Aufgabe 2, nachdem sie bewiesen ist |
 | 4 | API: Öffnungszeiten und Ausnahmen | Unabhängig von 5, liefert aber die Grenze, die 5 prüft |
 | 5 | API: Bedarfsbänder mit Validierung | Braucht die Öffnungszeiten aus 4 |
 | 6 | Deckungslücken berechnen und ausliefern | Braucht 5 und `assignment_hours()` aus Etappe 2 |
@@ -141,11 +139,11 @@ Benachbarte Abschnitte mit gleichem `missing` werden zusammengefasst. Ist der Be
 | 8 | Vitest aufsetzen und die Editoren testen | Nach 7, damit es echte Komponenten zu testen gibt |
 | 9 | Dokumentation | Zuletzt, wenn alles steht |
 
-Jede Aufgabe bekommt ihren eigenen Task-Brief über `scripts/task-brief`. Die detaillierten Schritte je Aufgabe stehen unten.
+Die detaillierten Schritte je Aufgabe stehen unten.
 
 ---
 
-## Task 1: Schema für Öffnungszeiten und Bedarf
+## Aufgabe 1: Schema für Öffnungszeiten und Bedarf
 
 **Files:**
 - Create: `backend/migrations/0006_coverage.py`
@@ -155,7 +153,7 @@ Jede Aufgabe bekommt ihren eigenen Task-Brief über `scripts/task-brief`. Die de
 - Consumes: den Migrations-Runner aus Etappe 0 (`up(cursor)`/`down(cursor)`), `db.table_columns()`, `db.use_postgres()`
 - Produces: die Tabellen `business_hours`, `business_hours_exceptions`, `coverage_requirements`; sieben `business_hours`-Zeilen mit dem Standard „rund um die Uhr offen"
 
-**Diese Aufgabe legt die Tabellen an und füllt `business_hours` mit dem Standard — sie leitet noch KEINEN Bedarf ab.** Das ist Task 3, nachdem Task 2 die Rechenlogik bewiesen hat.
+**Diese Aufgabe legt die Tabellen an und füllt `business_hours` mit dem Standard — sie leitet noch KEINEN Bedarf ab.** Das ist Aufgabe 3, nachdem Aufgabe 2 die Rechenlogik bewiesen hat.
 
 - [ ] **Schritt 1: Die fehlschlagenden Tests schreiben**
 
@@ -204,10 +202,10 @@ def test_ausnahme_ist_pro_datum_eindeutig(fresh_db):
 
 
 def test_bedarfsbaender_starten_leer(fresh_db):
-    """Task 1 legt nur die Tabelle an. Die Ableitung ist Task 3.
+    """Aufgabe 1 legt nur die Tabelle an. Die Ableitung ist Aufgabe 3.
 
     Dieser Test ist die Abgrenzung zwischen den beiden Aufgaben und darf nach
-    Task 3 angepasst werden - aber bewusst und mit Begruendung, nicht nebenbei.
+    Aufgabe 3 angepasst werden - aber bewusst und mit Begruendung, nicht nebenbei.
     """
 
 
@@ -255,7 +253,7 @@ git commit -m "feat: Schema fuer Oeffnungszeiten und Bedarfsbaender"
 
 ---
 
-## Task 2: Die Bedarfskurve als reine Funktion
+## Aufgabe 2: Die Bedarfskurve als reine Funktion
 
 **Files:**
 - Create: `backend/coverage.py`, `backend/test_coverage.py`
@@ -351,16 +349,16 @@ git commit -m "feat: Bedarfskurve aus Schichtarten ableiten"
 
 ---
 
-## Task 3: Die Ableitung anwenden
+## Aufgabe 3: Die Ableitung anwenden
 
 **Files:**
 - Create: `backend/migrations/0007_derive_coverage.py`
 - Modify: `backend/test_migrations.py`, `backend/test_migrations_postgres.py`
 
 **Interfaces:**
-- Consumes: `coverage_curve()` aus Task 2, die Tabellen aus Task 1
+- Consumes: `coverage_curve()` aus Aufgabe 2, die Tabellen aus Aufgabe 1
 
-**Warum eine eigene Migration statt Task 1 zu erweitern:** eine Schemamigration und eine Datenmigration haben verschiedene Risiken und verschiedene Rücknahmen. Getrennt lässt sich die Ableitung zurücknehmen, ohne die Tabellen zu verlieren — und wenn die Kurve sich als falsch herausstellt, ist das eine Zeile im Rollback statt einer Rekonstruktion.
+**Warum eine eigene Migration statt Aufgabe 1 zu erweitern:** eine Schemamigration und eine Datenmigration haben verschiedene Risiken und verschiedene Rücknahmen. Getrennt lässt sich die Ableitung zurücknehmen, ohne die Tabellen zu verlieren — und wenn die Kurve sich als falsch herausstellt, ist das eine Zeile im Rollback statt einer Rekonstruktion.
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
 
@@ -403,7 +401,7 @@ def test_ableitungsmigration_laesst_sich_zurueckrollen_und_danach_erneut_anwende
 **Zwei Punkte, die im Code stehen müssen:**
 
 - **Nur ableiten, wenn `coverage_requirements` leer ist.** Sonst überschreibt ein zweiter Lauf von Hand gepflegte Bänder. Das ist zugleich die Wiederholbarkeit: nach `down()` und erneutem `up()` wird sauber neu abgeleitet.
-- **`down()` löscht nur die Bänder**, nicht die Tabelle — die gehört Task 1.
+- **`down()` löscht nur die Bänder**, nicht die Tabelle — die gehört Aufgabe 1.
 
 Der Import von `coverage_curve` in einer Migration ist ungewöhnlich, aber richtig: die Alternative wäre, die Kurvenlogik in der Migration zu duplizieren, und dann driften Migration und Anwendung auseinander. Schreib den Grund als Kommentar dazu.
 
@@ -415,7 +413,7 @@ git commit -m "feat: bestehenden Schichtbedarf in Bedarfsbaender ueberfuehren"
 
 ---
 
-## Task 4: API für Öffnungszeiten und Ausnahmen
+## Aufgabe 4: API für Öffnungszeiten und Ausnahmen
 
 **Files:**
 - Modify: `backend/app.py`, `backend/i18n.py`
@@ -464,14 +462,14 @@ git commit -m "feat: Oeffnungszeiten und Ausnahmen ueber die API pflegen"
 
 ---
 
-## Task 5: API für Bedarfsbänder
+## Aufgabe 5: API für Bedarfsbänder
 
 **Files:**
 - Modify: `backend/app.py`, `backend/i18n.py`
 - Test: `backend/test_api_coverage.py`
 
 **Interfaces:**
-- Consumes: `bands_overlap()`, `band_within()` aus Task 2, `business_hours_for()` aus Task 4
+- Consumes: `bands_overlap()`, `band_within()` aus Aufgabe 2, `business_hours_for()` aus Aufgabe 4
 - Produces: `GET/PUT /coverage-requirements`
 
 `PUT` nimmt die Bänder **aller** Wochentage entgegen und ersetzt den Bestand vollständig — dieselbe Semantik wie die übrigen Listen im Projekt. Das macht die Überlappungsprüfung einfach, weil sie den Endzustand sieht statt einer Folge von Einzeländerungen.
@@ -518,14 +516,14 @@ git commit -m "feat: Bedarfsbaender ueber die API pflegen"
 
 ---
 
-## Task 6: Deckungslücken
+## Aufgabe 6: Deckungslücken
 
 **Files:**
 - Modify: `backend/coverage.py`, `backend/app.py`
 - Test: `backend/test_coverage.py`, `backend/test_api_coverage.py`
 
 **Interfaces:**
-- Consumes: `assignment_hours()` aus Etappe 2, `business_hours_for()` aus Task 4
+- Consumes: `assignment_hours()` aus Etappe 2, `business_hours_for()` aus Aufgabe 4
 - Produces: `coverage_gaps(bands, covered_intervals)` in `coverage.py`; `coverage_gaps` im Ergebnis von `fetch_schedule()`
 
 **Die Trennung ist wichtig:** die Rechnung gehört nach `coverage.py` und bekommt fertige Intervalle übergeben — sie fragt selbst keine Datenbank. `app.py` sammelt die Intervalle (über `assignment_hours()`) und reicht sie hinein. So bleibt der schwierige Teil ohne Datenbank testbar.
@@ -585,7 +583,7 @@ git commit -m "feat: Deckungsluecken auf der Zeitachse melden"
 
 ---
 
-## Task 7: Frontend — die beiden Editoren
+## Aufgabe 7: Frontend — die beiden Editoren
 
 **Files:**
 - Create: `frontend/src/pages/BusinessHours.jsx`, `frontend/src/pages/CoverageEditor.jsx`, `frontend/src/components/CoverageGaps.jsx`
@@ -611,7 +609,7 @@ git commit -m "feat: Editoren fuer Oeffnungszeiten und Bedarf"
 
 ---
 
-## Task 8: Frontend-Testinfrastruktur
+## Aufgabe 8: Frontend-Testinfrastruktur
 
 **Files:**
 - Create: `frontend/vitest.config.js`, `frontend/src/test/setup.js`, Tests zu den beiden Editoren
@@ -637,7 +635,7 @@ git commit -m "test: Frontend-Testinfrastruktur mit Vitest aufsetzen"
 
 ---
 
-## Task 9: Dokumentation
+## Aufgabe 9: Dokumentation
 
 **Files:** `README.md`, `docs/HANDOFF.md`
 

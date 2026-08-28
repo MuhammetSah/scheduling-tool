@@ -1,14 +1,12 @@
 # Etappe 0 — Fundament: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development` (empfohlen) oder `superpowers:executing-plans`, um diesen Plan Aufgabe für Aufgabe abzuarbeiten. Die Schritte nutzen Checkbox-Syntax (`- [ ]`) zur Nachverfolgung.
-
 **Ziel:** Das Schichtplan-Tool auf ein Fundament stellen, auf dem Schemaänderungen sicher sind — versionierte Migrationen, laufende Tests im CI, gepinnte Abhängigkeiten, gehärtete Authentifizierung und verlässliche Fehlerbehandlung.
 
 **Architektur:** Alles bleibt beim bestehenden Aufbau — Flask mit direktem `sqlite3`/`psycopg2`-Zugriff über die Dialektschicht in `db.py`, React mit Vite. Es kommt genau eine neue Datei-Kategorie dazu: ein eigener Migrations-Runner (`backend/migrations.py`) plus ein `backend/migrations/`-Verzeichnis. Keine neuen Laufzeitabhängigkeiten.
 
 **Tech-Stack:** Python 3.13 (Produktion) / 3.14 (lokal ok), Flask 3.1, SQLite lokal + Postgres in Produktion, React 19 + Vite 8, pytest 9 für Backend-Tests, GitHub Actions für CI.
 
-**Spec:** [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitt 10 „Etappe 0".
+**Spec:** [`docs/entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitt 10 „Etappe 0".
 
 ## Globale Rahmenbedingungen
 
@@ -53,7 +51,7 @@
 
 ---
 
-## Task 1: Abhängigkeiten pinnen und CI-Pipeline
+## Aufgabe 1: Abhängigkeiten pinnen und CI-Pipeline
 
 Ohne CI ist jede folgende Aufgabe ungeprüft, und ohne gepinnte Versionen kann ein fremdes Release den Build brechen. Deshalb zuerst.
 
@@ -200,7 +198,7 @@ git commit -m "chore: Abhaengigkeiten pinnen und CI-Pipeline einrichten"
 
 ---
 
-## Task 2: API-Testgrundgerüst
+## Aufgabe 2: API-Testgrundgerüst
 
 Alle folgenden Aufgaben ändern Verhalten der API. Ohne API-Tests wären diese Änderungen unbelegt — heute gibt es ausschließlich Scheduler-Tests.
 
@@ -210,7 +208,7 @@ Alle folgenden Aufgaben ändern Verhalten der API. Ohne API-Tests wären diese �
 - Create: `backend/test_api_auth.py`
 
 **Interfaces:**
-- Consumes: pytest aus Task 1
+- Consumes: pytest aus Aufgabe 1
 - Produces: Fixtures `client` (nicht angemeldet) und `hr_client` (als HR angemeldet), verwendbar in allen folgenden Testdateien
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
@@ -379,7 +377,7 @@ git commit -m "test: API-Testgrundgeruest mit isolierter Datenbank"
 
 ---
 
-## Task 3: Migrationssystem
+## Aufgabe 3: Migrationssystem
 
 `init_db()` flickt das Schema heute bei jedem Import mit handgeschriebenen `ALTER TABLE`-Prüfungen. Es gibt keine Version, keine Reihenfolge und keinen Weg zurück. Ohne das lässt sich Etappe 1 nicht sicher bauen.
 
@@ -743,7 +741,7 @@ cd backend
 ./venv/Scripts/python -m pytest
 ```
 
-Erwartet: alle Tests PASS, insbesondere die 6 API-Tests aus Task 2 — die belegen, dass die App über den neuen Weg immer noch ein vollständiges Schema bekommt.
+Erwartet: alle Tests PASS, insbesondere die 6 API-Tests aus Aufgabe 2 — die belegen, dass die App über den neuen Weg immer noch ein vollständiges Schema bekommt.
 
 - [ ] **Schritt 9: Commit**
 
@@ -754,7 +752,7 @@ git commit -m "feat: versionierte Datenbankmigrationen statt init_db-Flickwerk"
 
 ---
 
-## Task 4: Indizes und UNIQUE-Constraint
+## Aufgabe 4: Indizes und UNIQUE-Constraint
 
 `shift_assignments` wird bei jeder Warnungsprüfung nach `(date, employee_id)` durchsucht — heute ohne Index. Und nichts hindert zwei Zeilen daran, denselben Platz zu belegen.
 
@@ -764,7 +762,7 @@ git commit -m "feat: versionierte Datenbankmigrationen statt init_db-Flickwerk"
 - Modify: `backend/test_migrations.py`
 
 **Interfaces:**
-- Consumes: Runner aus Task 3
+- Consumes: Runner aus Aufgabe 3
 - Produces: Indizes `ix_assignments_date_employee`, `ix_assignments_schedule`, `ix_absences_date`; UNIQUE-Index `ux_assignment_slot`
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
@@ -830,7 +828,7 @@ cd backend
 ./venv/Scripts/python -m pytest test_migrations.py
 ```
 
-Erwartet: die drei neuen Tests FAIL, die drei aus Task 3 weiterhin PASS.
+Erwartet: die drei neuen Tests FAIL, die drei aus Aufgabe 3 weiterhin PASS.
 
 - [ ] **Schritt 3: Migration schreiben**
 
@@ -888,7 +886,7 @@ git commit -m "feat: Indizes und Eindeutigkeit fuer shift_assignments"
 
 ---
 
-## Task 5: SECRET_KEY-Härtung und Security-Header
+## Aufgabe 5: SECRET_KEY-Härtung und Security-Header
 
 `app.secret_key` fällt heute still auf `'schichtplan-local-dev'` zurück. Fehlt die Variable in Produktion, kann jeder gültige Bearer-Token signieren — der Wert steht öffentlich im Quelltext.
 
@@ -1068,7 +1066,7 @@ git commit -m "feat: SECRET_KEY in Produktion erzwingen und Security-Header setz
 
 ---
 
-## Task 6: Login-Drosselung
+## Aufgabe 6: Login-Drosselung
 
 `/login` nimmt heute unbegrenzt viele Versuche an. Ebenso `/invitations/<token>`, wo ein Treffer direkt ein Konto übernimmt.
 
@@ -1083,7 +1081,7 @@ Warum keine Bibliothek: siehe Spec Abschnitt 8.1.
 - Modify: `backend/test_api_security.py`
 
 **Interfaces:**
-- Consumes: Runner aus Task 3, `security.py` aus Task 5
+- Consumes: Runner aus Aufgabe 3, `security.py` aus Aufgabe 5
 - Produces:
   - `security.MAX_FAILED_ATTEMPTS = 10`, `security.ATTEMPT_WINDOW_MINUTES = 15`
   - `security.is_locked_out(cursor, identifier) -> bool` — die Sperre gilt pro Benutzername, die IP wird nur protokolliert
@@ -1337,7 +1335,7 @@ git commit -m "feat: Anmeldeversuche drosseln"
 
 ---
 
-## Task 7: Globaler Fehler-Handler und Logging
+## Aufgabe 7: Globaler Fehler-Handler und Logging
 
 Ein unerwarteter Fehler liefert heute Flasks HTML-Fehlerseite. Das Frontend versucht sie als JSON zu lesen, scheitert und zeigt „unerwartete Antwort" — eine Meldung, die auf eine falsche Fährte führt (siehe `frontend/src/api.js`, `parseFailed`).
 
@@ -1347,7 +1345,7 @@ Ein unerwarteter Fehler liefert heute Flasks HTML-Fehlerseite. Das Frontend vers
 - Modify: `backend/test_api_security.py`
 
 **Interfaces:**
-- Consumes: `security.is_production()` aus Task 5
+- Consumes: `security.is_production()` aus Aufgabe 5
 - Produces: Jede Fehlerantwort ist JSON mit `message`; unerwartete Fehler zusätzlich mit `request_id`
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
@@ -1508,7 +1506,7 @@ git commit -m "feat: Fehlerantworten immer als JSON, mit nachverfolgbarer Kennun
 
 ---
 
-## Task 8: Zeitzone Europe/Berlin
+## Aufgabe 8: Zeitzone Europe/Berlin
 
 `current_month_bounds()` und `list_absences()` nutzen `date.today()` — auf Render ist das UTC. Am Monatsersten zwischen 00:00 und 02:00 deutscher Zeit hält der Server noch den Vormonat für aktuell und weist die Krankmeldung eines Mitarbeiters ab.
 
@@ -1702,7 +1700,7 @@ git commit -m "fix: aktuellen Monat in der Betriebszeitzone bestimmen statt in U
 
 ---
 
-## Task 9: Schutz vor dem Überschreiben von Handkorrekturen
+## Aufgabe 9: Schutz vor dem Überschreiben von Handkorrekturen
 
 `POST /schedules/generate` löscht heute wortlos alle Zuweisungen des Monats — auch jede, die HR von Hand gesetzt hat. Es gibt keine Rückfrage und kein Zurück.
 
@@ -1714,7 +1712,7 @@ git commit -m "fix: aktuellen Monat in der Betriebszeitzone bestimmen statt in U
 - Modify: `frontend/src/i18n/translations.js`
 
 **Interfaces:**
-- Consumes: `hr_client`-Fixture aus Task 2
+- Consumes: `hr_client`-Fixture aus Aufgabe 2
 - Produces: `POST /schedules/generate` antwortet mit `409` und `{message, manually_edited_count}`, wenn Handkorrekturen bestehen und `confirm` nicht `true` ist
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
@@ -1906,7 +1904,7 @@ git commit -m "feat: Rueckfrage bevor Neuerzeugen Handkorrekturen verwirft"
 
 ---
 
-## Task 10: Betriebsdokumentation und Gunicorn-Konfiguration
+## Aufgabe 10: Betriebsdokumentation und Gunicorn-Konfiguration
 
 Der Planer darf bis zu 8 Sekunden rechnen. Gunicorn läuft in `render.yaml` ohne Angaben — ein synchroner Worker, der in dieser Zeit niemandem sonst antwortet. Und für die Datenbank existiert kein Backup-Verfahren.
 

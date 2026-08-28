@@ -1,14 +1,12 @@
 # Etappe 1 — Arbeitszeitfenster: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development`. Die Schritte nutzen Checkbox-Syntax (`- [ ]`).
-
 **Ziel:** Mitarbeiter bekommen echte Uhrzeiten statt nur Wochentags- und Schichtart-Listen. „Anna arbeitet Mo–Fr von 08:00 bis 14:00" wird ausdrückbar, und der Planer respektiert es.
 
 **Architektur:** Eine neue Tabelle `employee_availability` und ein Schalter `employees.availability_mode`. Der Planer bekommt eine zusätzliche Prüfung in `structurally_eligible()`; sein Suchkern bleibt unverändert. Kein Umbau des Schichtart-Modells — das kommt erst in Etappe 3.
 
 **Tech-Stack:** Flask 3.1, SQLite lokal + Postgres in Produktion, React 19 + Vite, pytest 9.
 
-**Spec:** [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.4, 4.5 und Etappe 1.
+**Spec:** [`docs/entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.4, 4.5 und Etappe 1.
 
 ## Globale Rahmenbedingungen
 
@@ -82,7 +80,7 @@ Beispiele, die alle als Tests auftauchen müssen:
 
 ---
 
-## Task 1: Migration und Schema
+## Aufgabe 1: Migration und Schema
 
 **Files:**
 - Create: `backend/migrations/0004_employee_availability.sql`, `.down.sql`
@@ -205,7 +203,7 @@ git commit -m "feat: Schema fuer Arbeitszeitfenster"
 
 ---
 
-## Task 2: Fensterprüfung im Planer
+## Aufgabe 2: Fensterprüfung im Planer
 
 Der Kern der Etappe. Reine Funktionen, keine Datenbank — hier entscheidet sich die Korrektheit.
 
@@ -343,7 +341,7 @@ git commit -m "feat: Planer respektiert Arbeitszeitfenster"
 
 ---
 
-## Task 3: API — Fenster lesen und schreiben
+## Aufgabe 3: API — Fenster lesen und schreiben
 
 **Files:**
 - Modify: `backend/app.py` (`serialize_employee`, `replace_employee_constraints`, `create_employee`, `update_employee`, `load_employees_for_scheduling`)
@@ -404,7 +402,7 @@ Für die Zeitprüfung ist `valid_time()` bereits in `app.py` vorhanden — nutze
 
 `create_employee()` und `update_employee()` müssen `availability_mode` schreiben; validiere gegen `('anytime', 'windows')`.
 
-`load_employees_for_scheduling()` muss beide Felder mitliefern, damit Task 2 überhaupt wirkt.
+`load_employees_for_scheduling()` muss beide Felder mitliefern, damit Aufgabe 2 überhaupt wirkt.
 
 - [ ] **Schritt 5: Suite, CI, Commit**
 
@@ -414,7 +412,7 @@ git commit -m "feat: Arbeitszeitfenster ueber die API pflegen"
 
 ---
 
-## Task 4: Warnung bei Handkorrektur
+## Aufgabe 4: Warnung bei Handkorrektur
 
 Der Planer verbietet; die Handkorrektur warnt nur. Das ist die durchgehende Haltung des Projekts — HR darf immer übersteuern, aber nie versehentlich.
 
@@ -444,7 +442,7 @@ Nutze die tatsächlichen Zeiten der Zuweisung, also `effective_shift_hours()` �
 
 ---
 
-## Task 5: Frontend
+## Aufgabe 5: Frontend
 
 **Files:**
 - Modify: `frontend/src/pages/Employees.jsx`, `frontend/src/i18n/translations.js`
@@ -471,7 +469,7 @@ Es gibt weiterhin keine Frontend-Testinfrastruktur. Bau sie **nicht** in dieser 
 
 ---
 
-## Task 6: Dokumentation
+## Aufgabe 6: Dokumentation
 
 **Files:** `README.md`
 

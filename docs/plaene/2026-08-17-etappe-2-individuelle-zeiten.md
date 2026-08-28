@@ -1,14 +1,12 @@
 # Etappe 2 — Individuelle Zeiten pro Zuweisung: Umsetzungsplan
 
-> **Für agentische Bearbeiter:** ERFORDERLICHE SUB-SKILL: `superpowers:subagent-driven-development` (empfohlen) oder `superpowers:executing-plans`, um diesen Plan Aufgabe für Aufgabe abzuarbeiten. Die Schritte nutzen Checkbox-Syntax (`- [ ]`).
-
 **Ziel:** Eine Zuweisung trägt eigene Uhrzeiten. „Ben steht am 17.03. als 10:00–16:00 im Plan, obwohl die Frühschicht 06:00–14:00 läuft" wird ausdrückbar, und alle Prüfungen rechnen mit den tatsächlichen Zeiten. Gleichzeitig wird `shift_type_id` nullable, damit ein Block ohne Vorlage überhaupt existieren kann — die Voraussetzung für den Zuschnitt in Etappe 4.
 
 **Architektur:** Zwei neue Spalten auf `shift_assignments` (`start_time`, `end_time`, beide NULL) plus eine Lockerung: `shift_type_id` wird nullable. Kein neues Konzept, keine neue Tabelle. Der eigentliche Umbau ist eine **Vereinheitlichung**: die Frage „welche Zeiten laufen für diese Zuweisung wirklich?" wird heute an fünf Stellen einzeln beantwortet und bekommt genau eine Funktion. Der Suchkern in `scheduler.py` bleibt unangetastet.
 
 **Tech-Stack:** Flask 3.1, SQLite lokal + Postgres in Produktion, React 19 + Vite, pytest 9.
 
-**Spec:** [`docs/superpowers/specs/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.6, 4.7 und „Etappe 2".
+**Spec:** [`docs/entwuerfe/2026-08-16-zeitachsen-dienstplan-design.md`](../specs/2026-08-16-zeitachsen-dienstplan-design.md), Abschnitte 4.6, 4.7 und „Etappe 2".
 
 ## Globale Rahmenbedingungen
 
@@ -21,7 +19,7 @@
 - Zeiten sind `"HH:MM"`-Strings. **`end <= start` bedeutet Überschreitung nach Mitternacht**, überall im Projekt (siehe `scheduler.shift_duration_minutes`).
 - Wochentagskonvention: 0 = Montag … 6 = Sonntag.
 - **Sprache: der Datei folgen, die du anfasst.** `app.py`, `db.py`, `scheduler.py`, `test_scheduler.py` und das Frontend sind englisch kommentiert; `security.py`, `timeutil.py`, `migrations.py`, die Migrationsdateien und die neueren Testdateien deutsch. Eine einzelne Datei in zwei Sprachen zu führen ist der eigentliche Fehler. README englisch.
-- Commit-Nachrichten auf Deutsch, Präfix `feat:`, `fix:`, `test:`, `chore:` oder `docs:`. An jede Commit-Nachricht gehört `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
+- Commit-Nachrichten auf Deutsch, Präfix `feat:`, `fix:`, `test:`, `chore:` oder `docs:`.
 - Jede Aufgabe endet mit genau **einem** Commit und grüner CI.
 
 ---
@@ -52,7 +50,7 @@ Diese Frage wird in `backend/app.py` heute an **fünf** Stellen einzeln beantwor
 - `constraint_warnings()`, Wochenstunden für die **vorgeschlagene** Schicht (`app.py:1757-1762`)
 - `constraint_warnings()`, Ruhezeit für die eigene und beide Nachbarschichten (`app.py:1768-1796`)
 
-Fünf Kopien derselben Logik sind heute schon grenzwertig; mit einer dritten Vorrangstufe werden sie zu fünf Gelegenheiten, sie unterschiedlich falsch zu machen. **Task 2 führt sie zusammen, bevor Task 3 und 4 die neue Stufe einziehen.** Diese Reihenfolge ist Absicht: erst aufräumen, dann erweitern.
+Fünf Kopien derselben Logik sind heute schon grenzwertig; mit einer dritten Vorrangstufe werden sie zu fünf Gelegenheiten, sie unterschiedlich falsch zu machen. **Aufgabe 2 führt sie zusammen, bevor Aufgabe 3 und 4 die neue Stufe einziehen.** Diese Reihenfolge ist Absicht: erst aufräumen, dann erweitern.
 
 ### Was `shift_type_id IS NULL` in SQL bedeutet
 
@@ -91,7 +89,7 @@ Für den Index löst das die Spec in 4.7 bereits: er wird zu `(schedule_id, date
 
 ---
 
-## Task 1: Migration und Schema
+## Aufgabe 1: Migration und Schema
 
 **Files:**
 - Create: `backend/migrations/0005_assignment_times.py`
@@ -403,17 +401,17 @@ git commit -m "feat: Schema fuer individuelle Zuweisungszeiten"
 
 ---
 
-## Task 2: Die Zeitauflösung an genau einer Stelle
+## Aufgabe 2: Die Zeitauflösung an genau einer Stelle
 
 **Files:**
 - Modify: `backend/app.py`
 - Test: `backend/test_api_assignment_times.py` (neu)
 
 **Interfaces:**
-- Consumes: nichts aus Task 1 außer dem Schema
-- Produces: `assignment_hours(cursor, row)` — nimmt eine Zeile (oder ein Dict) mit den Schlüsseln `schedule_id`, `date`, `shift_type_id`, `start_time`, `end_time` und liefert `(start, end)` als `"HH:MM"`-Strings oder `(None, None)`, wenn sich keine Zeit bestimmen lässt. **Task 3, 4 und 5 benutzen ausschließlich diese Funktion.**
+- Consumes: nichts aus Aufgabe 1 außer dem Schema
+- Produces: `assignment_hours(cursor, row)` — nimmt eine Zeile (oder ein Dict) mit den Schlüsseln `schedule_id`, `date`, `shift_type_id`, `start_time`, `end_time` und liefert `(start, end)` als `"HH:MM"`-Strings oder `(None, None)`, wenn sich keine Zeit bestimmen lässt. **Aufgabe 3, 4 und 5 benutzen ausschließlich diese Funktion.**
 
-Diese Aufgabe ist eine **reine Umstrukturierung**: nach ihr verhält sich die Anwendung exakt wie vorher, weil alle Zeilen `start_time IS NULL` haben. Genau deshalb kommt sie vor der Erweiterung — der Refactor lässt sich gegen die bestehende Testsuite absichern, und Task 3 bis 5 haben danach nur noch eine Stelle anzufassen.
+Diese Aufgabe ist eine **reine Umstrukturierung**: nach ihr verhält sich die Anwendung exakt wie vorher, weil alle Zeilen `start_time IS NULL` haben. Genau deshalb kommt sie vor der Erweiterung — der Refactor lässt sich gegen die bestehende Testsuite absichern, und Aufgabe 3 bis 5 haben danach nur noch eine Stelle anzufassen.
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
 
@@ -452,7 +450,7 @@ def test_block_ohne_vorlage_nutzt_seine_eigenen_zeiten(client, hr_login):
 def test_block_ohne_vorlage_und_ohne_zeiten_liefert_keine_zeit(client, hr_login):
     """(None, None) statt einer Ausnahme: der Aufrufer entscheidet, was das bedeutet.
 
-    Diese Kombination kann die API nicht erzeugen (Task 5 lehnt sie ab), aber
+    Diese Kombination kann die API nicht erzeugen (Aufgabe 5 lehnt sie ab), aber
     assignment_hours() darf an einer Altzeile nicht mit AttributeError sterben.
     """
 ```
@@ -521,7 +519,7 @@ def constraint_warnings(cursor, employee_id, assignment_date, shift_type_id, sch
                         exclude_assignment_id=None, start_time=None, end_time=None):
 ```
 
-Die beiden neuen Parameter sind die **vorgeschlagenen** Zeiten für genau diese Prüfung. Alle drei Aufrufer (`update_assignment`, `swap_assignments`, `replacement_suggestions`) reichen sie in Task 5 durch; bis dahin bleiben sie `None`, und das Verhalten ändert sich nicht.
+Die beiden neuen Parameter sind die **vorgeschlagenen** Zeiten für genau diese Prüfung. Alle drei Aufrufer (`update_assignment`, `swap_assignments`, `replacement_suggestions`) reichen sie in Aufgabe 5 durch; bis dahin bleiben sie `None`, und das Verhalten ändert sich nicht.
 
 Ersetze die vier Stellen innerhalb der Funktion, die Zeiten bestimmen:
 
@@ -585,7 +583,7 @@ und danach
 
 - [ ] **Schritt 6: `fetch_schedule()` unangetastet lassen**
 
-`fetch_schedule()` löst die Zeiten heute über einen vorab geladenen Override-Dict auf, um N+1-Abfragen zu vermeiden. Das ist richtig so und wird in **Task 3** angepasst, nicht hier. Fass es in dieser Aufgabe nicht an.
+`fetch_schedule()` löst die Zeiten heute über einen vorab geladenen Override-Dict auf, um N+1-Abfragen zu vermeiden. Das ist richtig so und wird in **Aufgabe 3** angepasst, nicht hier. Fass es in dieser Aufgabe nicht an.
 
 - [ ] **Schritt 7: Gesamte Suite laufen lassen**
 
@@ -605,14 +603,14 @@ git commit -m "refactor: Zeitaufloesung einer Zuweisung an einer Stelle buendeln
 
 ---
 
-## Task 3: Die Ansicht zeigt die tatsächlichen Zeiten
+## Aufgabe 3: Die Ansicht zeigt die tatsächlichen Zeiten
 
 **Files:**
 - Modify: `backend/app.py` (`fetch_schedule`)
 - Test: `backend/test_api_assignment_times.py`
 
 **Interfaces:**
-- Consumes: `assignment_hours()` aus Task 2
+- Consumes: `assignment_hours()` aus Aufgabe 2
 - Produces: `fetch_schedule()` liefert pro Zuweisung zusätzlich `assignment_time_set` (bool) und liefert Zeilen mit `shift_type_id IS NULL`
 
 - [ ] **Schritt 1: Den fehlschlagenden Test schreiben**
@@ -709,17 +707,17 @@ git commit -m "feat: Plan liefert die tatsaechlichen Zeiten und Bloecke ohne Vor
 
 ---
 
-## Task 4: Die Warnungen kommen mit fehlender Schichtart klar
+## Aufgabe 4: Die Warnungen kommen mit fehlender Schichtart klar
 
 **Files:**
 - Modify: `backend/app.py` (`constraint_warnings`, `add_slot`, `effective_shift_hours`)
 - Test: `backend/test_api_assignment_times.py`
 
 **Interfaces:**
-- Consumes: `assignment_hours()` aus Task 2, die umgestellte Abfrage aus Task 3
+- Consumes: `assignment_hours()` aus Aufgabe 2, die umgestellte Abfrage aus Aufgabe 3
 - Produces: keine neue Signatur
 
-Task 2 hat die Zeitauflösung gebündelt. Was bleibt, sind die Stellen, die `shift_type_id` für etwas **anderes** als Zeiten benutzen und dabei annehmen, dass es nie NULL ist.
+Aufgabe 2 hat die Zeitauflösung gebündelt. Was bleibt, sind die Stellen, die `shift_type_id` für etwas **anderes** als Zeiten benutzen und dabei annehmen, dass es nie NULL ist.
 
 - [ ] **Schritt 1: Die fehlschlagenden Tests schreiben**
 
@@ -806,7 +804,7 @@ In `add_slot()` (`app.py:1590-1605`) sind zwei Stellen betroffen. Die Existenzpr
     next_index = cursor.fetchone()['highest'] + 1
 ```
 
-Ein freier Block, der über `add_slot` entsteht, **muss** Zeiten mitbringen. Die Validierung dafür schreibt Task 5; hier reicht es, `start_time`/`end_time` aus dem Body entgegenzunehmen und mit einzufügen.
+Ein freier Block, der über `add_slot` entsteht, **muss** Zeiten mitbringen. Die Validierung dafür schreibt Aufgabe 5; hier reicht es, `start_time`/`end_time` aus dem Body entgegenzunehmen und mit einzufügen.
 
 - [ ] **Schritt 6: Test laufen lassen, Erfolg bestätigen**
 
@@ -819,14 +817,14 @@ git commit -m "feat: Warnungen und Platzvergabe kommen ohne Schichtart aus"
 
 ---
 
-## Task 5: Zeiten über die API setzen
+## Aufgabe 5: Zeiten über die API setzen
 
 **Files:**
 - Modify: `backend/app.py` (`update_assignment`, `swap_assignments`, `replacement_suggestions`, `add_slot`), `backend/i18n.py`
 - Test: `backend/test_api_assignment_times.py`
 
 **Interfaces:**
-- Consumes: `assignment_hours()`, die erweiterte `constraint_warnings()`-Signatur aus Task 2
+- Consumes: `assignment_hours()`, die erweiterte `constraint_warnings()`-Signatur aus Aufgabe 2
 - Produces: `PUT /assignments/<id>` nimmt optional `start_time`/`end_time`
 
 - [ ] **Schritt 1: Die fehlschlagenden Tests schreiben**
@@ -928,7 +926,7 @@ In `update_assignment()` danach:
         (employee_id, start_time, end_time, assignment_id))
 ```
 
-**Achtung, bewusste Entscheidung:** die Zeiten werden bei jedem `PUT` mitgeschrieben, auch wenn der Aufrufer sie weglässt — dann auf NULL. Das ist konsistent mit `employee_id`, das dieselbe „was nicht gesendet wird, gilt als leer"-Semantik hat und dessen Kommentar (`app.py:1817-1820`) genau das begründet. Schreib diese Konsequenz als Kommentar dazu, damit ein späterer Leser sie nicht für ein Versehen hält: **wer nur den Mitarbeiter tauschen will, muss die Zeiten mitschicken.** Das Frontend in Task 6 tut das.
+**Achtung, bewusste Entscheidung:** die Zeiten werden bei jedem `PUT` mitgeschrieben, auch wenn der Aufrufer sie weglässt — dann auf NULL. Das ist konsistent mit `employee_id`, das dieselbe „was nicht gesendet wird, gilt als leer"-Semantik hat und dessen Kommentar (`app.py:1817-1820`) genau das begründet. Schreib diese Konsequenz als Kommentar dazu, damit ein späterer Leser sie nicht für ein Versehen hält: **wer nur den Mitarbeiter tauschen will, muss die Zeiten mitschicken.** Das Frontend in Aufgabe 6 tut das.
 
 - [ ] **Schritt 5: `swap_assignments()` und `replacement_suggestions()` durchreichen**
 
@@ -962,7 +960,7 @@ git commit -m "feat: individuelle Zeiten ueber die API setzen"
 
 ---
 
-## Task 6: Frontend
+## Aufgabe 6: Frontend
 
 **Files:**
 - Modify: `frontend/src/components/ShiftCell.jsx`, `frontend/src/components/ScheduleGrid.jsx`, `frontend/src/components/CalendarView.jsx`, `frontend/src/i18n/translations.js`, ggf. `frontend/src/App.css`
@@ -1029,7 +1027,7 @@ git commit -m "feat: individuelle Zeiten pro Person in der Planansicht"
 
 ---
 
-## Task 7: Dokumentation
+## Aufgabe 7: Dokumentation
 
 **Files:** `README.md`, `docs/HANDOFF.md`
 
